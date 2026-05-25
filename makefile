@@ -10,10 +10,11 @@ CXXFLAGS := -Wall -Wextra -std=c++20 -O2 \
             -ffreestanding -fno-exceptions -fno-rtti \
             -mno-red-zone -mcmodel=kernel \
             -Ikernel/include -MMD -MP \
-						-Ilimine
+            -Ilimine
 
 ASFLAGS  := -f elf64
-LDFLAGS  := -T kernel/arch/x86_64/linker.ld -nostdlib -Wl,--no-warn-rwx-segments
+LDFLAGS  := -T kernel/arch/x86_64/linker.ld -ffreestanding -nostdlib -static \
+            -Wl,--no-warn-rwx-segments -Wl,-z,max-page-size=0x1000
 
 # --- Directory & File Layout ---
 BUILD_DIR := build
@@ -37,30 +38,30 @@ all: iso
 # 1. Compile C++ Source Files
 $(BUILD_DIR)/kernel/%.o: kernel/%.cpp
 	@mkdir -p $(dir $@)
-	@echo "  CXX  $<"
+	@echo "  CXX   $<"
 	@$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # 2. Compile Assembly Source Files
 $(BUILD_DIR)/kernel/%.o: kernel/%.asm
 	@mkdir -p $(dir $@)
-	@echo "  AS   $<"
+	@echo "  AS    $<"
 	@$(AS) $(ASFLAGS) $< -o $@
 
 # 3. Link Object Files into the Final Kernel ELF Binary
 $(KERNEL_ELF): $(OBJ)
 	@mkdir -p $(dir $@)
-	@echo "  LD   $@"
+	@echo "  LD    $@"
 	@$(CXX) $(LDFLAGS) $(OBJ) -o $@
 
 # 4. Generate the Bootable ISO Image and Deploy Limine MBR
 $(ISO_IMAGE): $(KERNEL_ELF)
-	@echo "  ISO  $@"
+	@echo "  ISO   $@"
 	@$(XORRISO) -as mkisofs -b boot/limine/limine-bios-cd.bin \
 		-no-emul-boot -boot-load-size 4 -boot-info-table \
 		--efi-boot boot/limine/limine-uefi-cd.bin \
 		-efi-boot-part --efi-boot-image --protective-msdos-label \
 		$(ISO_DIR) -o $(ISO_IMAGE) > /dev/null 2>&1
-	@echo "  BOOTLOALDER Deploying Limine..."
+	@echo "  BOOTLOADER Deploying Limine..."
 	@./limine/limine bios-install $(ISO_IMAGE)
 
 iso: $(ISO_IMAGE)
@@ -74,5 +75,5 @@ clean:
 	@echo "  CLEAN"
 	@rm -rf $(BUILD_DIR) $(ISO_IMAGE) $(KERNEL_ELF)
 
-# Include header dependency tracking tracking files
+# Include header dependency tracking files
 -include $(DEP)

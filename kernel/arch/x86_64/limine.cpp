@@ -1,19 +1,20 @@
 #include <limine.h>
+#include <stddef.h>
 
-__attribute__((
-    used, section(".limine_requests"))) static volatile LIMINE_BASE_REVISION(3);
+extern "C" {
+// Submit Framebuffer Request to Limine
+__attribute__((used)) static volatile struct limine_framebuffer_request
+    framebuffer_request = {
+        .id = LIMINE_FRAMEBUFFER_REQUEST, .revision = 0, .response = NULL};
 
-__attribute__((used,
-               section(".limine_requests_"
-                       "start"))) static volatile LIMINE_REQUESTS_START_MARKER;
+// Assert compatibility with modern Limine baseline specifications
+__attribute__((used)) static volatile LIMINE_BASE_REVISION(2);
+}
 
-__attribute__((
-    used,
-    section(".limine_requests"))) volatile struct limine_framebuffer_request
-    fb_request = {
-        .id = LIMINE_FRAMEBUFFER_REQUEST, .revision = 0, .response = nullptr};
-
-__attribute__((
-    used,
-    section(
-        ".limine_requests_end"))) static volatile LIMINE_REQUESTS_END_MARKER;
+struct limine_framebuffer *get_framebuffer() {
+  if (framebuffer_request.response == NULL ||
+      framebuffer_request.response->framebuffer_count < 1) {
+    return NULL;
+  }
+  return framebuffer_request.response->framebuffers[0];
+}
