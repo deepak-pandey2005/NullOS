@@ -1,0 +1,9 @@
+[build]
+target = "x86_64-unknown-none"
+
+[target.x86_64-unknown-none]
+linker = "rust-lld"
+rustflags = [
+    "-C", "link-arg=-Tlinker/x86_64.ld",
+]
+runner = "qemu-system-x86_64 -machine q35 -cpu qemu64 -m 256M -net none -display gtk -serial stdio -no-reboot"

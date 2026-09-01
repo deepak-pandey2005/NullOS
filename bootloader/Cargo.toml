@@ -1,0 +1,8 @@
+[package]
+name = "bootloader"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+uefi = "0.35"
+bootinfo = { path = "../bootinfo"}
