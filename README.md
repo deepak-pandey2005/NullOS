@@ -22,46 +22,46 @@
 # Phase 1 — Boot
 
 ### M1 — UEFI Bootloader
-- [ ] UEFI entry point
-- [ ] UEFI console output
-- [ ] FAT32 filesystem access
-- [ ] ELF64 parser
-- [ ] Parse ELF program headers
-- [ ] Load `PT_LOAD` segments
-- [ ] Kernel loading
-- [ ] Kernel entry address
-- [ ] UEFI memory map
-- [ ] GOP framebuffer
-- [ ] ACPI RSDP discovery
-- [ ] Kernel command line
-- [ ] Shared `BootInfo` structure
-- [ ] `ExitBootServices()`
-- [ ] Transfer control to kernel
+- [x] UEFI entry point
+- [x] UEFI console output
+- [x] FAT32 filesystem access
+- [x] ELF64 parser
+- [x] Parse ELF program headers
+- [x] Load `PT_LOAD` segments
+- [x] Kernel loading
+- [x] Kernel entry address
+- [x] UEFI memory map
+- [x] GOP framebuffer
+- [x] ACPI RSDP discovery
+- [x] Kernel command line
+- [x] Shared `BootInfo` structure
+- [x] `ExitBootServices()`
+- [x] Transfer control to kernel
 
 ### M2 — Kernel Entry & Debugging
-- [ ] `_start` assembly entry
-- [ ] Kernel stack
-- [ ] `kernel_main`
-- [ ] COM1 serial driver
-- [ ] `print!` macro
-- [ ] `println!` macro
-- [ ] Panic handler
-- [ ] Kernel panic output
-- [ ] QEMU serial console
-- [ ] QEMU GDB server
-- [ ] GDB kernel debugging
-- [ ] Kernel symbols
-- [ ] Debug build
-- [ ] Release build
+- [x] `_start` assembly entry
+- [x] Kernel stack
+- [x] `kernel_main`
+- [x] COM1 serial driver
+- [x] `print!` macro
+- [x] `println!` macro
+- [x] Panic handler
+- [x] Kernel panic output
+- [x] QEMU serial console
+- [x] QEMU GDB server
+- [x] GDB kernel debugging
+- [x] Kernel symbols
+- [x] Debug build
+- [x] Release build
 
 ### M3 — Boot Contract
-- [ ] Finalize `BootInfo`
-- [ ] Memory map abstraction
-- [ ] Framebuffer abstraction
-- [ ] ACPI abstraction
-- [ ] Kernel/bootloader ABI
-- [ ] Validate all `BootInfo` fields
-- [ ] Kernel boots without UEFI services
+- [x] Finalize `BootInfo`
+- [x] Memory map abstraction
+- [x] Framebuffer abstraction
+- [x] ACPI abstraction
+- [x] Kernel/bootloader ABI
+- [x] Validate all `BootInfo` fields
+- [x] Kernel boots without UEFI services
 
 ---
 
@@ -609,10 +609,10 @@
 # Major Checkpoints
 
 ## Checkpoint 1 — Bootable Kernel
-- [ ] M0
-- [ ] M1
-- [ ] M2
-- [ ] M3
+- [x] M0
+- [x] M1
+- [x] M2
+- [x] M3
 
 ## Checkpoint 2 — Real Kernel
 - [ ] M4
