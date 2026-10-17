@@ -54,6 +54,7 @@ version = "0.1.0"
 dependencies = [
  "bootinfo",
  "cc",
+ "noto-sans-mono-bitmap",
 ]
 
 [[package]]
@@ -61,6 +62,12 @@ name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
+
+[[package]]
+name = "noto-sans-mono-bitmap"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f102c477fd4ec864c149803bf606ecc23bc9329602ec0f99073a728abf454abc"
 
 [[package]]
 name = "proc-macro2"

@@ -33,7 +33,7 @@ pub unsafe fn write_byte(b: u8) {
     }
 }
 
-/// Write a string slice to COM1, converting `\n` → `\r\n`.
+/// Write a string slice to COM1 and to the framebuffer console (if initialized).
 pub fn write_str(s: &str) {
     for b in s.bytes() {
         if b == b'\n' {
@@ -41,6 +41,7 @@ pub fn write_str(s: &str) {
         }
         unsafe { write_byte(b); }
     }
+    crate::console::write_str(s);
 }
 
 /// Zero-sized writer that implements `core::fmt::Write` for COM1 serial output.

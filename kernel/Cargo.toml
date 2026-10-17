@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 bootinfo = { path = "../bootinfo"}
+noto-sans-mono-bitmap = "0.3.2"
 
 [build-dependencies]
 cc = "1"
