@@ -27,6 +27,11 @@ This documentation serves as an architectural blueprint, implementation guide, a
 - [**Phase 2: CPU Architecture (M4 - M6)**](phases/phase2_cpu.md) — GDT, TSS, IDT, exceptions, APIC & timer.
 - [**Phase 3: Memory Management (M7 - M10)** *(Upcoming)*](phases/phase3_memory.md) — Physical frame allocator, paging, heap.
 
+### 5. Development & Scripts
+- `./scripts/build.sh`: Compiles bootloader & kernel and builds the GPT disk image with ESP partition.
+- `./scripts/run.sh`: Launches QEMU with OVMF firmware, `-serial stdio`, and graphical GOP window. (`--test` for automated headless check).
+- `./scripts/clean.sh`: Removes all build artifacts, temporary mount points, and backup files. (`--all` to also clean Cargo target caches).
+
 ---
 
 ## How to Maintain and Extend These Docs
