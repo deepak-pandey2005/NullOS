@@ -1,21 +1,39 @@
 #![no_std]
 #![no_main]
 
-mod console;
-mod serial;
+mod arch;
+mod drivers;
 
+use arch::x86_64::{apic, gdt, idt};
 use bootinfo::BootInfo;
 use core::panic::PanicInfo;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
-    console::init(&boot_info.framebuffer);
+    drivers::console::init(&boot_info.framebuffer);
+
+    // Initialize Global Descriptor Table & Task State Segment (M4)
+    gdt::init();
+
+    // Initialize Interrupt Descriptor Table & CPU Exceptions (M5)
+    idt::init();
+
+    // Initialize Local APIC & Timers (M6)
+    apic::init();
+
+    // Enable CPU interrupts
+    unsafe {
+        core::arch::asm!("sti");
+    }
 
     println!();
     println!("========================================");
     println!("       NullOS Kernel Reached!           ");
     println!("========================================");
     println!("[KERNEL] Control transferred from UEFI bootloader to kernel_main.");
+    println!("[KERNEL] GDT & TSS initialized (Kernel CS: {:#x}, TSS: {:#x})", gdt::KERNEL_CODE_SELECTOR, gdt::TSS_SELECTOR);
+    println!("[KERNEL] IDT initialized with 20 CPU exception handlers.");
+    println!("[KERNEL] APIC initialized, 8259 PIC disabled, periodic timer active.");
 
     println!("[KERNEL] BootInfo received at: {:#018x}", boot_info as *const _ as u64);
     println!("[KERNEL] Framebuffer base:     {:#018x}", boot_info.framebuffer.address);
@@ -59,7 +77,11 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
         println!("[KERNEL] Warning: No framebuffer found in BootInfo.");
     }
 
-    println!("[KERNEL] Kernel initialization complete. Halting CPU.");
+    // Test timer interrupt & sleep primitive
+    apic::sleep(10);
+    println!("[KERNEL] APIC Timer verified: {} ticks recorded.", apic::get_ticks());
+
+    println!("[KERNEL] Kernel initialization complete. CPU idling with interrupts enabled.");
 
     loop {
         unsafe {

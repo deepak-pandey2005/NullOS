@@ -2,6 +2,8 @@
 
 *A custom, bare-metal 64-bit operating system for the `x86_64` architecture, built using `C++20` , `Rust` and Assembly. initializing essential kernel subsystems from scratch.*
 
+> 📖 **Architecture & Implementation Documentation**: See the [**Docs Directory**](docs/README.md) for architectural blueprints, execution flows, and detailed subsystem guides.
+
 # NullOS — Milestone Roadmap
 
 ## Phase 0 — Foundation
@@ -68,43 +70,43 @@
 # Phase 2 — CPU Architecture
 
 ### M4 — GDT & TSS
-- [ ] GDT
-- [ ] Kernel code segment
-- [ ] Kernel data segment
-- [ ] User code segment
-- [ ] User data segment
-- [ ] TSS
-- [ ] Kernel stack
-- [ ] IST stacks
-- [ ] Load GDT
-- [ ] Load TSS
-- [ ] Segment reload
+- [x] GDT
+- [x] Kernel code segment
+- [x] Kernel data segment
+- [x] User code segment
+- [x] User data segment
+- [x] TSS
+- [x] Kernel stack
+- [x] IST stacks
+- [x] Load GDT
+- [x] Load TSS
+- [x] Segment reload
 
 ### M5 — IDT & Exceptions
-- [ ] IDT
-- [ ] Interrupt descriptor structures
-- [ ] Assembly interrupt stubs
-- [ ] Common interrupt handler
-- [ ] Divide-by-zero handler
-- [ ] Debug handler
-- [ ] Breakpoint handler
-- [ ] Invalid opcode handler
-- [ ] General protection fault
-- [ ] Page fault handler
-- [ ] Double fault handler
-- [ ] Register dump
-- [ ] Exception diagnostics
+- [x] IDT
+- [x] Interrupt descriptor structures
+- [x] Assembly interrupt stubs
+- [x] Common interrupt handler
+- [x] Divide-by-zero handler
+- [x] Debug handler
+- [x] Breakpoint handler
+- [x] Invalid opcode handler
+- [x] General protection fault
+- [x] Page fault handler
+- [x] Double fault handler
+- [x] Register dump
+- [x] Exception diagnostics
 
 ### M6 — APIC & Timers
-- [ ] Disable legacy PIC
-- [ ] Local APIC
-- [ ] IOAPIC
-- [ ] APIC initialization
-- [ ] APIC timer
-- [ ] Timer calibration
-- [ ] Timer interrupt
-- [ ] Kernel tick counter
-- [ ] Sleep/delay primitive
+- [x] Disable legacy PIC
+- [x] Local APIC
+- [x] IOAPIC
+- [x] APIC initialization
+- [x] APIC timer
+- [x] Timer calibration
+- [x] Timer interrupt
+- [x] Kernel tick counter
+- [x] Sleep/delay primitive
 
 ---
 

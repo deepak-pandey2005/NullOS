@@ -41,7 +41,7 @@ pub fn write_str(s: &str) {
         }
         unsafe { write_byte(b); }
     }
-    crate::console::write_str(s);
+    crate::drivers::console::write_str(s);
 }
 
 /// Zero-sized writer that implements `core::fmt::Write` for COM1 serial output.
@@ -61,7 +61,7 @@ impl fmt::Write for SerialWriter {
 macro_rules! print {
     ($($arg:tt)*) => {{
         use core::fmt::Write;
-        let _ = write!($crate::serial::SerialWriter, $($arg)*);
+        let _ = write!($crate::drivers::serial::SerialWriter, $($arg)*);
     }};
 }
 
@@ -73,6 +73,6 @@ macro_rules! println {
     () => ($crate::print!("\n"));
     ($($arg:tt)*) => {{
         use core::fmt::Write;
-        let _ = writeln!($crate::serial::SerialWriter, $($arg)*);
+        let _ = writeln!($crate::drivers::serial::SerialWriter, $($arg)*);
     }};
 }
