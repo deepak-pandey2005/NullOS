@@ -57,11 +57,11 @@ if [[ "${1:-}" == "--headless" || "${1:-}" == "--test" ]]; then
     qemu-system-x86_64 "${QEMU_ARGS[@]}" > "${SERIAL_LOG}" 2>&1 &
     QEMU_PID=$!
     
-    for i in {1..20}; do
+    for i in {1..30}; do
         sleep 0.5
-        if grep -q "NullOS Kernel Reached" "${SERIAL_LOG}" 2>/dev/null; then
-            sleep 1
-            echo "==> Kernel successfully reached!"
+        if grep -q "All shell verification commands executed successfully" "${SERIAL_LOG}" 2>/dev/null; then
+            sleep 0.5
+            echo "==> Kernel reached and all automated tests passed!"
             break
         fi
         if ! kill -0 "${QEMU_PID}" 2>/dev/null; then
@@ -74,6 +74,10 @@ if [[ "${1:-}" == "--headless" || "${1:-}" == "--test" ]]; then
     
     echo "==> Serial Log:"
     cat "${SERIAL_LOG}"
+elif [[ "${1:-}" == "--cli" || "${1:-}" == "-n" || "${1:-}" == "--nographic" ]]; then
+    echo "==> Launching QEMU in interactive terminal CLI mode (Press Ctrl+A then X to exit)..."
+    QEMU_ARGS+=(-display none)
+    qemu-system-x86_64 "${QEMU_ARGS[@]}"
 else
     echo "==> Launching QEMU..."
     qemu-system-x86_64 "${QEMU_ARGS[@]}"

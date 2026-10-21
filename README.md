@@ -293,12 +293,12 @@
 # Phase 7 — Userspace
 
 ### M20 — Init Process
-- [ ] PID 1
-- [ ] Userspace initialization
-- [ ] Mount filesystems
-- [ ] Start services
-- [ ] Start shell
-- [ ] Reap orphan processes
+- [x] PID 1 (`spawn_init_process` loading ELF executable)
+- [x] Userspace initialization (dedicated PML4 address space, user stack)
+- [x] Mount filesystems (mount RamFS at `/`)
+- [x] Start services (start console and interactive shell)
+- [x] Start shell (spawn `nsh` interactive REPL thread)
+- [x] Reap orphan processes (`waitpid` zombie reaping)
 
 ### M21 — Minimal libc
 - [ ] `string.h`
@@ -313,18 +313,18 @@
 - [ ] Minimal C runtime
 
 ### M22 — Shell
-- [ ] Command parser
+- [x] Command parser (tokenization and argument splitting)
 - [ ] Environment variables
-- [ ] Built-in commands
+- [x] Built-in commands (`help`, `clear`, `echo`, `ls`, `cat`, `touch`, `write`, `ps`, `mem`, `uptime`, `reboot`)
 - [ ] Program execution
 - [ ] Pipes
 - [ ] Redirection
 - [ ] Background processes
 - [ ] Job control
-- [ ] `ls`
-- [ ] `cat`
-- [ ] `echo`
-- [ ] `ps`
+- [x] `ls` (directory listing via VFS Inode traversal)
+- [x] `cat` (read file contents via VFS)
+- [x] `echo` (print arguments to console)
+- [x] `ps` (display active processes, PIDs, and states from `ProcessTable`)
 - [ ] `kill`
 
 ---

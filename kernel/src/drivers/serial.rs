@@ -10,6 +10,25 @@ const COM1_LINE_STATUS: u16 = 0x3FD;
 const TRANSMIT_EMPTY: u8 = 0x20;
 const DATA_READY: u8 = 0x01;
 
+/// Initializes the 16550 COM1 serial port (115200 baud, 8N1, FIFO enabled).
+pub fn init() {
+    unsafe {
+        // Disable all interrupts
+        core::arch::asm!("out dx, al", in("dx") COM1_DATA + 1, in("al") 0x00u8, options(nomem, nostack));
+        // Enable DLAB (set baud rate divisor)
+        core::arch::asm!("out dx, al", in("dx") COM1_DATA + 3, in("al") 0x80u8, options(nomem, nostack));
+        // Set divisor to 1 (115200 baud): low byte = 1, high byte = 0
+        core::arch::asm!("out dx, al", in("dx") COM1_DATA + 0, in("al") 0x01u8, options(nomem, nostack));
+        core::arch::asm!("out dx, al", in("dx") COM1_DATA + 1, in("al") 0x00u8, options(nomem, nostack));
+        // 8 bits, no parity, one stop bit (8N1)
+        core::arch::asm!("out dx, al", in("dx") COM1_DATA + 3, in("al") 0x03u8, options(nomem, nostack));
+        // Enable FIFO, clear TX/RX queues, 14-byte threshold
+        core::arch::asm!("out dx, al", in("dx") COM1_DATA + 2, in("al") 0xC7u8, options(nomem, nostack));
+        // Enable Auxiliary output (OUT2), RTS and DTR
+        core::arch::asm!("out dx, al", in("dx") COM1_DATA + 4, in("al") 0x0Bu8, options(nomem, nostack));
+    }
+}
+
 /// Checks if an incoming byte is available in the COM1 receive buffer.
 pub fn has_incoming_byte() -> bool {
     unsafe {

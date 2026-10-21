@@ -16,6 +16,7 @@ use core::panic::PanicInfo;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
+    drivers::serial::init();
     drivers::console::init(&boot_info.framebuffer);
 
     // Initialize Global Descriptor Table & Task State Segment (M4)
@@ -108,10 +109,12 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // Verify Interactive Shell & CLI commands (Phase 7 - Userspace Shell)
     task::shell::run_automated_tests();
 
-    // Launch interactive shell thread
-    task::spawn("shell", task::shell::interactive_loop, 1);
+    println!();
+    println!("[KERNEL] Kernel initialization complete. Shell active.");
+    println!();
 
-    println!("[KERNEL] Kernel initialization complete. Shell active, CPU idling with interrupts enabled.");
+    // Hand execution over to the interactive shell (with cooperative yield for background tasks)
+    task::shell::interactive_loop();
 
     loop {
         unsafe {
