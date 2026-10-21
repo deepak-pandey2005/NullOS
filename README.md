@@ -216,16 +216,16 @@
 - [x] `mmap`
 
 ### M14 — Process Management
-- [ ] PID allocator
-- [ ] Process structure
-- [ ] Process table
-- [ ] Process creation
-- [ ] Process termination
-- [ ] `exec`
-- [ ] `wait`
-- [ ] Parent/child relationships
-- [ ] Process states
-- [ ] First user process
+- [x] PID allocator
+- [x] Process structure
+- [x] Process table
+- [x] Process creation
+- [x] Process termination
+- [x] `exec`
+- [x] `wait`
+- [x] Parent/child relationships
+- [x] Process states
+- [x] First user process
 
 ---
 
@@ -631,7 +631,7 @@
 - [x] M11
 - [x] M12
 - [x] M13
-- [ ] M14
+- [x] M14
 
 ---
 

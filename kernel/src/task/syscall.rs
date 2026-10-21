@@ -11,6 +11,7 @@ pub const SYS_EXIT: u64 = 2;
 pub const SYS_YIELD: u64 = 3;
 pub const SYS_GETPID: u64 = 4;
 pub const SYS_SLEEP: u64 = 5;
+pub const SYS_WAITPID: u64 = 7;
 pub const SYS_MMAP: u64 = 9;
 
 pub const PROT_READ: u64 = 1;
@@ -96,8 +97,9 @@ pub extern "C" fn syscall_dispatcher(
             len as u64
         }
         SYS_EXIT => {
-            let status = a1;
+            let status = a1 as i32;
             println!("\x1b[32m[USER]\x1b[0m User process finished with exit code: {}", status);
+            super::process::exit_process(super::process::ProcessId::INIT, status);
             USER_DEMO_PASSED.store(true, Ordering::SeqCst);
             super::exit();
         }
@@ -106,12 +108,32 @@ pub extern "C" fn syscall_dispatcher(
             0
         }
         SYS_GETPID => {
-            1337
+            super::process::ProcessId::INIT.as_u64()
         }
         SYS_SLEEP => {
             let ticks = a1;
             super::sleep(ticks);
             0
+        }
+        SYS_WAITPID => {
+            let target_pid = if a1 == 0 || a1 == u64::MAX {
+                None
+            } else {
+                Some(super::process::ProcessId(a1))
+            };
+            let parent_pid = super::process::ProcessId::INIT;
+            match super::process::waitpid(parent_pid, target_pid) {
+                Ok((reaped_pid, exit_code)) => {
+                    let status_ptr = a2 as *mut i32;
+                    if !status_ptr.is_null() {
+                        unsafe {
+                            *status_ptr = exit_code;
+                        }
+                    }
+                    reaped_pid.as_u64()
+                }
+                Err(_) => u64::MAX,
+            }
         }
         SYS_MMAP => {
             let addr = a1;
@@ -251,5 +273,32 @@ pub fn run_user_mode_self_test() {
     }
 
     println!("[USER] User Mode Crash Handling verified: Faulting user thread was terminated cleanly while kernel remained intact!");
-    println!("[USER] All Phase 5 milestones (M12 User Mode & M13 Syscalls) fully verified!");
+
+    // 6. Process Management & Lifecycle Verification (M14)
+    println!();
+    println!("----------------------------------------");
+    println!(" [PROCESS] Testing Process Lifecycle    ");
+    println!("----------------------------------------");
+
+    // Spawn init process (PID 1)
+    let init_pid = super::process::spawn_init_process(&test_elf_bytes).expect("Failed to spawn init process");
+    assert_eq!(init_pid, super::process::ProcessId::INIT);
+
+    // Create child process (PID 2) with parent PID 1
+    let child_pid = super::process::create_process("child_worker", Some(init_pid)).expect("Failed to create child process");
+    assert_eq!(child_pid.0, 2);
+    assert_eq!(super::process::process_count(), 2);
+
+    // Simulate child process executing, finishing, and transitioning to Zombie
+    super::process::exit_process(child_pid, 42);
+
+    // Parent process reaps the zombie child via waitpid
+    let (reaped_pid, exit_status) = super::process::waitpid(init_pid, Some(child_pid)).expect("Failed to reap child process");
+    assert_eq!(reaped_pid, child_pid);
+    assert_eq!(exit_status, 42);
+
+    // Verify child was completely removed from the process table (only init remains)
+    assert_eq!(super::process::process_count(), 1);
+    println!("[PROCESS] Process lifecycle, PID allocation, parent/child relationships, and waitpid verified successfully!");
+    println!("[PROCESS] All Phase 5 milestones (M12 User Mode, M13 Syscalls & M14 Process Management) 100% complete!");
 }

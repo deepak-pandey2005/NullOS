@@ -34,17 +34,15 @@ impl AddressSpace {
                 PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_EXECUTE,
             );
 
-            // 2. Clone higher-half kernel entries (entries 256..511)
+            // 2. Clone all active kernel and identity mappings from the current PML4
             let (current_cr3, _) = paging::x86::read_cr3();
             let current_pml4 = &*(current_cr3.start_address().as_ptr::<PageTable>());
 
-            for i in 256..511 {
+            for i in 0..511 {
                 if current_pml4[i].is_present() {
                     new_pml4[i] = current_pml4[i];
                 }
             }
-
-            // Note: Lower half (entries 0..256) is completely zeroed (empty user address space).
         }
 
         Ok(Self { pml4_frame })
