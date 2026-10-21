@@ -70,12 +70,17 @@ kernel/src/memory/
 
 ---
 
-## Upcoming Milestones
-
 ### M9 — Kernel Heap Allocator
-- Linked-list / Slab / Buddy allocator implementation.
-- `#[global_allocator]` implementation of `core::alloc::GlobalAlloc`.
-- Enable Rust standard collection types via `extern crate alloc;` (`Vec`, `Box`, `String`).
+- [x] **Kernel Heap Virtual Region**: Dedicated 1 MiB virtual memory window (`0x4444_4444_0000 .. 0x4444_4454_0000`) backed by 256 dynamically allocated physical frames.
+- [x] **Linked-List Allocator with Node Coalescing**: First-fit chunk allocation with boundary alignment and automatic deallocation coalescing to prevent heap fragmentation.
+- [x] **`GlobalAlloc` Implementation**: Thread-safe `LockedHeap` implementing `core::alloc::GlobalAlloc` via `Spinlock<LinkedListAllocator>`, registered globally with `#[global_allocator]`.
+- [x] **Rust Dynamic Collections Enabled**: Linked `extern crate alloc;` in `kernel/src/main.rs`, unlocking `Box`, `Vec`, `String`, and `format!`.
+- [x] **Heap Usage Statistics**: Tracking total, allocated, and freed bytes alongside active allocation counts via `HeapStats`.
+- [x] **Built-in Heap Self-Tests**:
+  - `Box<u64>` allocation, value verification, and automatic drop deallocation.
+  - Dynamic `Vec<usize>` with 500 pushed elements, verifying dynamic capacity reallocation.
+  - `String` allocation, dynamic formatting (`format!`), and string concatenation.
+  - Zero-leak verification (`Active: 0` allocations upon test completion).
 
 ---
 
@@ -95,8 +100,30 @@ Expected output:
   [00] Conventional (Free RAM) Start: 0x000000000000 End: 0x000000087000 Pages:    135 ( 540 KiB)
   ...
 [MEMORY] Physical space: max addr 0x1e150000, total frames: 123216, bitmap needed: 15402 bytes (16 KiB)
-[MEMORY] Placed PMM bitmap at physical address 0x000000122000 (4 frames)
-[MEMORY] Physical Memory Manager active. Total: 481 MiB, Free: 462 MiB (118375 frames), Used: 18 MiB (4841 frames)
+[MEMORY] Placed PMM bitmap at physical address 0x00000012d000 (4 frames)
+[MEMORY] Physical Memory Manager active. Total: 481 MiB, Free: 461 MiB (118241 frames), Used: 19 MiB (4975 frames)
+
+----------------------------------------
+ [PAGING] Initializing Virtual Memory   
+----------------------------------------
+[PAGING] Active firmware PML4 table at 0x1f801000
+[PAGING] New Kernel PML4 table allocated at 0x131000
+[PAGING] Recursive page table mapping established at PML4 entry 511.
+[PAGING] Framebuffer mapped: 0x80000000 (4000 KiB, Write-Through, NX)
+[PAGING] Local APIC MMIO mapped: 0xFEE00000 (No-Cache, NX)
+[PAGING] CPU CR3 switched to Kernel PML4: 0x131000
+[PAGING] 4-level x86_64 Virtual Memory Paging active.
+
+----------------------------------------
+ [HEAP] Initializing Kernel Heap        
+----------------------------------------
+[HEAP] Mapping 256 heap pages (1024 KiB) at virtual 0x444444440000...
+[HEAP] Kernel Heap active at 0x444444440000 - 0x444444540000 (1 MiB)
 [MEMORY] Running PMM verification self-tests...
 [MEMORY] All PMM self-tests passed successfully! (Frame allocation, contiguous, read/write, dealloc, recycle)
+[PAGING] Running Virtual Memory verification self-tests...
+[PAGING] All PMM/VMM self-tests passed successfully! (Translation, Dynamic Map, Read/Write, Unmap, TLB flush)
+[HEAP] Running Heap Allocator verification self-tests...
+[HEAP] All Heap self-tests passed successfully! (Box, Vec, String, Total alloc: 8232 bytes, Active: 0)
+[KERNEL] Kernel initialization complete. CPU idling with interrupts enabled.
 ```

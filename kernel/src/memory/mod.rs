@@ -8,11 +8,13 @@
 
 pub mod address;
 pub mod frame_allocator;
+pub mod heap;
 pub mod paging;
 pub mod uefi_mmap;
 
 pub use address::{Page, PhysAddr, PhysFrame, VirtAddr, PAGE_SIZE_4K};
 pub use frame_allocator::{BitmapFrameAllocator, MemoryStats};
+pub use heap::HeapStats;
 pub use paging::{KernelPageTable, PageTable, PageTableEntry, PageTableFlags};
 pub use uefi_mmap::{MemoryDescriptor, MemoryMapIterator, UefiMemoryType};
 
@@ -164,6 +166,9 @@ pub fn init(boot_info: &'static BootInfo) {
 
     // 8. Initialize Virtual Memory & 4-level Paging (Phase 3 - M8)
     paging::init(boot_info);
+
+    // 9. Initialize Dynamic Kernel Heap Allocator (Phase 3 - M9)
+    heap::init();
 }
 
 /// Allocates a single 4 KiB physical page frame.
@@ -259,4 +264,7 @@ pub fn run_self_tests() {
 
     // Run VMM Paging self-tests
     paging::run_self_tests();
+
+    // Run Kernel Heap self-tests
+    heap::run_self_tests();
 }

@@ -144,16 +144,16 @@
 - [x] Huge pages
 
 ### M9 — Kernel Heap
-- [ ] Initial bump allocator
-- [ ] Linked-list allocator
-- [ ] Kernel heap region
-- [ ] `GlobalAlloc`
-- [ ] `Box`
-- [ ] `Vec`
-- [ ] `String`
-- [ ] Allocation statistics
-- [ ] Slab allocator
-- [ ] Kernel object caches
+- [x] Initial bump allocator
+- [x] Linked-list allocator
+- [x] Kernel heap region
+- [x] `GlobalAlloc`
+- [x] `Box`
+- [x] `Vec`
+- [x] `String`
+- [x] Allocation statistics
+- [x] Slab allocator
+- [x] Kernel object caches
 
 ---
 
