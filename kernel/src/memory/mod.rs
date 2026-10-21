@@ -8,10 +8,12 @@
 
 pub mod address;
 pub mod frame_allocator;
+pub mod paging;
 pub mod uefi_mmap;
 
 pub use address::{Page, PhysAddr, PhysFrame, VirtAddr, PAGE_SIZE_4K};
 pub use frame_allocator::{BitmapFrameAllocator, MemoryStats};
+pub use paging::{KernelPageTable, PageTable, PageTableEntry, PageTableFlags};
 pub use uefi_mmap::{MemoryDescriptor, MemoryMapIterator, UefiMemoryType};
 
 use crate::println;
@@ -159,6 +161,9 @@ pub fn init(boot_info: &'static BootInfo) {
         stats.used_mib(),
         stats.used_frames
     );
+
+    // 8. Initialize Virtual Memory & 4-level Paging (Phase 3 - M8)
+    paging::init(boot_info);
 }
 
 /// Allocates a single 4 KiB physical page frame.
@@ -251,4 +256,7 @@ pub fn run_self_tests() {
     dealloc_frame(recycled);
 
     println!("[MEMORY] All PMM self-tests passed successfully! (Frame allocation, contiguous, read/write, dealloc, recycle)");
+
+    // Run VMM Paging self-tests
+    paging::run_self_tests();
 }

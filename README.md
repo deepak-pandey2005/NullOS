@@ -128,20 +128,20 @@
 - [x] Memory allocation tests
 
 ### M8 — Virtual Memory
-- [ ] PML4
-- [ ] PDPT
-- [ ] Page directory
-- [ ] Page tables
-- [ ] Page mapping
-- [ ] Page unmapping
-- [ ] Virtual address abstraction
-- [ ] Physical address abstraction
-- [ ] Address translation
-- [ ] Kernel address space
-- [ ] Higher-half kernel
-- [ ] Guard pages
-- [ ] NX
-- [ ] Huge pages
+- [x] PML4
+- [x] PDPT
+- [x] Page directory
+- [x] Page tables
+- [x] Page mapping
+- [x] Page unmapping
+- [x] Virtual address abstraction
+- [x] Physical address abstraction
+- [x] Address translation
+- [x] Kernel address space
+- [x] Higher-half kernel
+- [x] Guard pages
+- [x] NX
+- [x] Huge pages
 
 ### M9 — Kernel Heap
 - [ ] Initial bump allocator

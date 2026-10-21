@@ -159,7 +159,21 @@ pub extern "C" fn exception_handler(ctx: &ExceptionContext) {
         unsafe {
             core::arch::asm!("mov {}, cr2", out(reg) cr2);
         }
+        let present = (ctx.error_code & (1 << 0)) != 0;
+        let write = (ctx.error_code & (1 << 1)) != 0;
+        let user = (ctx.error_code & (1 << 2)) != 0;
+        let reserved = (ctx.error_code & (1 << 3)) != 0;
+        let instruction = (ctx.error_code & (1 << 4)) != 0;
+
         crate::println!("CR2 Faulting Address: {:#018x}", cr2);
+        crate::println!(
+            "Page Fault Reason:   {} during {} in {} mode{}{}",
+            if present { "Page-protection violation" } else { "Page not present" },
+            if instruction { "instruction fetch" } else if write { "write" } else { "read" },
+            if user { "user" } else { "kernel" },
+            if reserved { " (reserved bit set)" } else { "" },
+            if instruction { " (NX/XD violation)" } else { "" }
+        );
     }
 
     crate::println!("RIP: {:#018x}   CS:  {:#06x}   RFLAGS: {:#018x}", ctx.rip, ctx.cs, ctx.rflags);

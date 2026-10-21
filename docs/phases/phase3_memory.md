@@ -50,13 +50,27 @@ kernel/src/memory/
 
 ---
 
-## Upcoming Milestones
+### M8 — Virtual Memory & 4-Level Paging
+- [x] **Page Table Structures**: 512-entry aligned `PageTable`, `PageTableEntry`, and comprehensive `PageTableFlags` (Present, Writable, User, WriteThrough, NoCache, HugePage, Global, NoExecute).
+- [x] **4-Level Page Table Hierarchy**: PML4, PDPT, PD, and PT indexing and traversal logic.
+- [x] **Dedicated Kernel PML4**: Allocated a root PML4 physical frame and established a clean kernel address space.
+- [x] **Recursive Page Table Mapping**: Bound PML4 entry 511 to the PML4 itself (`pml4_frame`), enabling transparent higher-half access to the page table hierarchy.
+- [x] **Identity Mapping of Critical Hardware**:
+  - Identity-mapped lower 1 MiB physical space.
+  - Identity-mapped kernel executable ELF segments (`.text`, `.rodata`, `.data`, `.bss`).
+  - Identity-mapped conventional RAM.
+  - Identity-mapped `BootInfo`, `MemoryMap`, and command line buffers.
+  - Identity-mapped GOP Framebuffer MMIO with `Write-Through` and `No-Execute` attributes.
+  - Identity-mapped Local APIC MMIO (`0xFEE0_0000`) with `Cache-Disable` and `No-Execute` attributes.
+- [x] **CR3 Switch & TLB Management**: Switched `%cr3` to the Kernel PML4, supported single-page invalidation (`invlpg`), and full TLB flushing.
+- [x] **Dynamic Page Mapping & Unmapping**: Safe `map_page()` dynamically allocating intermediate tables from the PMM, and `unmap_page()`.
+- [x] **Virtual-to-Physical Address Translation**: `translate_addr()` resolving arbitrary virtual addresses through the 4-level hierarchy.
+- [x] **Enhanced Page Fault Diagnostics**: Connected `#PF` exception handler to decode error codes (present, write, user, reserved bit, instruction fetch / NX).
+- [x] **Built-in VMM Self-Tests**: Verified identity translation, dynamic virtual mapping at `0x0000_7000_0000_0000`, memory read/write across page tables, unmapping, and translation failure on unmapped pages.
 
-### M8 — Virtual Memory & Paging
-- 4-level x86_64 paging (PML4, PDPT, PD, PT).
-- Page table mapping & unmapping functions.
-- Recursive page table mapping / Higher-half kernel mapping.
-- Page fault exception diagnostics hooked to IDT.
+---
+
+## Upcoming Milestones
 
 ### M9 — Kernel Heap Allocator
 - Linked-list / Slab / Buddy allocator implementation.
