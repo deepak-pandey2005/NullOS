@@ -26,6 +26,9 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // Initialize modern CPU features & security flags (CR0.WP, EFER.NXE, CR4.OSFXSR/PGE)
     arch::x86_64::cpu::init();
 
+    // Initialize Fast SYSCALL / SYSRET ABI & MSRs (Phase 5 - M13)
+    arch::x86_64::syscall::init();
+
     // Initialize Local APIC & Timers (M6)
     apic::init();
 

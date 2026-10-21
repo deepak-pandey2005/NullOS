@@ -123,6 +123,11 @@ impl PageTableEntry {
     }
 
     #[inline]
+    pub fn add_flags(&mut self, flags: PageTableFlags) {
+        self.0 |= flags.bits();
+    }
+
+    #[inline]
     pub fn clear(&mut self) {
         self.0 = 0;
     }
@@ -317,6 +322,9 @@ impl KernelPageTable {
 
         // 1. Traverse or allocate PDPT
         let pdpt_frame = if pml4[pml4_idx].is_present() {
+            if flags.contains(PageTableFlags::USER_ACCESSIBLE) {
+                pml4[pml4_idx].add_flags(PageTableFlags::USER_ACCESSIBLE);
+            }
             pml4[pml4_idx].frame().unwrap()
         } else {
             let new_frame = super::alloc_frame().ok_or("Out of memory for PDPT")?;
@@ -333,6 +341,9 @@ impl KernelPageTable {
         // 2. Traverse or allocate PD
         let pdpt = unsafe { &mut *(pdpt_frame.start_address().as_mut_ptr::<PageTable>()) };
         let pd_frame = if pdpt[pdpt_idx].is_present() {
+            if flags.contains(PageTableFlags::USER_ACCESSIBLE) {
+                pdpt[pdpt_idx].add_flags(PageTableFlags::USER_ACCESSIBLE);
+            }
             pdpt[pdpt_idx].frame().unwrap()
         } else {
             let new_frame = super::alloc_frame().ok_or("Out of memory for PD")?;
@@ -349,6 +360,9 @@ impl KernelPageTable {
         // 3. Traverse or allocate PT
         let pd = unsafe { &mut *(pd_frame.start_address().as_mut_ptr::<PageTable>()) };
         let pt_frame = if pd[pd_idx].is_present() {
+            if flags.contains(PageTableFlags::USER_ACCESSIBLE) {
+                pd[pd_idx].add_flags(PageTableFlags::USER_ACCESSIBLE);
+            }
             pd[pd_idx].frame().unwrap()
         } else {
             let new_frame = super::alloc_frame().ok_or("Out of memory for PT")?;

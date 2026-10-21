@@ -187,30 +187,30 @@
 # Phase 5 — User Mode
 
 ### M12 — User Mode
-- [ ] Ring 3
-- [ ] User code segment
-- [ ] User data segment
-- [ ] User stack
-- [ ] User page tables
-- [ ] Kernel/user address separation
+- [x] Ring 3
+- [x] User code segment
+- [x] User data segment
+- [x] User stack
+- [x] User page tables
+- [x] Kernel/user address separation
 - [ ] User ELF loader
 - [ ] Process address space
-- [ ] User program entry
+- [x] User program entry
 - [ ] User-mode crash handling
 
 ### M13 — Syscalls
-- [ ] `SYSCALL` instruction
-- [ ] `SYSRET`
-- [ ] `STAR` MSR
-- [ ] `LSTAR` MSR
-- [ ] `FMASK` MSR
-- [ ] Syscall entry assembly
-- [ ] Syscall dispatcher
-- [ ] Syscall ABI
-- [ ] `write`
-- [ ] `exit`
-- [ ] `yield`
-- [ ] `getpid`
+- [x] `SYSCALL` instruction
+- [x] `SYSRET`
+- [x] `STAR` MSR
+- [x] `LSTAR` MSR
+- [x] `FMASK` MSR
+- [x] Syscall entry assembly
+- [x] Syscall dispatcher
+- [x] Syscall ABI
+- [x] `write`
+- [x] `exit`
+- [x] `yield`
+- [x] `getpid`
 - [ ] `mmap`
 
 ### M14 — Process Management

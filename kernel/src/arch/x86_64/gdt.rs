@@ -158,3 +158,10 @@ pub fn init() {
         );
     }
 }
+
+/// Updates the kernel stack pointer (RSP0) in the TSS loaded on privilege transition.
+pub fn set_tss_rsp0(rsp0: u64) {
+    unsafe {
+        TSS.rsp0 = rsp0;
+    }
+}

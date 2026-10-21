@@ -6,9 +6,11 @@
 #![allow(unused_imports, dead_code)]
 
 pub mod scheduler;
+pub mod syscall;
 pub mod thread;
 
 pub use scheduler::{exit, init, sleep, spawn, stats, timer_tick, yield_now};
+pub use syscall::run_user_mode_self_test;
 pub use thread::{Thread, ThreadId, ThreadState};
 
 use crate::println;
@@ -63,4 +65,7 @@ pub fn run_self_tests() {
         "[TASK] All Kernel Threads self-tests passed successfully! (Cooperative multitasking, Context Switch count: {})",
         switches
     );
+
+    // Run User Mode Ring 3 and SYSCALL self-test (Phase 5 - M12, M13)
+    syscall::run_user_mode_self_test();
 }
