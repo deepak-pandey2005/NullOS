@@ -1,6 +1,30 @@
+//! High-Performance Framebuffer Text Console Driver with ANSI Color Support.
+//!
+//! Features:
+//! - Thread-safe & interrupt-safe synchronization using Spinlock.
+//! - Optimized fast burst memory copy for instantaneous screen scrolling.
+//! - ANSI escape code parsing for colored kernel diagnostic logs.
+//! - Antialiased vector-quality font rasterization via noto-sans-mono-bitmap.
+
+use crate::sync::Spinlock;
 use bootinfo::{FramebufferInfo, PixelFormat};
 use core::fmt;
 use noto_sans_mono_bitmap::{get_raster, FontWeight, RasterHeight};
+
+const FONT_HEIGHT: RasterHeight = RasterHeight::Size16;
+const CHAR_HEIGHT: usize = 16;
+const CHAR_WIDTH: usize = 9;
+
+const DEFAULT_FG: u32 = 0x00E2E8F0; // Clean light slate text
+const DEFAULT_BG: u32 = 0x000F172A; // Dark slate blue background
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AnsiState {
+    Normal,
+    Esc,
+    Bracket,
+    Param(u32),
+}
 
 pub struct FramebufferConsole {
     address: u64,
@@ -13,13 +37,10 @@ pub struct FramebufferConsole {
     cursor_y: usize,
     fg_color: u32,
     bg_color: u32,
+    ansi_state: AnsiState,
 }
 
-static mut CONSOLE: Option<FramebufferConsole> = None;
-
-const FONT_HEIGHT: RasterHeight = RasterHeight::Size16;
-const CHAR_HEIGHT: usize = 16;
-const CHAR_WIDTH: usize = 9; // Size16 font width is ~9 px
+static CONSOLE: Spinlock<Option<FramebufferConsole>> = Spinlock::new(None);
 
 impl FramebufferConsole {
     pub fn new(fb: &FramebufferInfo) -> Self {
@@ -32,8 +53,9 @@ impl FramebufferConsole {
             _pixel_format: fb.pixel_format,
             cursor_x: 0,
             cursor_y: 0,
-            fg_color: 0x00E2E8F0, // Clean light slate text
-            bg_color: 0x000F172A, // Dark slate blue background
+            fg_color: DEFAULT_FG,
+            bg_color: DEFAULT_BG,
+            ansi_state: AnsiState::Normal,
         }
     }
 
@@ -51,6 +73,50 @@ impl FramebufferConsole {
     }
 
     pub fn write_char(&mut self, c: char) {
+        // ANSI escape sequence state machine
+        match self.ansi_state {
+            AnsiState::Normal => {
+                if c == '\x1b' {
+                    self.ansi_state = AnsiState::Esc;
+                    return;
+                }
+            }
+            AnsiState::Esc => {
+                if c == '[' {
+                    self.ansi_state = AnsiState::Bracket;
+                } else {
+                    self.ansi_state = AnsiState::Normal;
+                }
+                return;
+            }
+            AnsiState::Bracket => {
+                if c.is_ascii_digit() {
+                    self.ansi_state = AnsiState::Param(c.to_digit(10).unwrap_or(0));
+                } else if c == 'm' {
+                    self.apply_sgr(0);
+                    self.ansi_state = AnsiState::Normal;
+                } else {
+                    self.ansi_state = AnsiState::Normal;
+                }
+                return;
+            }
+            AnsiState::Param(n) => {
+                if c.is_ascii_digit() {
+                    let next = n.saturating_mul(10).saturating_add(c.to_digit(10).unwrap_or(0));
+                    self.ansi_state = AnsiState::Param(next);
+                    return;
+                } else if c == 'm' {
+                    self.apply_sgr(n);
+                    self.ansi_state = AnsiState::Normal;
+                    return;
+                } else {
+                    self.ansi_state = AnsiState::Normal;
+                    return;
+                }
+            }
+        }
+
+        // Standard character rendering
         match c {
             '\n' => self.newline(),
             '\r' => self.cursor_x = 0,
@@ -69,6 +135,29 @@ impl FramebufferConsole {
         }
     }
 
+    /// Handles ANSI SGR (Select Graphic Rendition) color codes.
+    fn apply_sgr(&mut self, code: u32) {
+        match code {
+            0 => self.fg_color = DEFAULT_FG,          // Reset
+            30 => self.fg_color = 0x000F172A,         // Black
+            31 => self.fg_color = 0x00EF4444,         // Red
+            32 => self.fg_color = 0x0022C55E,         // Green
+            33 => self.fg_color = 0x00EAB308,         // Yellow
+            34 => self.fg_color = 0x003B82F6,         // Blue
+            35 => self.fg_color = 0x00A855F7,         // Magenta
+            36 => self.fg_color = 0x0006B6D4,         // Cyan
+            37 => self.fg_color = 0x00F8FAFC,         // White
+            90 => self.fg_color = 0x0064748B,         // Bright Gray
+            91 => self.fg_color = 0x00F87171,         // Bright Red
+            92 => self.fg_color = 0x004ADE80,         // Bright Green
+            93 => self.fg_color = 0x00FDE047,         // Bright Yellow
+            94 => self.fg_color = 0x0060A5FA,         // Bright Blue
+            95 => self.fg_color = 0x00C084FC,         // Bright Magenta
+            96 => self.fg_color = 0x0022D3EE,         // Bright Cyan
+            _ => {}
+        }
+    }
+
     fn newline(&mut self) {
         self.cursor_x = 0;
         self.cursor_y += CHAR_HEIGHT;
@@ -77,28 +166,21 @@ impl FramebufferConsole {
         }
     }
 
+    /// High-performance screen scrolling via block memory movement.
     fn scroll_up(&mut self) {
         let ptr = self.address as *mut u32;
         let lines_to_move = self.height - CHAR_HEIGHT;
+        let total_pixels_to_move = lines_to_move * self.stride;
 
-        // Move rows up
-        for y in 0..lines_to_move {
-            let src = (y + CHAR_HEIGHT) * self.stride;
-            let dst = y * self.stride;
-            for x in 0..self.width {
-                unsafe {
-                    *ptr.add(dst + x) = *ptr.add(src + x);
-                }
-            }
-        }
+        unsafe {
+            // Fast sequential block copy
+            core::ptr::copy(ptr.add(CHAR_HEIGHT * self.stride), ptr, total_pixels_to_move);
 
-        // Clear bottom row
-        for y in lines_to_move..self.height {
-            let dst = y * self.stride;
-            for x in 0..self.width {
-                unsafe {
-                    *ptr.add(dst + x) = self.bg_color;
-                }
+            // Fast clear of the newly exposed bottom row
+            let clear_ptr = ptr.add(total_pixels_to_move);
+            let clear_count = CHAR_HEIGHT * self.stride;
+            for i in 0..clear_count {
+                *clear_ptr.add(i) = self.bg_color;
             }
         }
 
@@ -125,7 +207,6 @@ impl FramebufferConsole {
                 let pixel_color = if intensity > 128 {
                     self.fg_color
                 } else if intensity > 30 {
-                    // Mild antialiasing
                     self.blend_color(self.fg_color, self.bg_color, intensity)
                 } else {
                     self.bg_color
@@ -173,15 +254,11 @@ pub fn init(fb: &FramebufferInfo) {
     }
     let mut console = FramebufferConsole::new(fb);
     console.clear();
-    unsafe {
-        CONSOLE = Some(console);
-    }
+    *CONSOLE.lock() = Some(console);
 }
 
 pub fn write_str(s: &str) {
-    unsafe {
-        if let Some(ref mut console) = CONSOLE {
-            let _ = <FramebufferConsole as fmt::Write>::write_str(console, s);
-        }
+    if let Some(ref mut console) = *CONSOLE.lock() {
+        let _ = <FramebufferConsole as fmt::Write>::write_str(console, s);
     }
 }

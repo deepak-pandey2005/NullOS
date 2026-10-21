@@ -62,6 +62,7 @@ impl ListNode {
 pub struct LinkedListAllocator {
     head: ListNode,
     stats: HeapStats,
+    heap_end: usize,
 }
 
 impl LinkedListAllocator {
@@ -74,15 +75,51 @@ impl LinkedListAllocator {
                 freed_bytes: 0,
                 active_allocations: 0,
             },
+            heap_end: 0,
         }
     }
 
     /// Initializes the allocator with a memory region.
     pub unsafe fn init(&mut self, heap_start: usize, heap_size: usize) {
         self.stats.total_bytes = heap_size;
+        self.heap_end = heap_start + heap_size;
         unsafe {
             self.add_free_region(heap_start, heap_size);
         }
+    }
+
+    /// Dynamically expands the heap by allocating more physical frames and mapping new virtual pages.
+    pub fn expand_heap(&mut self, required_size: usize) -> Result<(), ()> {
+        let chunk_size = align_up(required_size.max(128 * 1024), PAGE_SIZE_4K as usize);
+        let pages = chunk_size / (PAGE_SIZE_4K as usize);
+        let start = self.heap_end;
+
+        for i in 0..pages {
+            let vaddr = VirtAddr::new((start + i * (PAGE_SIZE_4K as usize)) as u64);
+            let page = Page::containing_address(vaddr);
+            let frame = super::alloc_frame().ok_or(())?;
+            super::paging::map_page(
+                page,
+                frame,
+                PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_EXECUTE,
+            )
+            .map_err(|_| ())?;
+        }
+
+        unsafe {
+            self.add_free_region(start, chunk_size);
+        }
+        self.heap_end += chunk_size;
+        self.stats.total_bytes += chunk_size;
+
+        println!(
+            "[HEAP] Dynamic expansion: Added {} KiB ({} frames). New heap limit: {:#x}",
+            chunk_size / 1024,
+            pages,
+            self.heap_end
+        );
+
+        Ok(())
     }
 
     /// Adds a freed region back into the list, merging with adjacent regions.
@@ -152,6 +189,23 @@ impl LinkedListAllocator {
             self.stats.active_allocations += 1;
             Ok(alloc_start as *mut u8)
         } else {
+            // Attempt dynamic heap expansion
+            if self.expand_heap(size).is_ok() {
+                if let Some((region, alloc_start)) = self.find_region(size, align) {
+                    let alloc_end = alloc_start.checked_add(size).ok_or(())?;
+                    let excess_size = region.end_address() - alloc_end;
+
+                    if excess_size > 0 {
+                        unsafe {
+                            self.add_free_region(alloc_end, excess_size);
+                        }
+                    }
+
+                    self.stats.allocated_bytes += size;
+                    self.stats.active_allocations += 1;
+                    return Ok(alloc_start as *mut u8);
+                }
+            }
             Err(())
         }
     }
@@ -327,6 +381,31 @@ pub fn run_self_tests() {
 
         let dynamic_str = "Dynamic String Test".to_string();
         assert_eq!(dynamic_str.len(), 19);
+    }
+
+    // Test 4: Dynamic Heap Expansion on Demand
+    {
+        use alloc::vec::Vec;
+        let pre_expansion_total = stats().total_bytes;
+
+        // Allocate two large buffers totaling > 1.1 MiB (exceeding initial 1 MiB heap)
+        let mut large_buffer: Vec<u8> = Vec::with_capacity(512 * 1024);
+        for i in 0..(512 * 1024) {
+            large_buffer.push((i % 256) as u8);
+        }
+        assert_eq!(large_buffer.len(), 512 * 1024);
+
+        let mut second_buffer: Vec<u8> = Vec::with_capacity(600 * 1024);
+        for i in 0..(600 * 1024) {
+            second_buffer.push((i % 256) as u8);
+        }
+        assert_eq!(second_buffer.len(), 600 * 1024);
+
+        let post_expansion_total = stats().total_bytes;
+        assert!(
+            post_expansion_total > pre_expansion_total,
+            "Heap total capacity must expand when allocations exceed initial size"
+        );
     }
 
     let final_stats = stats();
