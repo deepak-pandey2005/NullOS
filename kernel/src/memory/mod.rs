@@ -7,12 +7,14 @@
 #![allow(unused_imports, dead_code)]
 
 pub mod address;
+pub mod address_space;
 pub mod frame_allocator;
 pub mod heap;
 pub mod paging;
 pub mod uefi_mmap;
 
 pub use address::{Page, PhysAddr, PhysFrame, VirtAddr, PAGE_SIZE_4K};
+pub use address_space::AddressSpace;
 pub use frame_allocator::{BitmapFrameAllocator, MemoryStats};
 pub use heap::HeapStats;
 pub use paging::{KernelPageTable, PageTable, PageTableEntry, PageTableFlags};

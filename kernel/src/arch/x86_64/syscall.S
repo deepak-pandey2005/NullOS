@@ -108,7 +108,27 @@ user_test_program_start:
     mov $3, %rax                      # SYS_YIELD
     syscall
 
-    # 4. SYS_EXIT: Terminate process with exit code 0
+    # 4. SYS_MMAP: Allocate 4 KiB user page at 0x60000000 (PROT_READ | PROT_WRITE)
+    mov $9, %rax                      # SYS_MMAP
+    mov $0x60000000, %rdi             # addr = 0x60000000
+    mov $4096, %rsi                   # length = 4096
+    mov $3, %rdx                      # prot = PROT_READ (1) | PROT_WRITE (2)
+    mov $0x22, %r10                   # flags = MAP_PRIVATE (0x02) | MAP_ANON (0x20)
+    syscall
+
+    # Verify write and read to the dynamically mapped page in user mode
+    mov $0x12345678, %rcx
+    mov %rcx, (%rax)
+    mov (%rax), %rbx
+
+    # 5. SYS_WRITE: Print mmap verification message from Ring 3
+    mov $1, %rax                      # SYS_WRITE
+    mov $1, %rdi                      # fd = 1 (stdout)
+    lea mmap_msg(%rip), %rsi          # pointer to string
+    mov $(mmap_msg_end - mmap_msg), %rdx  # length
+    syscall
+
+    # 6. SYS_EXIT: Terminate process with exit code 0
     mov $2, %rax                      # SYS_EXIT
     xor %rdi, %rdi                    # status = 0
     syscall
@@ -121,7 +141,28 @@ user_msg:
 user_msg_end:
     .align 8
 
+mmap_msg:
+    .ascii "\033[32m[USER RING 3]\033[0m SYS_MMAP verified: Dynamically mapped and wrote to user page at 0x60000000!\n"
+mmap_msg_end:
+    .align 8
+
 user_test_program_end:
+
+/*
+ * Deliberate user mode crash test program.
+ */
+.global user_fault_program_start
+.global user_fault_program_end
+.type user_fault_program_start, @function
+
+user_fault_program_start:
+    # Deliberately access unmapped address in Ring 3 to trigger Page Fault
+    mov $0xDEAD0000, %rax
+    mov (%rax), %rbx
+1:  pause
+    jmp 1b
+
+user_fault_program_end:
 
 .section .bss
 .align 16

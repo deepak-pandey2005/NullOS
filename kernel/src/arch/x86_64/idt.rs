@@ -187,6 +187,19 @@ pub extern "C" fn exception_handler(ctx: &ExceptionContext) {
     crate::println!("R13: {:#018x}   R14: {:#018x}   R15: {:#018x}", ctx.r13, ctx.r14, ctx.r15);
     crate::println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
 
+    // Check if the fault occurred in Ring 3 User Mode (CPL == 3)
+    if (ctx.cs & 3) == 3 {
+        crate::println!();
+        crate::println!(
+            "\x1b[31;1m[USER CRASH]\x1b[0m User mode process crashed with {} (vector {}) at RIP: {:#018x}!",
+            name,
+            ctx.vector,
+            ctx.rip
+        );
+        crate::println!("\x1b[33m[USER CRASH]\x1b[0m Terminating faulting user thread cleanly and continuing OS execution...");
+        crate::task::exit();
+    }
+
     loop {
         unsafe {
             core::arch::asm!("cli; hlt");

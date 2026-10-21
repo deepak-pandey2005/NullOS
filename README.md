@@ -193,10 +193,10 @@
 - [x] User stack
 - [x] User page tables
 - [x] Kernel/user address separation
-- [ ] User ELF loader
-- [ ] Process address space
+- [x] User ELF loader
+- [x] Process address space
 - [x] User program entry
-- [ ] User-mode crash handling
+- [x] User-mode crash handling
 
 ### M13 — Syscalls
 - [x] `SYSCALL` instruction
@@ -211,7 +211,7 @@
 - [x] `exit`
 - [x] `yield`
 - [x] `getpid`
-- [ ] `mmap`
+- [x] `mmap`
 
 ### M14 — Process Management
 - [ ] PID allocator

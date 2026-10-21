@@ -12,6 +12,8 @@ unsafe extern "C" {
     pub fn enter_user_mode(entry_point: u64, user_stack_top: u64) -> !;
     pub fn user_test_program_start();
     pub fn user_test_program_end();
+    pub fn user_fault_program_start();
+    pub fn user_fault_program_end();
     pub static kernel_syscall_stack_top: u8;
 }
 

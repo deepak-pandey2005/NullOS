@@ -5,10 +5,12 @@
 //! - M11: Preemptive Multitasking Round-Robin Scheduler & Sleep Primitives
 #![allow(unused_imports, dead_code)]
 
+pub mod elf;
 pub mod scheduler;
 pub mod syscall;
 pub mod thread;
 
+pub use elf::{load_user_elf, LoadedUserElf};
 pub use scheduler::{exit, init, sleep, spawn, stats, timer_tick, yield_now};
 pub use syscall::run_user_mode_self_test;
 pub use thread::{Thread, ThreadId, ThreadState};
