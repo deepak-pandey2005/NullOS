@@ -3,6 +3,8 @@
 
 mod arch;
 mod drivers;
+mod memory;
+mod sync;
 
 use arch::x86_64::{apic, gdt, idt};
 use bootinfo::BootInfo;
@@ -80,6 +82,10 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // Test timer interrupt & sleep primitive
     apic::sleep(10);
     println!("[KERNEL] APIC Timer verified: {} ticks recorded.", apic::get_ticks());
+
+    // Initialize Physical Memory Manager (Phase 3 - M7)
+    memory::init(boot_info);
+    memory::run_self_tests();
 
     println!("[KERNEL] Kernel initialization complete. CPU idling with interrupts enabled.");
 

@@ -113,19 +113,19 @@
 # Phase 3 — Memory Management
 
 ### M7 — Physical Memory Manager
-- [ ] Parse UEFI memory map
-- [ ] Identify usable memory
-- [ ] Reserve kernel memory
-- [ ] Reserve bootloader memory
-- [ ] Reserve framebuffer
-- [ ] 4 KiB page abstraction
-- [ ] Bitmap allocator
-- [ ] `alloc_frame()`
-- [ ] `dealloc_frame()`
-- [ ] `alloc_frames(n)`
-- [ ] Free frame counter
-- [ ] Physical memory statistics
-- [ ] Memory allocation tests
+- [x] Parse UEFI memory map
+- [x] Identify usable memory
+- [x] Reserve kernel memory
+- [x] Reserve bootloader memory
+- [x] Reserve framebuffer
+- [x] 4 KiB page abstraction
+- [x] Bitmap allocator
+- [x] `alloc_frame()`
+- [x] `dealloc_frame()`
+- [x] `alloc_frames(n)`
+- [x] Free frame counter
+- [x] Physical memory statistics
+- [x] Memory allocation tests
 
 ### M8 — Virtual Memory
 - [ ] PML4
