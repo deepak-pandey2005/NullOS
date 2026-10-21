@@ -1,5 +1,5 @@
 # NullOS: The Complete Operating Systems Course
-### *A 10-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
+### *A 12-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
 
 Welcome to the comprehensive textbook documentation for **NullOS**. This curriculum teaches operating system engineering from absolute first principles: starting from raw motherboard electricity and transistors, all the way to multitasking, 4-level paging, and Ring 3 user mode with fast hardware system calls.
 
@@ -93,3 +93,18 @@ Welcome to the comprehensive textbook documentation for **NullOS**. This curricu
 - Motherboard boot menu keys (Dell, Lenovo, HP, ASUS, Acer, MSI).
 - Debugging without a debugger: COM1 serial ports and GOP visual panic screens.
 - Architectural comparison: NullOS vs. Linux vs. MIT xv6.
+
+### [Chapter 11: Filesystems & Initramfs — From Raw Bytes to Files](chapter11_filesystems_and_initramfs.md)
+- The core problem: Storage hardware sectors vs. human file and folder concepts.
+- What is an Initramfs? Overcoming the chicken-and-egg storage driver paradox.
+- The POSIX USTAR (TAR) archive format: 512-byte header blocks, octal ASCII fields, and padding.
+- Zero-copy streaming archive parsing in `#![no_std]` Rust.
+- The in-memory RamFS: Files, directories, and character device nodes (`/dev/console`, `/dev/null`, `/dev/zero`).
+
+### [Chapter 12: The Virtual File System (VFS), Inodes & File Descriptors](chapter12_vfs_inodes_and_file_descriptors.md)
+- Why an OS needs a VFS: Polymorphic file interfaces across multiple filesystem drivers.
+- Inodes vs. Dentries: Decoupling file metadata and identity from path names.
+- The `Inode` and `FileSystem` trait architecture in NullOS.
+- Path traversal and mount point prefix routing.
+- File Descriptors: Security isolation, independent read/write cursors, and standard streams (`stdin 0`, `stdout 1`, `stderr 2`).
+- Standard POSIX file syscalls: `open`, `close`, `read`, `write`, `stat`, `lseek`.

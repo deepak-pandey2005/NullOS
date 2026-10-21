@@ -232,29 +232,28 @@
 # Phase 6 — Filesystems & Storage
 
 ### M15 — Initramfs
-- [ ] CPIO parser
-- [ ] TAR parser
-- [ ] Embedded filesystem
-- [ ] File abstraction
-- [ ] Directory abstraction
-- [ ] Path resolution
-- [ ] `open`
-- [ ] `read`
-- [ ] `write`
-- [ ] `close`
-- [ ] File descriptors
+- [x] TAR (USTAR) archive parser (512-byte blocks, octal parsing, zero-copy slice extraction)
+- [x] Embedded RamFS filesystem (`/dev`, `/etc`, `/tmp`, `/bin`, `/hello.txt`)
+- [x] File abstraction (`RamFile` backed by thread-safe `Vec<u8>`)
+- [x] Directory abstraction (`RamDirectory` with child node lookup and directory nesting)
+- [x] Path resolution (absolute path canonicalization, prefix matching, relative traversal)
+- [x] `open` syscall (`SYS_OPEN = 2` with `OpenFlags` bitflags parsing)
+- [x] `read` syscall (`SYS_READ = 0` reading from file descriptors)
+- [x] `write` syscall (`SYS_WRITE = 1` writing to file descriptors & `/dev/console` stdout/stderr)
+- [x] `close` syscall (`SYS_CLOSE = 3` releasing file descriptors)
+- [x] File descriptors (`FileDescriptorTable` with stdin/stdout/stderr pre-populated)
 
 ### M16 — VFS
-- [ ] VFS abstraction
-- [ ] Inode
-- [ ] Dentry
-- [ ] File object
-- [ ] Filesystem trait
-- [ ] Mount system
-- [ ] Mount points
-- [ ] Path traversal
-- [ ] File descriptor table
-- [ ] Multiple filesystem support
+- [x] VFS abstraction (global singleton `VFS` mount table and path resolver)
+- [x] Inode (`Inode` trait with `stat`, `read_at`, `write_at`, `lookup`, `read_dir`, `create`)
+- [x] Dentry (`DirEntry` structure with inode number and `FileType`)
+- [x] File object (`FileDescriptor` with seek offset cursor, POSIX `lseek` whence support)
+- [x] Filesystem trait (`FileSystem` trait with `name()` and `root()`)
+- [x] Mount system (dynamic prefix-matching mount table with longest-prefix routing)
+- [x] Mount points (`/` root mountpoint populated with RamFS)
+- [x] Path traversal (`resolve_path` with directory validation and segment iteration)
+- [x] File descriptor table (`FileDescriptorTable` integrated into `Process` PCB)
+- [x] Multiple filesystem support (trait-based architecture ready for FAT32 / ext2)
 
 ### M17 — PCI
 - [ ] PCI configuration space

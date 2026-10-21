@@ -101,11 +101,11 @@ user_test_program_start:
     syscall
 
     # 2. SYS_GETPID: Query PID
-    mov $4, %rax                      # SYS_GETPID
+    mov $39, %rax                     # SYS_GETPID
     syscall
 
     # 3. SYS_YIELD: Voluntarily yield CPU
-    mov $3, %rax                      # SYS_YIELD
+    mov $24, %rax                     # SYS_YIELD
     syscall
 
     # 4. SYS_MMAP: Allocate 4 KiB user page at 0x60000000 (PROT_READ | PROT_WRITE)
@@ -129,7 +129,7 @@ user_test_program_start:
     syscall
 
     # 6. SYS_EXIT: Terminate process with exit code 0
-    mov $2, %rax                      # SYS_EXIT
+    mov $60, %rax                     # SYS_EXIT
     xor %rdi, %rdi                    # status = 0
     syscall
 

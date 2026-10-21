@@ -5,6 +5,7 @@ extern crate alloc;
 
 mod arch;
 mod drivers;
+mod fs;
 mod memory;
 mod sync;
 mod task;
@@ -96,9 +97,13 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     memory::init(boot_info);
     memory::run_self_tests();
 
-    // Initialize Preemptive Multitasking & Kernel Threads (Phase 4 - M10, M11)
+    // Initialize Preemptive Multitasking & Kernel Threads (Phase 4 - M10, M11 & Phase 5 - M12, M13, M14)
     task::init();
     task::run_self_tests();
+
+    // Initialize Virtual File System & Initramfs (Phase 6 - M15, M16)
+    fs::init();
+    fs::run_self_tests();
 
     println!("[KERNEL] Kernel initialization complete. CPU idling with interrupts enabled.");
 

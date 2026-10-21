@@ -59,6 +59,7 @@ pub struct Process {
     pub children: Vec<ProcessId>,
     pub threads: Vec<ThreadId>,
     pub address_space: AddressSpace,
+    pub fd_table: crate::fs::fd::FileDescriptorTable,
     pub exit_code: Option<i32>,
 }
 
@@ -76,6 +77,7 @@ impl Process {
             children: Vec::new(),
             threads: Vec::new(),
             address_space,
+            fd_table: crate::fs::fd::FileDescriptorTable::new(),
             exit_code: None,
         })
     }
@@ -125,7 +127,7 @@ impl ProcessTable {
 }
 
 /// Global thread-safe Process Table instance protected by Spinlock.
-static PROCESS_TABLE: Spinlock<ProcessTable> = Spinlock::new(ProcessTable::new());
+pub static PROCESS_TABLE: Spinlock<ProcessTable> = Spinlock::new(ProcessTable::new());
 
 /// Creates and registers a new process in the global process table.
 pub fn create_process(name: &str, parent_pid: Option<ProcessId>) -> Result<ProcessId, &'static str> {

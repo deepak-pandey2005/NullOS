@@ -7,12 +7,16 @@ use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 pub const SYS_READ: u64 = 0;
 pub const SYS_WRITE: u64 = 1;
-pub const SYS_EXIT: u64 = 2;
-pub const SYS_YIELD: u64 = 3;
-pub const SYS_GETPID: u64 = 4;
-pub const SYS_SLEEP: u64 = 5;
-pub const SYS_WAITPID: u64 = 7;
+pub const SYS_OPEN: u64 = 2;
+pub const SYS_CLOSE: u64 = 3;
+pub const SYS_STAT: u64 = 4;
+pub const SYS_LSEEK: u64 = 8;
 pub const SYS_MMAP: u64 = 9;
+pub const SYS_YIELD: u64 = 24;
+pub const SYS_GETPID: u64 = 39;
+pub const SYS_EXIT: u64 = 60;
+pub const SYS_WAITPID: u64 = 61;
+pub const SYS_SLEEP: u64 = 100;
 
 pub const PROT_READ: u64 = 1;
 pub const PROT_WRITE: u64 = 2;
@@ -80,8 +84,32 @@ pub extern "C" fn syscall_dispatcher(
     _a5: u64,
 ) -> u64 {
     match num {
-        SYS_READ => 0,
+        SYS_READ => {
+            let fd = a1 as i32;
+            let buf_ptr = a2 as *mut u8;
+            let len = a3 as usize;
+
+            if buf_ptr.is_null() || len == 0 {
+                return 0;
+            }
+
+            let proc_table = super::process::PROCESS_TABLE.lock();
+            if let Some(proc) = proc_table.get(super::process::ProcessId::INIT) {
+                if let Ok(handle) = proc.fd_table.get(fd) {
+                    let slice = unsafe { core::slice::from_raw_parts_mut(buf_ptr, len) };
+                    match handle.read(slice) {
+                        Ok(bytes) => bytes as u64,
+                        Err(_) => u64::MAX,
+                    }
+                } else {
+                    u64::MAX
+                }
+            } else {
+                u64::MAX
+            }
+        }
         SYS_WRITE => {
+            let fd = a1 as i32;
             let buf_ptr = a2 as *const u8;
             let len = a3 as usize;
 
@@ -90,11 +118,78 @@ pub extern "C" fn syscall_dispatcher(
             }
 
             let slice = unsafe { core::slice::from_raw_parts(buf_ptr, len) };
-            if let Ok(s) = core::str::from_utf8(slice) {
-                print!("{}", s);
+            if fd == 1 || fd == 2 {
+                if let Ok(s) = core::str::from_utf8(slice) {
+                    print!("{}", s);
+                } else {
+                    for &b in slice {
+                        unsafe {
+                            crate::drivers::serial::write_byte(b);
+                        }
+                    }
+                }
+                len as u64
+            } else {
+                let proc_table = super::process::PROCESS_TABLE.lock();
+                if let Some(proc) = proc_table.get(super::process::ProcessId::INIT) {
+                    if let Ok(handle) = proc.fd_table.get(fd) {
+                        match handle.write(slice) {
+                            Ok(bytes) => bytes as u64,
+                            Err(_) => u64::MAX,
+                        }
+                    } else {
+                        u64::MAX
+                    }
+                } else {
+                    u64::MAX
+                }
+            }
+        }
+        SYS_OPEN => {
+            let path_ptr = a1 as *const u8;
+            let flags_bits = a2;
+            if path_ptr.is_null() {
+                return u64::MAX;
             }
 
-            len as u64
+            let mut len = 0;
+            while len < 256 && unsafe { *path_ptr.add(len) } != 0 {
+                len += 1;
+            }
+
+            let path_slice = unsafe { core::slice::from_raw_parts(path_ptr, len) };
+            if let Ok(path) = core::str::from_utf8(path_slice) {
+                let flags = crate::fs::vfs::OpenFlags::from_bits(flags_bits);
+                match crate::fs::vfs::VFS.open(path, flags) {
+                    Ok(inode) => {
+                        let desc = alloc::sync::Arc::new(crate::fs::fd::FileDescriptor::new(inode, flags));
+                        let proc_table = super::process::PROCESS_TABLE.lock();
+                        if let Some(proc) = proc_table.get(super::process::ProcessId::INIT) {
+                            match proc.fd_table.alloc_fd(desc) {
+                                Ok(fd) => fd as u64,
+                                Err(_) => u64::MAX,
+                            }
+                        } else {
+                            u64::MAX
+                        }
+                    }
+                    Err(_) => u64::MAX,
+                }
+            } else {
+                u64::MAX
+            }
+        }
+        SYS_CLOSE => {
+            let fd = a1 as i32;
+            let proc_table = super::process::PROCESS_TABLE.lock();
+            if let Some(proc) = proc_table.get(super::process::ProcessId::INIT) {
+                match proc.fd_table.close(fd) {
+                    Ok(_) => 0,
+                    Err(_) => u64::MAX,
+                }
+            } else {
+                u64::MAX
+            }
         }
         SYS_EXIT => {
             let status = a1 as i32;
