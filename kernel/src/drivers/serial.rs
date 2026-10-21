@@ -8,6 +8,39 @@ use core::fmt;
 const COM1_DATA: u16 = 0x3F8;
 const COM1_LINE_STATUS: u16 = 0x3FD;
 const TRANSMIT_EMPTY: u8 = 0x20;
+const DATA_READY: u8 = 0x01;
+
+/// Checks if an incoming byte is available in the COM1 receive buffer.
+pub fn has_incoming_byte() -> bool {
+    unsafe {
+        let mut status: u8;
+        core::arch::asm!(
+            "in al, dx",
+            in("dx") COM1_LINE_STATUS,
+            out("al") status,
+            options(nomem, nostack),
+        );
+        (status & DATA_READY) != 0
+    }
+}
+
+/// Reads a byte from COM1 if one is available, without blocking.
+pub fn read_byte() -> Option<u8> {
+    if has_incoming_byte() {
+        unsafe {
+            let mut b: u8;
+            core::arch::asm!(
+                "in al, dx",
+                in("dx") COM1_DATA,
+                out("al") b,
+                options(nomem, nostack),
+            );
+            Some(b)
+        }
+    } else {
+        None
+    }
+}
 
 /// Write a single byte to COM1, busy-waiting until the transmit buffer is empty.
 pub unsafe fn write_byte(b: u8) {

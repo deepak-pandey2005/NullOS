@@ -105,7 +105,13 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     fs::init();
     fs::run_self_tests();
 
-    println!("[KERNEL] Kernel initialization complete. CPU idling with interrupts enabled.");
+    // Verify Interactive Shell & CLI commands (Phase 7 - Userspace Shell)
+    task::shell::run_automated_tests();
+
+    // Launch interactive shell thread
+    task::spawn("shell", task::shell::interactive_loop, 1);
+
+    println!("[KERNEL] Kernel initialization complete. Shell active, CPU idling with interrupts enabled.");
 
     loop {
         unsafe {

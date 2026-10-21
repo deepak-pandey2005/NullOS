@@ -120,6 +120,11 @@ impl ProcessTable {
         self.processes.remove(&pid)
     }
 
+    /// Returns an iterator over all processes in the table.
+    pub fn iter(&self) -> impl Iterator<Item = (&ProcessId, &Process)> {
+        self.processes.iter()
+    }
+
     /// Returns the number of processes currently in the table.
     pub fn count(&self) -> usize {
         self.processes.len()
