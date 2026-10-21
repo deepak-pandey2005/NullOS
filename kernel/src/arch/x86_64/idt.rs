@@ -118,6 +118,8 @@ unsafe extern "C" {
 pub extern "C" fn timer_handler() {
     super::apic::on_timer_tick();
     super::apic::end_of_interrupt();
+    let ticks = super::apic::get_ticks();
+    crate::task::timer_tick(ticks);
 }
 
 /// Common Rust exception dispatcher called by assembly stub

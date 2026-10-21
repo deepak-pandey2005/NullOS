@@ -160,27 +160,27 @@
 # Phase 4 — Kernel Execution
 
 ### M10 — Kernel Threads
-- [ ] Thread structure
-- [ ] Kernel stack per thread
-- [ ] Register context
-- [ ] Context switch
-- [ ] `switch_to` assembly
-- [ ] Thread creation
-- [ ] Thread termination
-- [ ] Thread states
-- [ ] Kernel thread entry point
+- [x] Thread structure
+- [x] Kernel stack per thread
+- [x] Register context
+- [x] Context switch
+- [x] `switch_to` assembly
+- [x] Thread creation
+- [x] Thread termination
+- [x] Thread states
+- [x] Kernel thread entry point
 
 ### M11 — Scheduler
-- [ ] Run queue
-- [ ] Round-robin scheduler
-- [ ] Timer-driven preemption
-- [ ] `yield()`
-- [ ] Sleep
-- [ ] Wake
-- [ ] Scheduler state
-- [ ] Thread priorities
-- [ ] Scheduler statistics
-- [ ] Context-switch benchmark
+- [x] Run queue
+- [x] Round-robin scheduler
+- [x] Timer-driven preemption
+- [x] `yield()`
+- [x] Sleep
+- [x] Wake
+- [x] Scheduler state
+- [x] Thread priorities
+- [x] Scheduler statistics
+- [x] Context-switch benchmark
 
 ---
 

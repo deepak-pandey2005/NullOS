@@ -4,11 +4,13 @@ use std::path::PathBuf;
 fn main() {
     println!("cargo:rerun-if-changed=src/arch/x86_64/entry.S");
     println!("cargo:rerun-if-changed=src/arch/x86_64/interrupts.S");
+    println!("cargo:rerun-if-changed=src/arch/x86_64/switch.S");
     println!("cargo:rerun-if-changed=../linker/x86_64.ld");
 
     cc::Build::new()
         .file("src/arch/x86_64/entry.S")
         .file("src/arch/x86_64/interrupts.S")
+        .file("src/arch/x86_64/switch.S")
         .flag("-ffreestanding")
         .flag("-fno-stack-protector")
         .flag("-mno-red-zone")
