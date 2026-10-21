@@ -2,7 +2,9 @@
 
 *A custom, bare-metal 64-bit operating system for the `x86_64` architecture, built using `C++20` , `Rust` and Assembly. initializing essential kernel subsystems from scratch.*
 
-> 📖 **Architecture & Implementation Documentation**: See the [**Docs Directory**](docs/README.md) for architectural blueprints, execution flows, and detailed subsystem guides.
+> 📖 **Architecture & Subsystems Documentation**: See the [**Docs Directory**](docs/README.md).
+>
+> 🎓 **Learning Operating Systems from Scratch?** Read the [**Absolute Beginner's Guide to Operating Systems & NullOS**](docs/BEGINNERS_GUIDE.md) — an in-depth, first-principles textbook explaining the GDT, TSS, ISRs (hardware vs. software interrupts), 4-level paging, and Ring 3 user mode!
 
 # NullOS — Milestone Roadmap
 

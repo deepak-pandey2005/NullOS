@@ -8,6 +8,9 @@ This documentation serves as an architectural blueprint, implementation guide, a
 
 ## Table of Contents
 
+### 🎓 Educational Guides
+- [**The Absolute Beginner's Guide to Operating Systems & NullOS**](BEGINNERS_GUIDE.md) — Complete first-principles guide explaining what an OS is, GDT/TSS, ISRs (hardware vs. software), 4-level paging, preemptive scheduling, and Ring 3 user mode.
+
 ### 1. Architecture & Execution Flow
 - [**Boot and Execution Flow**](architecture/boot_flow.md) — Step-by-step lifecycle from UEFI firmware initialization to kernel idle loop.
 - [**System Memory Layout**](architecture/memory_layout.md) — Address spaces, physical memory partitioning, and framebuffer mapping.
