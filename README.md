@@ -617,19 +617,41 @@
 - [x] M3
 
 ## Checkpoint 2 — Real Kernel
-- [ ] M4
-- [ ] M5
-- [ ] M6
-- [ ] M7
-- [ ] M8
-- [ ] M9
+- [x] M4
+- [x] M5
+- [x] M6
+- [x] M7
+- [x] M8
+- [x] M9
 
 ## Checkpoint 3 — Multitasking OS
-- [ ] M10
-- [ ] M11
-- [ ] M12
-- [ ] M13
+- [x] M10
+- [x] M11
+- [x] M12
+- [x] M13
 - [ ] M14
+
+---
+
+# Running on Real Hardware (Bare-Metal USB Boot)
+
+NullOS is a standard 64-bit UEFI operating system that boots natively on real physical hardware (PCs and laptops).
+
+### Creating a Bootable USB:
+Plug in your USB flash drive and run:
+```bash
+sudo ./scripts/create_bootable_usb.sh
+```
+Or specify the target drive directly:
+```bash
+sudo ./scripts/create_bootable_usb.sh --device /dev/sdX
+```
+
+### Hardware Boot Requirements:
+1. **Disable Secure Boot** in your motherboard/laptop BIOS (as NullOS is custom OS code and not signed by Microsoft's CA).
+2. **UEFI Mode**: Ensure UEFI boot mode is enabled (do not use CSM / Legacy BIOS mode).
+3. **Boot Menu**: Press your PC's boot menu hotkey (F12, F11, F9, or F8 depending on manufacturer) and select `UEFI: <USB Drive>`.
+4. The OS will boot through `BOOTX64.EFI`, initialize the GOP framebuffer display, and run kernel diagnostics & Ring 3 user mode directly on the screen.
 
 ## Checkpoint 4 — Usable OS
 - [ ] M15
