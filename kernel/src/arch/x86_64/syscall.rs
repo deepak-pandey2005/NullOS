@@ -15,6 +15,15 @@ unsafe extern "C" {
     pub fn user_fault_program_start();
     pub fn user_fault_program_end();
     pub static kernel_syscall_stack_top: u8;
+    pub static mut current_kernel_rsp: u64;
+}
+
+/// Sets the active thread's kernel stack top loaded on SYSCALL instruction entry.
+#[inline]
+pub fn set_kernel_rsp(rsp: u64) {
+    unsafe {
+        current_kernel_rsp = rsp;
+    }
 }
 
 #[inline]

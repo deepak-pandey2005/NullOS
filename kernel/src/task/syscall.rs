@@ -385,9 +385,6 @@ fn user_thread_runner() {
 fn user_fault_runner() {
     println!("[USER CRASH TEST] Entering Ring 3 to execute deliberate faulting instruction...");
     unsafe {
-        let syscall_stack_top = core::ptr::addr_of!(crate::arch::x86_64::syscall::kernel_syscall_stack_top) as u64;
-        crate::arch::x86_64::gdt::set_tss_rsp0(syscall_stack_top);
-
         crate::arch::x86_64::syscall::enter_user_mode(
             USER_FAULT_CODE_VADDR,
             USER_STACK_TOP,

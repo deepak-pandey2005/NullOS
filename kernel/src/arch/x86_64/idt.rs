@@ -149,10 +149,17 @@ pub extern "C" fn exception_handler(ctx: &ExceptionContext) {
         _ => "Unknown Exception",
     };
 
+    let is_user = (ctx.cs & 3) == 3;
     crate::println!();
-    crate::println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-    crate::println!("                CPU EXCEPTION                   ");
-    crate::println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+    if is_user {
+        crate::println!("------------------------------------------------");
+        crate::println!("        USER MODE CPU EXCEPTION (HANDLED)       ");
+        crate::println!("------------------------------------------------");
+    } else {
+        crate::println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+        crate::println!("          KERNEL CPU EXCEPTION PANIC            ");
+        crate::println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+    }
     crate::println!("Exception: {} (Vector: {})", name, ctx.vector);
     crate::println!("Error Code: {:#018x}", ctx.error_code);
 
@@ -185,18 +192,22 @@ pub extern "C" fn exception_handler(ctx: &ExceptionContext) {
     crate::println!("RBP: {:#018x}   R8:  {:#018x}   R9:  {:#018x}", ctx.rbp, ctx.r8, ctx.r9);
     crate::println!("R10: {:#018x}   R11: {:#018x}   R12: {:#018x}", ctx.r10, ctx.r11, ctx.r12);
     crate::println!("R13: {:#018x}   R14: {:#018x}   R15: {:#018x}", ctx.r13, ctx.r14, ctx.r15);
-    crate::println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+    if is_user {
+        crate::println!("------------------------------------------------");
+    } else {
+        crate::println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+    }
 
     // Check if the fault occurred in Ring 3 User Mode (CPL == 3)
-    if (ctx.cs & 3) == 3 {
+    if is_user {
         crate::println!();
         crate::println!(
-            "\x1b[31;1m[USER CRASH]\x1b[0m User mode process crashed with {} (vector {}) at RIP: {:#018x}!",
+            "\x1b[31;1m[USER CRASH]\x1b[0m User mode process encountered {} (vector {}) at RIP: {:#018x}!",
             name,
             ctx.vector,
             ctx.rip
         );
-        crate::println!("\x1b[33m[USER CRASH]\x1b[0m Terminating faulting user thread cleanly and continuing OS execution...");
+        crate::println!("\x1b[32m[USER CRASH]\x1b[0m Kernel successfully caught user fault. Terminating user thread cleanly and continuing OS execution...");
         crate::task::exit();
     }
 

@@ -129,6 +129,16 @@ pub trait Inode: Send + Sync {
 
     /// Creates a new child file or directory under this directory.
     fn create(&self, name: &str, file_type: FileType) -> Result<Arc<dyn Inode>, FsError>;
+
+    /// Truncates file length to `size` bytes.
+    fn truncate(&self, _size: usize) -> Result<(), FsError> {
+        Ok(())
+    }
+
+    /// Removes a child entry by name from this directory.
+    fn unlink(&self, _name: &str) -> Result<(), FsError> {
+        Err(FsError::Unsupported)
+    }
 }
 
 /// Core FileSystem trait implemented by file system drivers (Initramfs, FAT32, ext2).
@@ -215,17 +225,31 @@ impl Vfs {
 
     /// Opens an inode with the given flags.
     pub fn open(&self, path: &str, flags: OpenFlags) -> Result<Arc<dyn Inode>, FsError> {
-        match self.resolve_path(path) {
-            Ok(inode) => Ok(inode),
+        let inode = match self.resolve_path(path) {
+            Ok(inode) => {
+                if flags.truncate {
+                    inode.truncate(0)?;
+                }
+                inode
+            }
             Err(FsError::NotFound) if flags.create => {
                 // If create flag set, find parent directory and create file
                 let clean = clean_path(path);
                 let (parent_path, file_name) = split_path(&clean)?;
                 let parent_inode = self.resolve_path(parent_path)?;
-                parent_inode.create(file_name, FileType::File)
+                parent_inode.create(file_name, FileType::File)?
             }
-            Err(e) => Err(e),
-        }
+            Err(e) => return Err(e),
+        };
+        Ok(inode)
+    }
+
+    /// Unlinks (removes) a file or child node from its parent directory.
+    pub fn unlink(&self, path: &str) -> Result<(), FsError> {
+        let clean = clean_path(path);
+        let (parent_path, leaf) = split_path(&clean)?;
+        let parent_inode = self.resolve_path(parent_path)?;
+        parent_inode.unlink(leaf)
     }
 }
 

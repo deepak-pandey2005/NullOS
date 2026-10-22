@@ -85,6 +85,8 @@ pub unsafe fn write_byte(b: u8) {
     }
 }
 
+pub static SERIAL_LOCK: crate::sync::Spinlock<()> = crate::sync::Spinlock::new(());
+
 /// Write a string slice to COM1 and to the framebuffer console (if initialized).
 pub fn write_str(s: &str) {
     for b in s.bytes() {
@@ -106,18 +108,19 @@ impl fmt::Write for SerialWriter {
     }
 }
 
-/// Print formatted text to COM1 serial port.
+/// Print formatted text to COM1 serial port atomically across threads.
 ///
 /// Usage: `print!("Hello, {}!", "world");`
 #[macro_export]
 macro_rules! print {
     ($($arg:tt)*) => {{
         use core::fmt::Write;
+        let _guard = $crate::drivers::serial::SERIAL_LOCK.lock();
         let _ = write!($crate::drivers::serial::SerialWriter, $($arg)*);
     }};
 }
 
-/// Print formatted text to COM1 serial port, followed by a newline.
+/// Print formatted text to COM1 serial port, followed by a newline atomically across threads.
 ///
 /// Usage: `println!("Value: {:#x}", 42);`
 #[macro_export]
@@ -125,6 +128,7 @@ macro_rules! println {
     () => ($crate::print!("\n"));
     ($($arg:tt)*) => {{
         use core::fmt::Write;
+        let _guard = $crate::drivers::serial::SERIAL_LOCK.lock();
         let _ = writeln!($crate::drivers::serial::SerialWriter, $($arg)*);
     }};
 }

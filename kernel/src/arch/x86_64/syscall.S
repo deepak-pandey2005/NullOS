@@ -10,8 +10,8 @@ syscall_entry:
     # 1. Save user %rsp into scratch variable
     mov %rsp, user_rsp_scratch(%rip)
 
-    # 2. Switch to the dedicated kernel syscall stack
-    lea kernel_syscall_stack_top(%rip), %rsp
+    # 2. Switch to the active thread's kernel stack
+    mov current_kernel_rsp(%rip), %rsp
 
     # 3. Save user execution context on kernel stack:
     # Save user %rsp, %r11 (user RFLAGS), and %rcx (user RIP)
@@ -171,8 +171,12 @@ user_fault_program_end:
 user_rsp_scratch:
     .quad 0
 
+.global current_kernel_rsp
+current_kernel_rsp:
+    .quad 0
+
 .global kernel_syscall_stack_bottom
 .global kernel_syscall_stack_top
 kernel_syscall_stack_bottom:
-    .skip 16384     # 16 KiB kernel syscall stack
+    .skip 16384     # 16 KiB fallback kernel syscall stack
 kernel_syscall_stack_top:

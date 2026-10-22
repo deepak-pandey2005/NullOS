@@ -160,6 +160,22 @@ pub fn exit_process(pid: ProcessId, exit_code: i32) {
     }
 }
 
+/// Terminates a process by PID with a given signal / exit code.
+pub fn kill_process(pid: ProcessId, signal: i32) -> Result<(), &'static str> {
+    if pid == ProcessId::INIT {
+        return Err("Cannot kill init process (PID 1)");
+    }
+    let mut table = PROCESS_TABLE.lock();
+    if let Some(proc) = table.get_mut(pid) {
+        println!("[PROCESS] Terminating process #{} \"{}\" with signal {}", pid.0, proc.name, signal);
+        proc.state = ProcessState::Zombie(signal);
+        proc.exit_code = Some(signal);
+        Ok(())
+    } else {
+        Err("Process not found")
+    }
+}
+
 /// Waits for a child process to terminate and reaps its exit status (reaping a zombie).
 /// If `target` is `None`, waits for any child. If `Some(pid)`, waits specifically for that child.
 pub fn waitpid(parent_pid: ProcessId, target: Option<ProcessId>) -> Result<(ProcessId, i32), &'static str> {
@@ -264,8 +280,6 @@ fn user_exec_runner() {
         pid.0, entry_point, user_stack_top
     );
     unsafe {
-        let syscall_stack_top = core::ptr::addr_of!(crate::arch::x86_64::syscall::kernel_syscall_stack_top) as u64;
-        crate::arch::x86_64::gdt::set_tss_rsp0(syscall_stack_top);
         crate::arch::x86_64::syscall::enter_user_mode(entry_point, user_stack_top);
     }
 }

@@ -18,6 +18,7 @@ pub struct Scheduler {
     current: Option<Box<Thread>>,
     ready_queue: VecDeque<Box<Thread>>,
     sleeping_queue: Vec<Box<Thread>>,
+    dead_threads: Vec<Box<Thread>>,
     total_switches: u64,
 }
 
@@ -29,6 +30,7 @@ impl Scheduler {
             current: None,
             ready_queue: VecDeque::new(),
             sleeping_queue: Vec::new(),
+            dead_threads: Vec::new(),
             total_switches: 0,
         }
     }
@@ -38,7 +40,10 @@ impl Scheduler {
 pub fn init() {
     let mut sched = Scheduler::new();
     // Establish main kernel execution context as Thread 0
-    sched.current = Some(Box::new(Thread::new_main()));
+    let main_thread = Box::new(Thread::new_main());
+    crate::arch::x86_64::gdt::set_tss_rsp0(main_thread.stack.top());
+    crate::arch::x86_64::syscall::set_kernel_rsp(main_thread.stack.top());
+    sched.current = Some(main_thread);
     *SCHEDULER.lock() = Some(sched);
 
     println!("[TASK] Preemptive Thread Scheduler initialized (main thread active).");
@@ -66,6 +71,9 @@ pub fn yield_now() {
             None => return,
         };
 
+        // Safely reap terminated threads now that we are on a valid running stack
+        sched.dead_threads.clear();
+
         // If no other threads are ready, keep running
         if sched.ready_queue.is_empty() {
             return;
@@ -92,6 +100,8 @@ pub fn yield_now() {
             sched.ready_queue.push_back(current);
         }
 
+        crate::arch::x86_64::gdt::set_tss_rsp0(next.stack.top());
+        crate::arch::x86_64::syscall::set_kernel_rsp(next.stack.top());
         sched.current = Some(next);
 
         (prev_rsp_ptr, next_rsp)
@@ -111,6 +121,9 @@ pub fn timer_tick(current_tick: u64) {
             Some(s) => s,
             None => return,
         };
+
+        // Safely reap terminated threads
+        sched.dead_threads.clear();
 
         // 1. Wake up sleeping threads
         let mut i = 0;
@@ -154,6 +167,8 @@ pub fn timer_tick(current_tick: u64) {
             sched.ready_queue.push_back(current);
         }
 
+        crate::arch::x86_64::gdt::set_tss_rsp0(next.stack.top());
+        crate::arch::x86_64::syscall::set_kernel_rsp(next.stack.top());
         sched.current = Some(next);
 
         (prev_rsp_ptr, next_rsp)
@@ -197,6 +212,8 @@ pub fn sleep(ticks: u64) {
         let next_rsp = next.rsp;
 
         sched.sleeping_queue.push(current);
+        crate::arch::x86_64::gdt::set_tss_rsp0(next.stack.top());
+        crate::arch::x86_64::syscall::set_kernel_rsp(next.stack.top());
         sched.current = Some(next);
 
         (prev_rsp_ptr, next_rsp)
@@ -216,13 +233,16 @@ pub fn exit() -> ! {
         if let Some(mut current) = sched.current.take() {
             println!("[TASK] Thread #{} \"{}\" finished (total ticks: {}).", current.id.0, current.name, current.total_ticks);
             current.state = ThreadState::Terminated;
-            // Thread drops here, freeing its stack automatically!
+            // Defer dropping until we are running on another thread's stack!
+            sched.dead_threads.push(current);
         }
 
         // Schedule next thread
         if let Some(mut next) = sched.ready_queue.pop_front() {
             next.state = ThreadState::Running;
             let rsp = next.rsp;
+            crate::arch::x86_64::gdt::set_tss_rsp0(next.stack.top());
+            crate::arch::x86_64::syscall::set_kernel_rsp(next.stack.top());
             sched.current = Some(next);
             sched.total_switches += 1;
             rsp

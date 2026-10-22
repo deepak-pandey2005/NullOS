@@ -153,6 +153,17 @@ Welcome to the comprehensive textbook documentation for **NullOS**. This curricu
 - Cross-compilation and static linking of standalone user ELF binaries linked at `0x400000`.
 - Process execution lifecycle: Dedicated PML4 address space, Ring 3 transition, and child zombie harvesting via `waitpid`.
 
+### [Chapter 18: The Unix Shell — Pipelines, Redirection, Environment Variables & Job Control](chapter18_shell_pipelines_redirection_and_jobs.md)
+- Lexical analysis, word splitting, and quote preservation (`'...'` vs. `"..."`).
+- Environment variable management (`$PATH`, `$USER`, `$PWD`, etc.), `export`, `env`, and `unset`.
+- Dynamic lexical expansion: `$VAR`, `${VAR}`, exit status `$?`, and process ID `$$`.
+- Standard I/O redirection: Input (`<`), truncate (`>`), and append (`>>`) via VFS inodes.
+- Multi-stage pipeline architecture (`cmd1 | cmd2 | cmd3`) with in-memory stream composition.
+- Built-in Unix utilities: `grep`, `wc`, `head`, `tail`, `pwd`, `cd`, `rm`, `kill`.
+- Asynchronous background execution (`cmd &`) and zero-heap job table tracking (`jobs`).
+- Ring 3 ELF binary loading and execution from both RamFS and persistent FAT32 storage.
+
+
 
 
 

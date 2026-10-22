@@ -320,20 +320,20 @@
 - [x] Minimal C runtime (`crt0.s` entry point `_start`, 16-byte stack alignment per System V AMD64 ABI, invoking `main(argc, argv)`, and calling `exit()`)
 
 ### M22 — Shell
-- [x] Command parser (tokenization and argument splitting)
-- [ ] Environment variables
-- [x] Built-in commands (`help`, `clear`, `echo`, `ls`, `cat`, `touch`, `write`, `ps`, `lspci`, `disks`, `mem`, `uptime`, `reboot`, `exec`)
+- [x] Command parser (tokenization, quotes `'...'` vs `"..."`, and argument splitting)
+- [x] Environment variables (global `ENV_VARS`, `export`, `env`, `unset`, `$VAR`, `${VAR}`, `$?`, `$$`)
+- [x] Built-in commands (`help`, `clear`, `echo`, `pwd`, `cd`, `ls`, `cat`, `touch`, `write`, `rm`, `grep`, `wc`, `head`, `tail`, `env`, `export`, `unset`, `ps`, `jobs`, `kill`, `lspci`, `disks`, `mem`, `uptime`, `reboot`, `exec`)
 - [x] Program execution (direct execution of Ring 3 ELF binaries from RamFS `/bin/` or persistent FAT32 `/disk/` with dedicated PML4 address space)
-
-- [ ] Pipes
-- [ ] Redirection
-- [ ] Background processes
-- [ ] Job control
+- [x] Pipes (`cmd1 | cmd2 | cmd3` multi-stage synchronous pipelines with stream passing)
+- [x] Redirection (standard input `< file`, truncate output `> file`, append output `>> file`)
+- [x] Background processes (asynchronous background execution `cmd &` via dedicated worker threads)
+- [x] Job control (zero-heap fixed-buffer `Job` table and `jobs` status monitor)
 - [x] `ls` (directory listing via VFS Inode traversal)
-- [x] `cat` (read file contents via VFS)
-- [x] `echo` (print arguments to console)
+- [x] `cat` (read file contents via VFS or stream input)
+- [x] `echo` (print arguments to console with variable expansion)
 - [x] `ps` (display active processes, PIDs, and states from `ProcessTable`)
-- [ ] `kill`
+- [x] `kill` (signal delivery and process termination handling)
+
 
 ---
 

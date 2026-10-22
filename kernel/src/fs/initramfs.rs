@@ -80,6 +80,12 @@ impl Inode for RamFile {
     fn create(&self, _name: &str, _file_type: FileType) -> Result<Arc<dyn Inode>, FsError> {
         Err(FsError::NotADirectory)
     }
+
+    fn truncate(&self, size: usize) -> Result<(), FsError> {
+        let mut data = self.data.lock();
+        data.truncate(size);
+        Ok(())
+    }
 }
 
 /// An in-memory directory node.
@@ -168,6 +174,16 @@ impl Inode for RamDirectory {
 
         children.insert(name.to_string(), new_node.clone());
         Ok(new_node)
+    }
+
+    fn unlink(&self, name: &str) -> Result<(), FsError> {
+        let mut children = self.children.lock();
+        if children.remove(name).is_some() {
+            self.dirs.lock().remove(name);
+            Ok(())
+        } else {
+            Err(FsError::NotFound)
+        }
     }
 }
 

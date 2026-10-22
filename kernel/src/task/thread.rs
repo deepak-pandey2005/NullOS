@@ -46,7 +46,7 @@ impl KernelStack {
 
     #[inline]
     pub fn top(&self) -> u64 {
-        self.bottom() + (self.memory.len() as u64)
+        (self.bottom() + (self.memory.len() as u64)) & !0xF
     }
 }
 
@@ -107,19 +107,21 @@ impl Thread {
                 *ptr = val;
             };
 
-            // 1. Thread entry point (popped by `ret` in switch_threads)
+            // 1. Thread entry point (popped 8th by `ret` in switch_threads)
             push(&mut sp, thread_entry_wrapper as *const () as usize as u64);
 
-            // 2. Initial RFLAGS (0x202 = Reserved bit 1 set + IF bit 9 set)
-            push(&mut sp, 0x202);
+            // 2. Callee-saved registers (popped in reverse order of switch_threads pushes)
+            // switch_threads pushes: r15, r14, r13, r12, rbx, rbp, flags
+            // switch_threads pops:   flags, rbp, rbx, r12, r13, r14, r15, ret
+            push(&mut sp, 0); // %r15 (popped 7th)
+            push(&mut sp, 0); // %r14 (popped 6th)
+            push(&mut sp, 0); // %r13 (popped 5th)
+            push(&mut sp, entry as *const () as usize as u64); // %r12 (popped 4th by switch_threads)
+            push(&mut sp, 0); // %rbx (popped 3rd)
+            push(&mut sp, 0); // %rbp (popped 2nd)
 
-            // 3. Callee-saved registers (popped in reverse order)
-            push(&mut sp, 0); // %rbp
-            push(&mut sp, 0); // %rbx
-            push(&mut sp, entry as *const () as usize as u64); // %r12 = entry function pointer
-            push(&mut sp, 0); // %r13
-            push(&mut sp, 0); // %r14
-            push(&mut sp, 0); // %r15
+            // 3. Initial RFLAGS (popped 1st by `popfq`)
+            push(&mut sp, 0x202); // RFLAGS with IF enabled
         }
 
         Self {
@@ -140,7 +142,7 @@ impl Thread {
             id: ThreadId(0),
             name: String::from("kernel_main"),
             state: ThreadState::Running,
-            stack: KernelStack::new(1024), // Placeholder stack structure
+            stack: KernelStack::new(DEFAULT_STACK_SIZE),
             rsp: 0,
             priority: 0,
             total_ticks: 0,
