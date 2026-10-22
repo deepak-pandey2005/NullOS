@@ -47,6 +47,7 @@ pub fn execute_command(line: &str) {
             println!("  touch <path>         - Create an empty file");
             println!("  write <path> <text>  - Write text string to a file");
             println!("  ps                   - List active processes & threads");
+            println!("  lspci                - List all discovered PCI hardware devices");
             println!("  mem                  - Display physical memory statistics");
             println!("  uptime               - Display system timer ticks");
             println!("  reboot               - Reboot physical / virtual machine");
@@ -182,6 +183,21 @@ pub fn execute_command(line: &str) {
                 println!("{:<6} {:<16} {:<12} {:<8}", pid.as_u64(), proc.name, state_str, proc.threads.len());
             }
         }
+        "lspci" => {
+            let devices = crate::drivers::pci::PCI_DEVICES.lock();
+            println!("{:<8} {:<10} {:<32} {}", "SLOT", "ID", "CLASS", "VENDOR");
+            println!("{:-<68}", "");
+            for dev in devices.iter() {
+                println!(
+                    "{:<8} {:04x}:{:04x}  {:<32} {}",
+                    dev.address,
+                    dev.vendor_id,
+                    dev.device_id,
+                    dev.class_name(),
+                    dev.vendor_name()
+                );
+            }
+        }
         "mem" => {
             println!("Physical Memory Manager (PMM):");
             println!("  Page frame size: 4 KiB (4,096 bytes)");
@@ -246,6 +262,9 @@ pub fn run_automated_tests() {
 
     println!("[SHELL] Testing 'ps'...");
     execute_command("ps");
+
+    println!("[SHELL] Testing 'lspci'...");
+    execute_command("lspci");
 
     println!("[SHELL] Testing 'mem'...");
     execute_command("mem");

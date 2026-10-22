@@ -1,5 +1,5 @@
 # NullOS: The Complete Operating Systems Course
-### *A 12-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
+### *A 13-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
 
 Welcome to the comprehensive textbook documentation for **NullOS**. This curriculum teaches operating system engineering from absolute first principles: starting from raw motherboard electricity and transistors, all the way to multitasking, 4-level paging, and Ring 3 user mode with fast hardware system calls.
 
@@ -108,3 +108,13 @@ Welcome to the comprehensive textbook documentation for **NullOS**. This curricu
 - Path traversal and mount point prefix routing.
 - File Descriptors: Security isolation, independent read/write cursors, and standard streams (`stdin 0`, `stdout 1`, `stderr 2`).
 - Standard POSIX file syscalls: `open`, `close`, `read`, `write`, `stat`, `lseek`.
+
+### [Chapter 13: The PCI Bus, Hardware Discovery & Base Address Registers (BARs)](chapter13_pci_bus_and_device_discovery.md)
+- How an OS discovers physical motherboard hardware without hardcoded addresses.
+- Accessing PCI configuration space via I/O ports `0xCF8` (`CONFIG_ADDRESS`) and `0xCFC` (`CONFIG_DATA`).
+- The 32-bit `CONFIG_ADDRESS` format (Bus, Device, Function, Register offset).
+- The standardized 64-byte Type 0x00 PCI configuration header.
+- Base Address Registers (BARs): Memory-Mapped I/O (MMIO 32/64-bit) vs. Port I/O.
+- The BAR sizing algorithm: Probing address spaces by writing all 1s.
+- The PCI Command Register: Enabling Bus Mastering (DMA), MMIO, and Port I/O.
+- Capabilities linked lists: Discovering MSI, MSI-X, SATA, and PCIe extensions.

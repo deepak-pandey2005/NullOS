@@ -256,16 +256,16 @@
 - [x] Multiple filesystem support (trait-based architecture ready for FAT32 / ext2)
 
 ### M17 — PCI
-- [ ] PCI configuration space
-- [ ] PCI bus enumeration
-- [ ] PCI device discovery
-- [ ] Vendor/device IDs
-- [ ] BAR discovery
-- [ ] MMIO
-- [ ] I/O ports
-- [ ] MSI
-- [ ] MSI-X
-- [ ] PCI driver abstraction
+- [x] PCI configuration space (I/O ports `0xCF8` `CONFIG_ADDRESS` and `0xCFC` `CONFIG_DATA`)
+- [x] PCI bus enumeration (256 buses, 32 devices, 8 functions scanning)
+- [x] PCI device discovery (detection of Host Bridge, VGA, ISA, SATA/AHCI, SMBus)
+- [x] Vendor/device IDs (decoding Intel `0x8086`, QEMU `0x1234`, Red Hat VirtIO `0x1AF4`)
+- [x] BAR discovery (32-bit MMIO, 64-bit MMIO, and Port I/O hardware size probing)
+- [x] MMIO (address extraction, prefetchable flag detection)
+- [x] I/O ports (base port address and size detection)
+- [x] MSI (Message Signaled Interrupts capability linked-list discovery)
+- [x] MSI-X (MSI-X capability structure decoding)
+- [x] PCI driver abstraction (`PciDevice` with `enable_bus_mastering`, `enable_memory_space`, `enable_io_space`, `find_device`, `find_by_class`, and `lspci` shell command)
 
 ### M18 — VirtIO Block
 - [ ] VirtIO transport

@@ -106,6 +106,10 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     fs::init();
     fs::run_self_tests();
 
+    // Initialize PCI Bus Enumeration & Hardware Device Discovery (Phase 6 - M17 PCI)
+    drivers::pci::init();
+    drivers::pci::run_self_tests();
+
     // Verify Interactive Shell & CLI commands (Phase 7 - Userspace Shell)
     task::shell::run_automated_tests();
 
