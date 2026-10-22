@@ -340,14 +340,15 @@
 # Phase 8 — Networking
 
 ### M23 — Network Driver
-- [ ] VirtIO network
-- [ ] Virtqueues
-- [ ] RX queues
-- [ ] TX queues
-- [ ] Network buffers
-- [ ] DMA
-- [ ] MAC address
-- [ ] Interrupt handling
+- [x] VirtIO network (PCI discovery Vendor `0x1AF4`, Device `0x1000` / `0x1041`)
+- [x] Virtqueues (Split virtqueues: Queue 0 RX and Queue 1 TX)
+- [x] RX queues (Pre-populated receive descriptor ring with 32 buffers)
+- [x] TX queues (Synchronous packet transmission ring with header chaining)
+- [x] Network buffers (Ethernet MTU 1500 + 10-byte `VirtIoNetHdr` DMA buffers)
+- [x] DMA (Direct physical frame mapping and memory fences)
+- [x] MAC address (Hardware MAC discovery from PCI config space `0x14..0x19`)
+- [x] Interrupt handling & status polling (ISR status acknowledgement and queue notify kicks)
+
 
 ### M24 — Network Stack
 - [ ] Ethernet

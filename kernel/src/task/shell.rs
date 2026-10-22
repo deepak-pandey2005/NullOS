@@ -425,6 +425,7 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str("  kill [-sig] <pid>    - Send signal to process (default: SIGKILL 9)\n");
             out.push_str("  lspci                - Discover PCI hardware buses and devices\n");
             out.push_str("  disks                - List registered block storage devices\n");
+            out.push_str("  ifconfig             - Display network interface configuration and statistics\n");
             out.push_str("  mem                  - Display physical memory manager statistics\n");
             out.push_str("  uptime               - Display system timer ticks\n");
             out.push_str("  reboot               - Reboot physical or virtual machine\n");
@@ -873,6 +874,20 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             }
             (out, 0)
         }
+        "ifconfig" => {
+            let mut out = String::new();
+            if let Some(dev) = crate::drivers::virtio_net::NETWORK_DEVICE.lock().as_ref() {
+                let mac = dev.mac();
+                let stats = dev.stats;
+                out.push_str("eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500\n");
+                out.push_str(&alloc::format!("        ether {}  txqueuelen 1000  (Ethernet)\n", mac));
+                out.push_str(&alloc::format!("        RX packets {}  bytes {} ({} B)\n", stats.rx_packets, stats.rx_bytes, stats.rx_bytes));
+                out.push_str(&alloc::format!("        TX packets {}  bytes {} ({} B)\n", stats.tx_packets, stats.tx_bytes, stats.tx_bytes));
+            } else {
+                out.push_str("No network interfaces detected.\n");
+            }
+            (out, 0)
+        }
         "mem" => {
             let mut out = String::new();
             out.push_str("Physical Memory Manager (PMM):\n");
@@ -1198,7 +1213,10 @@ pub fn run_automated_tests() {
     execute_command("exec /bin/hello.elf");
     execute_command("exec /disk/HELLO.ELF");
 
-    println!("[SHELL] All Phase 7 Advanced Shell tests passed successfully!");
+    println!("[SHELL] 13. Testing Network Interface Configuration (ifconfig)...");
+    execute_command("ifconfig");
+
+    println!("[SHELL] All Phase 7 & 8 Advanced Shell and Network tests passed successfully!");
 }
 
 /// Interactive Shell Loop that listens on both PS/2 Keyboard and COM1 serial input

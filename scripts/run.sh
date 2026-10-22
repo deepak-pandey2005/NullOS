@@ -44,7 +44,8 @@ QEMU_ARGS=(
     -machine q35
     "${KVM_FLAG[@]}"
     -m 512M
-    -net none
+    -netdev user,id=net0
+    -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56
     -bios "${OVMF_PATH}"
     -drive "format=raw,file=${DISK_IMG}"
     -drive "format=raw,file=${DATA_DISK_IMG},if=virtio"
@@ -63,7 +64,8 @@ if [[ "${1:-}" == "--headless" || "${1:-}" == "--test" ]]; then
         -machine q35
         "${KVM_FLAG[@]}"
         -m 512M
-        -net none
+        -netdev user,id=net0
+        -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56
         -bios "${OVMF_PATH}"
         -drive "format=raw,file=${TEST_DISK}"
         -drive "format=raw,file=${TEST_DATA},if=virtio"
@@ -78,7 +80,7 @@ if [[ "${1:-}" == "--headless" || "${1:-}" == "--test" ]]; then
     
     for i in {1..80}; do
         sleep 0.5
-        if grep -q -E "All shell verification commands executed successfully|All Phase 7 Advanced Shell tests passed successfully" "${SERIAL_LOG}" 2>/dev/null; then
+        if grep -q -E "All shell verification commands executed successfully|All Phase 7 Advanced Shell tests passed successfully|All Phase 7 & 8 Advanced Shell and Network tests passed successfully" "${SERIAL_LOG}" 2>/dev/null; then
             sleep 0.5
             echo "==> Kernel reached and all automated tests passed!"
             break

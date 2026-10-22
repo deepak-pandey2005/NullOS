@@ -117,9 +117,14 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // Mount Persistent Block Storage Filesystems (Phase 6 - M19 Filesystems)
     fs::mount_block_devices();
 
+    // Initialize VirtIO Network Subsystem (Phase 8 - M23 Network Driver)
+    drivers::virtio_net::init();
+    drivers::virtio_net::run_self_tests();
+
     // Initialize PS/2 Keyboard Driver (Scan Code Set 1 & Input Decoding)
     drivers::keyboard::init();
     drivers::keyboard::run_self_tests();
+
 
     // Verify Interactive Shell & CLI commands (Phase 7 - Userspace Shell)
     task::shell::run_automated_tests();
