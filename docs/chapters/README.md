@@ -143,5 +143,16 @@ Welcome to the comprehensive textbook documentation for **NullOS**. This curricu
 - Linux ext2 architecture: Superblock at byte 1024 (`0xEF53`), block groups, and direct/indirect block pointers.
 - Mounting block devices to VFS mount points (`/disk`, `/mnt`) for transparent file access.
 
+### [Chapter 17: The C Standard Library (libc) & Userspace Runtime](chapter17_c_standard_library_libc_and_runtime.md)
+- The bridge between kernel and user application space.
+- The C runtime startup (`crt0.s`): Stack alignment per System V AMD64 ABI, calling `main(argc, argv)`, and calling `exit()`.
+- Fast inline assembly system call wrappers (`syscall0`..`syscall6`) mapping to x86_64 `syscall` / `sysretq`.
+- Standard string and memory primitives (`string.h`) implemented from first principles.
+- Dynamic heap memory allocator (`stdlib.h`): Boundary tag allocator with free-list coalescing powered by `SYS_MMAP`.
+- Formatted stream I/O (`stdio.h`): `printf`, `vsnprintf`, `fopen`, `fread`, and `fwrite`.
+- Cross-compilation and static linking of standalone user ELF binaries linked at `0x400000`.
+- Process execution lifecycle: Dedicated PML4 address space, Ring 3 transition, and child zombie harvesting via `waitpid`.
+
+
 
 

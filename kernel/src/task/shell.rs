@@ -52,6 +52,7 @@ pub fn execute_command(line: &str) {
             println!("  mem                  - Display physical memory statistics");
             println!("  uptime               - Display system timer ticks");
             println!("  reboot               - Reboot physical / virtual machine");
+            println!("  exec <path>          - Execute a Ring 3 ELF binary (e.g. /bin/hello.elf, /disk/HELLO.ELF)");
         }
         "clear" => {
             print!("\x1b[2J\x1b[H");
@@ -245,8 +246,62 @@ pub fn execute_command(line: &str) {
                 unsafe { core::arch::asm!("hlt"); }
             }
         }
+        "exec" => {
+            if args.is_empty() {
+                println!("Usage: exec <path>");
+                return;
+            }
+            let path = args[0];
+            match VFS.open(path, OpenFlags::READ_ONLY) {
+                Ok(file) => {
+                    let size = file.stat().size;
+                    let mut elf_bytes = alloc::vec![0u8; size];
+                    match file.read_at(0, &mut elf_bytes) {
+                        Ok(n) if n == size => {
+                            let name = path.rsplit('/').next().unwrap_or(path);
+                            match crate::task::execute_user_elf(name, &elf_bytes) {
+                                Ok(status) => println!("Process '{}' exited with status {}", name, status),
+                                Err(e) => println!("exec: failed to execute '{}': {}", path, e),
+                            }
+                        }
+                        Ok(_) => println!("exec: short read on '{}'", path),
+                        Err(e) => println!("exec: error reading '{}': {:?}", path, e),
+                    }
+                }
+                Err(e) => println!("exec: cannot open '{}': {:?}", path, e),
+            }
+        }
         unknown => {
-            println!("nsh: command not found: {}. Type 'help' for list of commands.", unknown);
+            let try_paths = [
+                String::from(unknown),
+                alloc::format!("/bin/{}", unknown),
+                alloc::format!("/disk/{}", unknown),
+            ];
+
+            let mut executed = false;
+            for p in &try_paths {
+                if let Ok(file) = VFS.open(p, OpenFlags::READ_ONLY) {
+                    let stat = file.stat();
+                    if stat.file_type == FileType::File && stat.size > 4 {
+                        let mut elf_bytes = alloc::vec![0u8; stat.size];
+                        if let Ok(n) = file.read_at(0, &mut elf_bytes) {
+                            if n == stat.size && elf_bytes.starts_with(&[0x7f, b'E', b'L', b'F']) {
+                                let name = p.rsplit('/').next().unwrap_or(p);
+                                match crate::task::execute_user_elf(name, &elf_bytes) {
+                                    Ok(status) => println!("Process '{}' exited with status {}", name, status),
+                                    Err(e) => println!("exec: failed to execute '{}': {}", p, e),
+                                }
+                                executed = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !executed {
+                println!("nsh: command not found: {}. Type 'help' for list of commands.", unknown);
+            }
         }
     }
 }
@@ -302,6 +357,12 @@ pub fn run_automated_tests() {
 
     println!("[SHELL] Testing 'uptime'...");
     execute_command("uptime");
+
+    println!("[SHELL] Testing 'exec /bin/hello.elf' (Ring 3 C Userspace Libc Binary)...");
+    execute_command("exec /bin/hello.elf");
+
+    println!("[SHELL] Testing 'exec /disk/HELLO.ELF' (Persistent FAT32 Ring 3 C Binary)...");
+    execute_command("exec /disk/HELLO.ELF");
 
     println!("[SHELL] All shell verification commands executed successfully!");
 }

@@ -7,6 +7,9 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 echo "==> Building Bootloader (x86_64-unknown-uefi)..."
 cargo build --manifest-path "${ROOT_DIR}/bootloader/Cargo.toml" --target x86_64-unknown-uefi
 
+echo "==> Building Userspace Libc and Binaries..."
+make -C "${ROOT_DIR}/user"
+
 echo "==> Building Kernel (x86_64-unknown-none)..."
 cargo build --manifest-path "${ROOT_DIR}/kernel/Cargo.toml" --target x86_64-unknown-none
 
@@ -62,4 +65,15 @@ if [ ! -f "${DATA_DISK_IMG}" ]; then
     
     echo "==> Created 36MB FAT32 VirtIO data disk with sample files at ${DATA_DISK_IMG}"
 fi
+
+# Copy compiled user ELF binaries into persistent FAT32 VirtIO storage
+if [ -f "${ROOT_DIR}/user/build/bin/hello.elf" ]; then
+    mcopy -o -i "${DATA_DISK_IMG}" "${ROOT_DIR}/user/build/bin/hello.elf" ::HELLO.ELF
+    echo "==> Copied HELLO.ELF to FAT32 data disk."
+fi
+if [ -f "${ROOT_DIR}/user/build/bin/cat.elf" ]; then
+    mcopy -o -i "${DATA_DISK_IMG}" "${ROOT_DIR}/user/build/bin/cat.elf" ::CAT.ELF
+    echo "==> Copied CAT.ELF to FAT32 data disk."
+fi
+
 

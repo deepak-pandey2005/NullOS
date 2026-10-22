@@ -253,7 +253,87 @@ pub fn spawn_init_process(elf_bytes: &[u8]) -> Result<ProcessId, &'static str> {
     Ok(pid)
 }
 
+static PENDING_USER_ENTRY: AtomicU64 = AtomicU64::new(0);
+static PENDING_USER_STACK: AtomicU64 = AtomicU64::new(0);
+
+fn user_exec_runner() {
+    let entry_point = PENDING_USER_ENTRY.load(Ordering::SeqCst);
+    let user_stack_top = PENDING_USER_STACK.load(Ordering::SeqCst);
+    let pid = super::syscall::current_pid();
+    println!("[EXEC] Process #{} transitioning to Ring 3 (RIP {:#x}, RSP {:#x})...",
+        pid.0, entry_point, user_stack_top
+    );
+    unsafe {
+        let syscall_stack_top = core::ptr::addr_of!(crate::arch::x86_64::syscall::kernel_syscall_stack_top) as u64;
+        crate::arch::x86_64::gdt::set_tss_rsp0(syscall_stack_top);
+        crate::arch::x86_64::syscall::enter_user_mode(entry_point, user_stack_top);
+    }
+}
+
+/// Spawns and executes a user program from raw ELF bytes within an isolated process.
+/// Runs in Ring 3 and blocks until the child process exits, returning its exit code.
+pub fn execute_user_elf(name: &str, elf_bytes: &[u8]) -> Result<i32, &'static str> {
+    println!();
+    println!("--------------------------------------------------");
+    println!(" [EXEC] Spawning User ELF Process: \"{}\"", name);
+    println!("--------------------------------------------------");
+
+    let pid = create_process(name, Some(ProcessId::INIT))?;
+    let entry_point = {
+        let mut table = PROCESS_TABLE.lock();
+        let proc = table.get_mut(pid).ok_or("Failed to retrieve created process")?;
+
+        unsafe {
+            proc.address_space.activate();
+        }
+
+        let loaded_elf = super::elf::load_user_elf(elf_bytes)?;
+        println!(
+            "[EXEC] Process #{} \"{}\" ELF mapped: entry {:#x}, memory size {} bytes",
+            pid.0, name, loaded_elf.entry_point, loaded_elf.total_memory_size
+        );
+
+        // Map user stack page (0x7000_0000)
+        let user_stack_vaddr = crate::memory::VirtAddr::new(0x7000_0000);
+        let stack_page = crate::memory::Page::containing_address(user_stack_vaddr);
+        let stack_frame = crate::memory::alloc_frame().ok_or("Out of memory for user stack")?;
+
+        crate::memory::paging::map_page(
+            stack_page,
+            stack_frame,
+            crate::memory::PageTableFlags::PRESENT
+                | crate::memory::PageTableFlags::WRITABLE
+                | crate::memory::PageTableFlags::USER_ACCESSIBLE
+                | crate::memory::PageTableFlags::NO_EXECUTE,
+        )?;
+
+        unsafe {
+            core::ptr::write_bytes(stack_frame.start_address().as_mut_ptr::<u8>(), 0, 4096);
+        }
+
+        proc.state = ProcessState::Ready;
+        loaded_elf.entry_point
+    };
+
+    let user_stack_top = 0x7000_0000 + 4096 - 16;
+    super::syscall::set_current_pid(pid.0);
+    PENDING_USER_ENTRY.store(entry_point, Ordering::SeqCst);
+    PENDING_USER_STACK.store(user_stack_top, Ordering::SeqCst);
+
+    // Spawn execution thread to transition to Ring 3
+    super::spawn(name, user_exec_runner, 1);
+
+    // Wait for the user process to exit and harvest its exit status
+    let (reaped_pid, exit_status) = waitpid(ProcessId::INIT, Some(pid))?;
+    assert_eq!(reaped_pid, pid);
+    super::syscall::set_current_pid(ProcessId::INIT.0);
+
+    println!("[EXEC] User process #{} \"{}\" finished with exit status: {}", pid.0, name, exit_status);
+    Ok(exit_status)
+}
+
 /// Returns the number of processes currently tracked in the process table.
 pub fn process_count() -> usize {
     PROCESS_TABLE.lock().count()
 }
+

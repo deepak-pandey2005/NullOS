@@ -308,22 +308,23 @@
 - [x] Reap orphan processes (`waitpid` zombie reaping)
 
 ### M21 — Minimal libc
-- [ ] `string.h`
-- [ ] `stdlib.h`
-- [ ] `stdio.h`
-- [ ] `unistd.h`
-- [ ] `stdint.h`
-- [ ] Syscall wrappers
-- [ ] Process wrappers
-- [ ] File wrappers
-- [ ] Memory wrappers
-- [ ] Minimal C runtime
+- [x] `string.h` (`strlen`, `strcpy`, `strncpy`, `strcat`, `strcmp`, `strncmp`, `strchr`, `strstr`, `strdup`, `memset`, `memcpy`, `memmove`, `memcmp`, `memchr`, `strerror`)
+- [x] `stdlib.h` (`malloc`, `free`, `calloc`, `realloc`, `exit`, `abort`, `abs`, `atoi`, `atol`, `strtol`, `itoa`)
+- [x] `stdio.h` (`printf`, `sprintf`, `snprintf`, `vprintf`, `puts`, `putchar`, `getchar`, `fopen`, `fclose`, `fread`, `fwrite`, `stdin`, `stdout`, `stderr`)
+- [x] `unistd.h` (`read`, `write`, `open`, `close`, `lseek`, `exit`, `getpid`, `yield`, `waitpid`, `sleep`, `usleep`, `isatty`)
+- [x] `stdint.h` & `stddef.h` (Standard integer types, fixed-width limits, `size_t`, `ssize_t`, `ptrdiff_t`, `NULL`, `offsetof`)
+- [x] Syscall wrappers (Fast x86_64 inline assembly stubs `syscall0` through `syscall6` marshaling arguments to hardware registers)
+- [x] Process wrappers (`getpid`, `exit`, `waitpid`, `yield`, `sleep`, `usleep`)
+- [x] File wrappers (`open`, `close`, `read`, `write`, `lseek`, `fopen`, `fclose`, `fread`, `fwrite`, `fseek`, `ftell`, `fputs`, `fputc`)
+- [x] Memory wrappers (Boundary-tag dynamic memory allocator with free-list coalescing powered by `SYS_MMAP`)
+- [x] Minimal C runtime (`crt0.s` entry point `_start`, 16-byte stack alignment per System V AMD64 ABI, invoking `main(argc, argv)`, and calling `exit()`)
 
 ### M22 — Shell
 - [x] Command parser (tokenization and argument splitting)
 - [ ] Environment variables
-- [x] Built-in commands (`help`, `clear`, `echo`, `ls`, `cat`, `touch`, `write`, `ps`, `mem`, `uptime`, `reboot`)
-- [ ] Program execution
+- [x] Built-in commands (`help`, `clear`, `echo`, `ls`, `cat`, `touch`, `write`, `ps`, `lspci`, `disks`, `mem`, `uptime`, `reboot`, `exec`)
+- [x] Program execution (direct execution of Ring 3 ELF binaries from RamFS `/bin/` or persistent FAT32 `/disk/` with dedicated PML4 address space)
+
 - [ ] Pipes
 - [ ] Redirection
 - [ ] Background processes

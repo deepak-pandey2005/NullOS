@@ -121,7 +121,9 @@ pub fn load_user_elf(elf_data: &[u8]) -> Result<LoadedUserElf, &'static str> {
                 page_flags |= PageTableFlags::NO_EXECUTE;
             }
 
-            // Map each virtual page for this segment
+            let mut mapped_pages: Vec<(Page, PhysFrame, PageTableFlags)> = Vec::new();
+
+            // Map each virtual page for this segment (initially writable so kernel can copy file data)
             let mut curr = start_vaddr;
             while curr < end_vaddr {
                 let page = Page::containing_address(VirtAddr::new(curr));
@@ -132,7 +134,13 @@ pub fn load_user_elf(elf_data: &[u8]) -> Result<LoadedUserElf, &'static str> {
                     core::ptr::write_bytes(frame.start_address().as_mut_ptr::<u8>(), 0, PAGE_SIZE_4K as usize);
                 }
 
-                crate::memory::paging::map_page(page, frame, page_flags)?;
+                // Map with writable so kernel can populate segment data
+                crate::memory::paging::map_page(
+                    page,
+                    frame,
+                    PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE,
+                )?;
+                mapped_pages.push((page, frame, page_flags));
                 curr += PAGE_SIZE_4K;
             }
 
@@ -159,6 +167,13 @@ pub fn load_user_elf(elf_data: &[u8]) -> Result<LoadedUserElf, &'static str> {
                 let bss_size = (ph.p_memsz - ph.p_filesz) as usize;
                 unsafe {
                     core::ptr::write_bytes(bss_start as *mut u8, 0, bss_size);
+                }
+            }
+
+            // Apply final protection flags (e.g. read-only text / rodata)
+            for (page, frame, final_flags) in mapped_pages {
+                if !final_flags.contains(PageTableFlags::WRITABLE) {
+                    crate::memory::paging::map_page(page, frame, final_flags)?;
                 }
             }
 

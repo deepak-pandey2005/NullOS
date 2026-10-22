@@ -13,7 +13,7 @@ pub mod syscall;
 pub mod thread;
 
 pub use elf::{load_user_elf, LoadedUserElf};
-pub use process::{create_process, exit_process, process_count, spawn_init_process, waitpid, Process, ProcessId, ProcessState};
+pub use process::{create_process, execute_user_elf, exit_process, process_count, spawn_init_process, waitpid, Process, ProcessId, ProcessState};
 pub use scheduler::{exit, init, sleep, spawn, stats, timer_tick, yield_now};
 pub use syscall::run_user_mode_self_test;
 pub use thread::{Thread, ThreadId, ThreadState};

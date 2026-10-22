@@ -345,8 +345,12 @@ impl RamFs {
         let tmp = Arc::new(RamDirectory::new(0o777));
         self.root.insert_dir("tmp", tmp);
 
-        // Create /bin directory with test executable placeholder
+        // Create /bin directory with test executable
         let bin = Arc::new(RamDirectory::new(0o755));
+        bin.insert_child(
+            "hello.elf",
+            Arc::new(RamFile::new(include_bytes!("../../../user/build/bin/hello.elf"), 0o755)),
+        );
         self.root.insert_dir("bin", bin);
 
         // Create /disk and /mnt mountpoint directories for persistent storage

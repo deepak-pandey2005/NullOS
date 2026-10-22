@@ -1,2 +1,5 @@
 /target
 /build
+user/libc/build/
+user/build/obj/
+

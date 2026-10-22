@@ -72,10 +72,11 @@ if [[ "${1:-}" == "--headless" || "${1:-}" == "--test" ]]; then
         -display none
     )
     
+    touch "${SERIAL_LOG}"
     qemu-system-x86_64 "${HEADLESS_ARGS[@]}" > "${SERIAL_LOG}" 2>&1 &
     QEMU_PID=$!
     
-    for i in {1..30}; do
+    for i in {1..80}; do
         sleep 0.5
         if grep -q "All shell verification commands executed successfully" "${SERIAL_LOG}" 2>/dev/null; then
             sleep 0.5
@@ -92,7 +93,9 @@ if [[ "${1:-}" == "--headless" || "${1:-}" == "--test" ]]; then
     rm -f "${TEST_DISK}" "${TEST_DATA}"
     
     echo "==> Serial Log:"
-    cat "${SERIAL_LOG}"
+    if [ -f "${SERIAL_LOG}" ]; then
+        cat "${SERIAL_LOG}"
+    fi
 elif [[ "${1:-}" == "--cli" || "${1:-}" == "-n" || "${1:-}" == "--nographic" ]]; then
     echo "==> Launching QEMU in interactive terminal CLI mode (Press Ctrl+A then X to exit)..."
     QEMU_ARGS+=(-display none)

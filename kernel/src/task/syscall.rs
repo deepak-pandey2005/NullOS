@@ -29,6 +29,33 @@ const USER_STACK_TOP: u64 = USER_STACK_VADDR + PAGE_SIZE_4K - 16;
 
 static USER_DEMO_PASSED: AtomicBool = AtomicBool::new(false);
 static NEXT_USER_MMAP_VADDR: AtomicU64 = AtomicU64::new(0x0000_6000_0000);
+static CURRENT_PID: AtomicU64 = AtomicU64::new(1);
+
+/// Returns the currently active user ProcessId.
+pub fn current_pid() -> super::process::ProcessId {
+    super::process::ProcessId(CURRENT_PID.load(Ordering::SeqCst))
+}
+
+/// Sets the currently active user ProcessId.
+pub fn set_current_pid(pid: u64) {
+    CURRENT_PID.store(pid, Ordering::SeqCst);
+}
+
+/// POSIX-compatible stat structure matching user/libc/include/sys/stat.h.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct StatBuffer {
+    pub st_dev: u64,
+    pub st_ino: u64,
+    pub st_mode: u32,
+    pub st_nlink: u32,
+    pub st_uid: u32,
+    pub st_gid: u32,
+    pub st_rdev: u64,
+    pub st_size: i64,
+    pub st_blksize: i64,
+    pub st_blocks: i64,
+}
 
 /// Handles dynamic memory allocation and page mapping requests from user space.
 pub fn sys_mmap(addr: u64, len: usize, prot: u64, _flags: u64) -> u64 {
@@ -93,8 +120,36 @@ pub extern "C" fn syscall_dispatcher(
                 return 0;
             }
 
+            if fd == 0 {
+                let mut read_bytes = 0;
+                while read_bytes < len {
+                    let ch = if let Some(c) = crate::drivers::keyboard::read_char() {
+                        Some(c as u8)
+                    } else if let Some(b) = crate::drivers::serial::read_byte() {
+                        Some(b)
+                    } else {
+                        None
+                    };
+
+                    if let Some(b) = ch {
+                        unsafe {
+                            *buf_ptr.add(read_bytes) = b;
+                        }
+                        read_bytes += 1;
+                        if b == b'\n' || b == b'\r' {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                return read_bytes as u64;
+            }
+
+            let cur_pid = current_pid();
             let proc_table = super::process::PROCESS_TABLE.lock();
-            if let Some(proc) = proc_table.get(super::process::ProcessId::INIT) {
+            let proc = proc_table.get(cur_pid).or_else(|| proc_table.get(super::process::ProcessId::INIT));
+            if let Some(proc) = proc {
                 if let Ok(handle) = proc.fd_table.get(fd) {
                     let slice = unsafe { core::slice::from_raw_parts_mut(buf_ptr, len) };
                     match handle.read(slice) {
@@ -130,8 +185,10 @@ pub extern "C" fn syscall_dispatcher(
                 }
                 len as u64
             } else {
+                let cur_pid = current_pid();
                 let proc_table = super::process::PROCESS_TABLE.lock();
-                if let Some(proc) = proc_table.get(super::process::ProcessId::INIT) {
+                let proc = proc_table.get(cur_pid).or_else(|| proc_table.get(super::process::ProcessId::INIT));
+                if let Some(proc) = proc {
                     if let Ok(handle) = proc.fd_table.get(fd) {
                         match handle.write(slice) {
                             Ok(bytes) => bytes as u64,
@@ -163,8 +220,14 @@ pub extern "C" fn syscall_dispatcher(
                 match crate::fs::vfs::VFS.open(path, flags) {
                     Ok(inode) => {
                         let desc = alloc::sync::Arc::new(crate::fs::fd::FileDescriptor::new(inode, flags));
-                        let proc_table = super::process::PROCESS_TABLE.lock();
-                        if let Some(proc) = proc_table.get(super::process::ProcessId::INIT) {
+                        let cur_pid = current_pid();
+                        let mut proc_table = super::process::PROCESS_TABLE.lock();
+                        let proc = if proc_table.get_mut(cur_pid).is_some() {
+                            proc_table.get_mut(cur_pid)
+                        } else {
+                            proc_table.get_mut(super::process::ProcessId::INIT)
+                        };
+                        if let Some(proc) = proc {
                             match proc.fd_table.alloc_fd(desc) {
                                 Ok(fd) => fd as u64,
                                 Err(_) => u64::MAX,
@@ -181,8 +244,14 @@ pub extern "C" fn syscall_dispatcher(
         }
         SYS_CLOSE => {
             let fd = a1 as i32;
-            let proc_table = super::process::PROCESS_TABLE.lock();
-            if let Some(proc) = proc_table.get(super::process::ProcessId::INIT) {
+            let cur_pid = current_pid();
+            let mut proc_table = super::process::PROCESS_TABLE.lock();
+            let proc = if proc_table.get_mut(cur_pid).is_some() {
+                proc_table.get_mut(cur_pid)
+            } else {
+                proc_table.get_mut(super::process::ProcessId::INIT)
+            };
+            if let Some(proc) = proc {
                 match proc.fd_table.close(fd) {
                     Ok(_) => 0,
                     Err(_) => u64::MAX,
@@ -191,10 +260,66 @@ pub extern "C" fn syscall_dispatcher(
                 u64::MAX
             }
         }
+        SYS_LSEEK => {
+            let fd = a1 as i32;
+            let offset = a2 as i64;
+            let whence = a3 as i32;
+            let cur_pid = current_pid();
+            let proc_table = super::process::PROCESS_TABLE.lock();
+            let proc = proc_table.get(cur_pid).or_else(|| proc_table.get(super::process::ProcessId::INIT));
+            if let Some(proc) = proc {
+                if let Ok(handle) = proc.fd_table.get(fd) {
+                    match handle.seek(offset, whence) {
+                        Ok(new_off) => new_off as u64,
+                        Err(_) => u64::MAX,
+                    }
+                } else {
+                    u64::MAX
+                }
+            } else {
+                u64::MAX
+            }
+        }
+        SYS_STAT => {
+            let path_ptr = a1 as *const u8;
+            let stat_ptr = a2 as *mut StatBuffer;
+            if path_ptr.is_null() || stat_ptr.is_null() {
+                return u64::MAX;
+            }
+            let mut len = 0;
+            while len < 256 && unsafe { *path_ptr.add(len) } != 0 {
+                len += 1;
+            }
+            let path_slice = unsafe { core::slice::from_raw_parts(path_ptr, len) };
+            if let Ok(path) = core::str::from_utf8(path_slice) {
+                match crate::fs::vfs::VFS.resolve_path(path) {
+                    Ok(inode) => {
+                        let st = inode.stat();
+                        unsafe {
+                            (*stat_ptr).st_dev = 0;
+                            (*stat_ptr).st_ino = st.inode_num;
+                            (*stat_ptr).st_mode = st.mode;
+                            (*stat_ptr).st_nlink = 1;
+                            (*stat_ptr).st_uid = 0;
+                            (*stat_ptr).st_gid = 0;
+                            (*stat_ptr).st_rdev = 0;
+                            (*stat_ptr).st_size = st.size as i64;
+                            (*stat_ptr).st_blksize = 512;
+                            (*stat_ptr).st_blocks = ((st.size + 511) / 512) as i64;
+                        }
+                        0
+                    }
+                    Err(_) => u64::MAX,
+                }
+            } else {
+                u64::MAX
+            }
+        }
         SYS_EXIT => {
             let status = a1 as i32;
-            println!("\x1b[32m[USER]\x1b[0m User process finished with exit code: {}", status);
-            super::process::exit_process(super::process::ProcessId::INIT, status);
+            let cur_pid = current_pid();
+            println!("\x1b[32m[USER]\x1b[0m User process #{} finished with exit code: {}", cur_pid.0, status);
+            super::process::exit_process(cur_pid, status);
             USER_DEMO_PASSED.store(true, Ordering::SeqCst);
             super::exit();
         }
@@ -203,7 +328,7 @@ pub extern "C" fn syscall_dispatcher(
             0
         }
         SYS_GETPID => {
-            super::process::ProcessId::INIT.as_u64()
+            current_pid().as_u64()
         }
         SYS_SLEEP => {
             let ticks = a1;
