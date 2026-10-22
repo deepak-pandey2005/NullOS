@@ -349,6 +349,12 @@ impl RamFs {
         let bin = Arc::new(RamDirectory::new(0o755));
         self.root.insert_dir("bin", bin);
 
+        // Create /disk and /mnt mountpoint directories for persistent storage
+        let disk = Arc::new(RamDirectory::new(0o755));
+        self.root.insert_dir("disk", disk);
+        let mnt = Arc::new(RamDirectory::new(0o755));
+        self.root.insert_dir("mnt", mnt);
+
         // Create root files
         self.root.insert_child(
             "hello.txt",

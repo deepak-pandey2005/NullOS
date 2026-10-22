@@ -114,6 +114,9 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     drivers::virtio_blk::init();
     drivers::virtio_blk::run_self_tests();
 
+    // Mount Persistent Block Storage Filesystems (Phase 6 - M19 Filesystems)
+    fs::mount_block_devices();
+
     // Initialize PS/2 Keyboard Driver (Scan Code Set 1 & Input Decoding)
     drivers::keyboard::init();
     drivers::keyboard::run_self_tests();

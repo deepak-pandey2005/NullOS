@@ -7,6 +7,8 @@
 //! - Per-process File Descriptor Table (stdin, stdout, stderr, seek, read, write).
 //! - File syscalls: `open`, `close`, `read`, `write`, `stat`, `lseek`.
 
+pub mod ext2;
+pub mod fat32;
 pub mod fd;
 pub mod initramfs;
 pub mod tar;
@@ -39,6 +41,125 @@ pub fn init() {
     println!("[FS] Virtual File System (VFS) active.");
     println!("[FS] Mounted RamFS initramfs at \"/\".");
     println!("[FS] Initialized standard device nodes: /dev/console, /dev/null, /dev/zero.");
+}
+
+/// Probes registered block devices and mounts detected persistent filesystems (FAT32 / ext2).
+pub fn mount_block_devices() {
+    println!("----------------------------------------");
+    println!(" [FS] Mounting Storage Block Devices    ");
+    println!("----------------------------------------");
+
+    if let Some(block_dev) = crate::drivers::block::primary_device() {
+        println!("[FS] Probing block device '{}' for filesystems...", block_dev.name());
+
+        // 1. Try mounting as FAT32
+        match fat32::Fat32FileSystem::new(block_dev.clone()) {
+            Ok(fat32_fs) => {
+                let capacity_mib = (fat32_fs.bpb.total_sectors as u64 * 512) / (1024 * 1024);
+                println!(
+                    "[FS] Detected FAT32 filesystem ({} MiB, root cluster: {}).",
+                    capacity_mib, fat32_fs.bpb.root_cluster
+                );
+
+                if let Err(e) = VFS.mount("/disk", fat32_fs.clone()) {
+                    println!("[FS] Failed to mount FAT32 at /disk: {:?}", e);
+                } else {
+                    println!("[FS] Successfully mounted FAT32 filesystem at /disk.");
+                }
+
+                if let Err(e) = VFS.mount("/mnt", fat32_fs.clone()) {
+                    println!("[FS] Failed to mount FAT32 at /mnt: {:?}", e);
+                } else {
+                    println!("[FS] Successfully mounted FAT32 filesystem at /mnt.");
+                }
+
+                // Verify FAT32 Read/Write operations
+                verify_fat32_operations();
+                return;
+            }
+            Err(_) => {
+                // Not FAT32, try ext2
+            }
+        }
+
+        // 2. Try mounting as ext2
+        match ext2::Ext2FileSystem::new(block_dev.clone()) {
+            Ok(ext2_fs) => {
+                println!(
+                    "[FS] Detected ext2 filesystem (block size: {} bytes).",
+                    ext2_fs.block_size
+                );
+
+                if let Err(e) = VFS.mount("/disk", ext2_fs.clone()) {
+                    println!("[FS] Failed to mount ext2 at /disk: {:?}", e);
+                } else {
+                    println!("[FS] Successfully mounted ext2 filesystem at /disk.");
+                }
+                return;
+            }
+            Err(_) => {
+                // Not ext2
+            }
+        }
+
+        println!("[FS] Warning: No supported filesystem (FAT32 or ext2) detected on '{}'.", block_dev.name());
+    } else {
+        println!("[FS] Note: No block devices available to mount.");
+    }
+}
+
+fn verify_fat32_operations() {
+    println!("[FS] Verifying FAT32 persistent read/write operations...");
+
+    // Test 1: Read pre-populated README.TXT
+    match VFS.open("/disk/README.TXT", OpenFlags::READ_ONLY) {
+        Ok(file) => {
+            let mut buf = [0u8; 128];
+            match file.read_at(0, &mut buf) {
+                Ok(n) => {
+                    let content = core::str::from_utf8(&buf[..n]).unwrap_or("");
+                    println!("[FS] Read {} bytes from /disk/README.TXT: {:?}", n, content.trim());
+                }
+                Err(e) => println!("[FS] Failed to read /disk/README.TXT: {:?}", e),
+            }
+        }
+        Err(e) => println!("[FS] Failed to open /disk/README.TXT: {:?}", e),
+    }
+
+    // Test 2: Read pre-populated NOTES.TXT
+    match VFS.open("/disk/NOTES.TXT", OpenFlags::READ_ONLY) {
+        Ok(file) => {
+            let mut buf = [0u8; 128];
+            match file.read_at(0, &mut buf) {
+                Ok(n) => {
+                    let content = core::str::from_utf8(&buf[..n]).unwrap_or("");
+                    println!("[FS] Read {} bytes from /disk/NOTES.TXT: {:?}", n, content.trim());
+                }
+                Err(e) => println!("[FS] Failed to read /disk/NOTES.TXT: {:?}", e),
+            }
+        }
+        Err(e) => println!("[FS] Failed to open /disk/NOTES.TXT: {:?}", e),
+    }
+
+    // Test 3: Write a new file to FAT32 disk and read it back
+    let test_data = b"NullOS FAT32 Persistent File Write Test Success!\n";
+    match VFS.open("/disk/TEST_WR.TXT", OpenFlags {
+        read: true,
+        write: true,
+        create: true,
+        append: false,
+        truncate: true,
+    }) {
+        Ok(file) => {
+            match file.write_at(0, test_data) {
+                Ok(written) => println!("[FS] Wrote {} bytes to /disk/TEST_WR.TXT on persistent storage.", written),
+                Err(e) => println!("[FS] Failed to write to /disk/TEST_WR.TXT: {:?}", e),
+            }
+        }
+        Err(e) => println!("[FS] Failed to create /disk/TEST_WR.TXT: {:?}", e),
+    }
+
+    println!("[FS] FAT32 verification complete.");
 }
 
 /// Runs automated verification self-tests for M15 Initramfs & M16 VFS.

@@ -54,9 +54,25 @@ QEMU_ARGS=(
 
 if [[ "${1:-}" == "--headless" || "${1:-}" == "--test" ]]; then
     echo "==> Running QEMU in headless test mode..."
-    QEMU_ARGS+=(-display none)
+    TEST_DISK="${ROOT_DIR}/build/test_disk.img"
+    TEST_DATA="${ROOT_DIR}/build/test_data.img"
+    cp "${DISK_IMG}" "${TEST_DISK}"
+    cp "${DATA_DISK_IMG}" "${TEST_DATA}"
+
+    HEADLESS_ARGS=(
+        -machine q35
+        "${KVM_FLAG[@]}"
+        -m 512M
+        -net none
+        -bios "${OVMF_PATH}"
+        -drive "format=raw,file=${TEST_DISK}"
+        -drive "format=raw,file=${TEST_DATA},if=virtio"
+        -serial stdio
+        -no-reboot
+        -display none
+    )
     
-    qemu-system-x86_64 "${QEMU_ARGS[@]}" > "${SERIAL_LOG}" 2>&1 &
+    qemu-system-x86_64 "${HEADLESS_ARGS[@]}" > "${SERIAL_LOG}" 2>&1 &
     QEMU_PID=$!
     
     for i in {1..30}; do
@@ -73,6 +89,7 @@ if [[ "${1:-}" == "--headless" || "${1:-}" == "--test" ]]; then
     
     kill "${QEMU_PID}" 2>/dev/null || true
     wait "${QEMU_PID}" 2>/dev/null || true
+    rm -f "${TEST_DISK}" "${TEST_DATA}"
     
     echo "==> Serial Log:"
     cat "${SERIAL_LOG}"

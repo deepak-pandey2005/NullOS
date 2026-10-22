@@ -291,6 +291,12 @@ pub fn run_automated_tests() {
     println!("[SHELL] Testing 'disks'...");
     execute_command("disks");
 
+    println!("[SHELL] Testing 'ls /disk'...");
+    execute_command("ls /disk");
+
+    println!("[SHELL] Testing 'cat /disk/README.TXT'...");
+    execute_command("cat /disk/README.TXT");
+
     println!("[SHELL] Testing 'mem'...");
     execute_command("mem");
 

@@ -45,9 +45,21 @@ dd if="${ESP_PART}" of="${DISK_IMG}" bs=1M seek=1 conv=notrunc status=none
 
 echo "==> GPT disk image with ESP created at ${DISK_IMG}"
 
-# 3. Create a 16MB raw VirtIO block data disk image if not present
+# 3. Create a 36MB FAT32 VirtIO block data disk image if not present
 DATA_DISK_IMG="${BUILD_DIR}/data.img"
 if [ ! -f "${DATA_DISK_IMG}" ]; then
-    truncate -s 16M "${DATA_DISK_IMG}"
-    echo "==> Created 16MB VirtIO data disk at ${DATA_DISK_IMG}"
+    truncate -s 36M "${DATA_DISK_IMG}"
+    mkfs.fat -F 32 -s 1 -n "NULLOS_DATA" "${DATA_DISK_IMG}" > /dev/null
+    
+    # Pre-populate with initial test files
+    TEMP_NOTE="${BUILD_DIR}/temp_note.txt"
+    echo "Welcome to NullOS Persistent FAT32 Storage!" > "${TEMP_NOTE}"
+    mcopy -i "${DATA_DISK_IMG}" "${TEMP_NOTE}" ::README.TXT
+    
+    echo "This file was read directly from the VirtIO block device via FAT32 driver." > "${TEMP_NOTE}"
+    mcopy -i "${DATA_DISK_IMG}" "${TEMP_NOTE}" ::NOTES.TXT
+    rm -f "${TEMP_NOTE}"
+    
+    echo "==> Created 36MB FAT32 VirtIO data disk with sample files at ${DATA_DISK_IMG}"
 fi
+

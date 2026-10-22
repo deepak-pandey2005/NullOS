@@ -288,12 +288,12 @@
 - [x] Block cache & shell integration (`disks` CLI command and automated read/write self-tests)
 
 ### M19 — Filesystems
-- [ ] FAT32 read
-- [ ] FAT32 write
-- [ ] ext2 read-only
-- [ ] Filesystem mounting
-- [ ] VFS integration
-- [ ] Filesystem tests
+- [x] FAT32 read (BPB parsing, FAT cluster chain following, 8.3 directory reading)
+- [x] FAT32 write (free cluster allocation, FAT table linking, sector flushing, file size updating)
+- [x] ext2 read-only (Superblock parsing `0xEF53`, block group descriptors, inode reading, direct block resolution)
+- [x] Filesystem mounting (dynamic block device probing and mounting to `/disk` and `/mnt`)
+- [x] VFS integration (`FileSystem` and `Inode` trait implementations with transparent path dispatch)
+- [x] Filesystem tests (boot-time FAT32 file reading/writing and automated shell verification)
 
 ---
 

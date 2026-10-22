@@ -1,5 +1,5 @@
 # NullOS: The Complete Operating Systems Course
-### *A 15-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
+### *A 16-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
 
 Welcome to the comprehensive textbook documentation for **NullOS**. This curriculum teaches operating system engineering from absolute first principles: starting from raw motherboard electricity and transistors, all the way to multitasking, 4-level paging, and Ring 3 user mode with fast hardware system calls.
 
@@ -134,5 +134,14 @@ Welcome to the comprehensive textbook documentation for **NullOS**. This curricu
 - The Split Virtqueue architecture: Descriptor Tables, Available Rings, and Used Rings in shared RAM.
 - The 3-part chained descriptor protocol for 512-byte block read and write DMA transfers.
 - The generic `BlockDevice` trait and interactive shell `disks` inspection command.
+
+### [Chapter 16: Persistent Filesystems — FAT32 & ext2](chapter16_persistent_filesystems_fat32_ext2.md)
+- Bridging flat 512-byte sectors to hierarchical directory trees.
+- FAT32 BIOS Parameter Block (BPB) parsing and geometry discovery.
+- File Allocation Table (FAT) cluster chains, allocation, and End-of-Chain markers.
+- 32-byte directory entries: 8.3 format, attributes, cluster pointers, and case-insensitive matching.
+- Linux ext2 architecture: Superblock at byte 1024 (`0xEF53`), block groups, and direct/indirect block pointers.
+- Mounting block devices to VFS mount points (`/disk`, `/mnt`) for transparent file access.
+
 
 
