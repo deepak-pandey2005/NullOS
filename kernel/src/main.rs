@@ -110,6 +110,10 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     drivers::pci::init();
     drivers::pci::run_self_tests();
 
+    // Initialize PS/2 Keyboard Driver (Scan Code Set 1 & Input Decoding)
+    drivers::keyboard::init();
+    drivers::keyboard::run_self_tests();
+
     // Verify Interactive Shell & CLI commands (Phase 7 - Userspace Shell)
     task::shell::run_automated_tests();
 

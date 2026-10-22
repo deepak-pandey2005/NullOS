@@ -267,6 +267,13 @@
 - [x] MSI-X (MSI-X capability structure decoding)
 - [x] PCI driver abstraction (`PciDevice` with `enable_bus_mastering`, `enable_memory_space`, `enable_io_space`, `find_device`, `find_by_class`, and `lspci` shell command)
 
+### PS/2 Keyboard Driver & Unified Input
+- [x] Intel 8042 PS/2 controller driver (Data port `0x60`, Status/Command port `0x64`)
+- [x] Scan Code Set 1 translation table (Make codes and Break codes `0x80` release decoding)
+- [x] Modifier state machine (Left/Right Shift, CapsLock XOR logic, Ctrl, Alt, Extended `0xE0` keys)
+- [x] Non-blocking input polling (`read_char()` with input/output buffer synchronization)
+- [x] Dual-input interactive shell integration (unified QEMU graphical display + physical keyboard + COM1 serial console)
+
 ### M18 — VirtIO Block
 - [ ] VirtIO transport
 - [ ] VirtIO PCI

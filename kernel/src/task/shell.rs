@@ -275,7 +275,8 @@ pub fn run_automated_tests() {
     println!("[SHELL] All shell verification commands executed successfully!");
 }
 
-/// Interactive Shell Loop that listens on COM1 serial input and executes commands in real-time.
+/// Interactive Shell Loop that listens on both PS/2 Keyboard and COM1 serial input
+/// and executes commands in real-time.
 pub fn interactive_loop() {
     println!();
     println!("==================================================");
@@ -287,15 +288,29 @@ pub fn interactive_loop() {
     let mut line_buf = String::new();
 
     loop {
-        if let Some(byte) = serial::read_byte() {
+        // Read input from either PS/2 keyboard (display window/hardware) or COM1 serial
+        let incoming_char = if let Some(ch) = crate::drivers::keyboard::read_char() {
+            Some(ch)
+        } else if let Some(byte) = serial::read_byte() {
             match byte {
-                b'\r' | b'\n' => {
+                b'\r' | b'\n' => Some('\n'),
+                0x08 | 0x7F => Some('\x08'),
+                b if b >= 0x20 && b <= 0x7E => Some(b as char),
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        if let Some(ch) = incoming_char {
+            match ch {
+                '\n' => {
                     println!();
                     execute_command(&line_buf);
                     line_buf.clear();
                     print!("nullos> ");
                 }
-                0x08 | 0x7F => {
+                '\x08' => {
                     // Backspace handling
                     if !line_buf.is_empty() {
                         line_buf.pop();
@@ -303,9 +318,8 @@ pub fn interactive_loop() {
                         print!("\x08 \x08");
                     }
                 }
-                b if b >= 0x20 && b <= 0x7E => {
+                c if c >= ' ' && c <= '~' => {
                     // Printable ASCII character
-                    let c = b as char;
                     line_buf.push(c);
                     print!("{}", c);
                 }
@@ -317,3 +331,4 @@ pub fn interactive_loop() {
         }
     }
 }
+

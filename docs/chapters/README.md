@@ -1,5 +1,5 @@
 # NullOS: The Complete Operating Systems Course
-### *A 13-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
+### *A 14-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
 
 Welcome to the comprehensive textbook documentation for **NullOS**. This curriculum teaches operating system engineering from absolute first principles: starting from raw motherboard electricity and transistors, all the way to multitasking, 4-level paging, and Ring 3 user mode with fast hardware system calls.
 
@@ -118,3 +118,12 @@ Welcome to the comprehensive textbook documentation for **NullOS**. This curricu
 - The BAR sizing algorithm: Probing address spaces by writing all 1s.
 - The PCI Command Register: Enabling Bus Mastering (DMA), MMIO, and Port I/O.
 - Capabilities linked lists: Discovering MSI, MSI-X, SATA, and PCIe extensions.
+
+### [Chapter 14: Keyboard Drivers & Input Subsystems](chapter14_keyboard_drivers_and_input_subsystems.md)
+- The mechanical keyboard illusion: Why keys send Make and Break codes instead of ASCII bytes.
+- The Intel 8042 PS/2 controller architecture: Data port `0x60`, Status port `0x64`, and Command port `0x64`.
+- IBM PC Scan Code Set 1: Bit 7 release encoding (`make_code | 0x80`) and extended `0xE0` prefixes.
+- The modifier state machine: Tracking Shift, CapsLock, Ctrl, and Alt with Boolean XOR logic ($\text{Shift} \oplus \text{CapsLock}$).
+- Non-blocking polling vs. Interrupts.
+- Unifying physical keyboard input, QEMU graphical display, and COM1 serial lines in the interactive shell.
+
