@@ -48,6 +48,7 @@ pub fn execute_command(line: &str) {
             println!("  write <path> <text>  - Write text string to a file");
             println!("  ps                   - List active processes & threads");
             println!("  lspci                - List all discovered PCI hardware devices");
+            println!("  disks                - List registered block storage devices & capacities");
             println!("  mem                  - Display physical memory statistics");
             println!("  uptime               - Display system timer ticks");
             println!("  reboot               - Reboot physical / virtual machine");
@@ -198,6 +199,27 @@ pub fn execute_command(line: &str) {
                 );
             }
         }
+        "disks" => {
+            let devices = crate::drivers::block::BLOCK_DEVICES.lock();
+            println!("{:<10} {:<12} {:<12} {}", "NAME", "SECTORS", "SECTOR_SIZE", "CAPACITY");
+            println!("{:-<54}", "");
+            if devices.is_empty() {
+                println!("No block storage devices registered.");
+            } else {
+                for dev in devices.iter() {
+                    let sectors = dev.sector_count();
+                    let mib = (sectors * dev.sector_size() as u64) / (1024 * 1024);
+                    println!(
+                        "{:<10} {:<12} {:<12} {} MiB ({} bytes)",
+                        dev.name(),
+                        sectors,
+                        dev.sector_size(),
+                        mib,
+                        dev.capacity_bytes()
+                    );
+                }
+            }
+        }
         "mem" => {
             println!("Physical Memory Manager (PMM):");
             println!("  Page frame size: 4 KiB (4,096 bytes)");
@@ -265,6 +287,9 @@ pub fn run_automated_tests() {
 
     println!("[SHELL] Testing 'lspci'...");
     execute_command("lspci");
+
+    println!("[SHELL] Testing 'disks'...");
+    execute_command("disks");
 
     println!("[SHELL] Testing 'mem'...");
     execute_command("mem");

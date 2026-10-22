@@ -110,6 +110,10 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     drivers::pci::init();
     drivers::pci::run_self_tests();
 
+    // Initialize VirtIO Block Storage Subsystem (Phase 6 - M18 Block Devices)
+    drivers::virtio_blk::init();
+    drivers::virtio_blk::run_self_tests();
+
     // Initialize PS/2 Keyboard Driver (Scan Code Set 1 & Input Decoding)
     drivers::keyboard::init();
     drivers::keyboard::run_self_tests();

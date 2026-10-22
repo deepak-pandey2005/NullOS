@@ -1,5 +1,5 @@
 # NullOS: The Complete Operating Systems Course
-### *A 14-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
+### *A 15-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
 
 Welcome to the comprehensive textbook documentation for **NullOS**. This curriculum teaches operating system engineering from absolute first principles: starting from raw motherboard electricity and transistors, all the way to multitasking, 4-level paging, and Ring 3 user mode with fast hardware system calls.
 
@@ -126,4 +126,13 @@ Welcome to the comprehensive textbook documentation for **NullOS**. This curricu
 - The modifier state machine: Tracking Shift, CapsLock, Ctrl, and Alt with Boolean XOR logic ($\text{Shift} \oplus \text{CapsLock}$).
 - Non-blocking polling vs. Interrupts.
 - Unifying physical keyboard input, QEMU graphical display, and COM1 serial lines in the interactive shell.
+
+### [Chapter 15: VirtIO & Paravirtualized Block Storage](chapter15_virtio_and_block_storage.md)
+- Full hardware emulation vs. Paravirtualization: Eliminating VM-Exit penalties.
+- Discovering VirtIO on the PCI bus (Vendor `0x1AF4`, Device `0x1001` / `0x1042`).
+- Legacy PCI I/O control registers (BAR0 port layout, device status, queue notify).
+- The Split Virtqueue architecture: Descriptor Tables, Available Rings, and Used Rings in shared RAM.
+- The 3-part chained descriptor protocol for 512-byte block read and write DMA transfers.
+- The generic `BlockDevice` trait and interactive shell `disks` inspection command.
+
 

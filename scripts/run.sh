@@ -8,6 +8,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 "${SCRIPT_DIR}/build.sh"
 
 DISK_IMG="${ROOT_DIR}/build/disk.img"
+DATA_DISK_IMG="${ROOT_DIR}/build/data.img"
 SERIAL_LOG="${ROOT_DIR}/build/serial.log"
 rm -f "${SERIAL_LOG}"
 
@@ -46,6 +47,7 @@ QEMU_ARGS=(
     -net none
     -bios "${OVMF_PATH}"
     -drive "format=raw,file=${DISK_IMG}"
+    -drive "format=raw,file=${DATA_DISK_IMG},if=virtio"
     -serial stdio
     -no-reboot
 )

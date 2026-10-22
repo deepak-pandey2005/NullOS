@@ -275,17 +275,17 @@
 - [x] Dual-input interactive shell integration (unified QEMU graphical display + physical keyboard + COM1 serial console)
 
 ### M18 — VirtIO Block
-- [ ] VirtIO transport
-- [ ] VirtIO PCI
-- [ ] Virtqueues
-- [ ] Descriptor tables
-- [ ] Available ring
-- [ ] Used ring
-- [ ] DMA buffers
-- [ ] Block read
-- [ ] Block write
-- [ ] Block device abstraction
-- [ ] Block cache
+- [x] VirtIO transport (Legacy PCI I/O port registers: device status, features, queue notify)
+- [x] VirtIO PCI (PCI bus device discovery: Vendor `0x1AF4`, Device `0x1001` / `0x1042`, BAR0 extraction)
+- [x] Virtqueues (Split virtqueue memory allocation aligned per specification)
+- [x] Descriptor tables (16-byte chained descriptors with `NEXT` and `WRITE` flags)
+- [x] Available ring (driver submission ring buffer with queue notify kicking)
+- [x] Used ring (hypervisor completion ring buffer polling and ISR status clearing)
+- [x] DMA buffers (direct zero-copy physical buffer memory mapping)
+- [x] Block read (`read_sector` reading 512-byte blocks via VirtIO DMA)
+- [x] Block write (`write_sector` writing 512-byte blocks via VirtIO DMA)
+- [x] Block device abstraction (`BlockDevice` trait, `BlockError`, and global `BLOCK_DEVICES` registry)
+- [x] Block cache & shell integration (`disks` CLI command and automated read/write self-tests)
 
 ### M19 — Filesystems
 - [ ] FAT32 read
