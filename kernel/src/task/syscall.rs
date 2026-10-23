@@ -120,6 +120,10 @@ pub extern "C" fn syscall_dispatcher(
                 return 0;
             }
 
+            if crate::security::validate_user_buffer(buf_ptr as *const u8, len).is_err() {
+                return u64::MAX;
+            }
+
             if fd == 0 {
                 let mut read_bytes = 0;
                 while read_bytes < len {
@@ -172,6 +176,10 @@ pub extern "C" fn syscall_dispatcher(
                 return 0;
             }
 
+            if crate::security::validate_user_buffer(buf_ptr, len).is_err() {
+                return u64::MAX;
+            }
+
             let slice = unsafe { core::slice::from_raw_parts(buf_ptr, len) };
             if fd == 1 || fd == 2 {
                 if let Ok(s) = core::str::from_utf8(slice) {
@@ -205,41 +213,32 @@ pub extern "C" fn syscall_dispatcher(
         SYS_OPEN => {
             let path_ptr = a1 as *const u8;
             let flags_bits = a2;
-            if path_ptr.is_null() {
-                return u64::MAX;
-            }
+            let path = match crate::security::copy_str_from_user(path_ptr, 256) {
+                Ok(p) => p,
+                Err(_) => return u64::MAX,
+            };
 
-            let mut len = 0;
-            while len < 256 && unsafe { *path_ptr.add(len) } != 0 {
-                len += 1;
-            }
-
-            let path_slice = unsafe { core::slice::from_raw_parts(path_ptr, len) };
-            if let Ok(path) = core::str::from_utf8(path_slice) {
-                let flags = crate::fs::vfs::OpenFlags::from_bits(flags_bits);
-                match crate::fs::vfs::VFS.open(path, flags) {
-                    Ok(inode) => {
-                        let desc = alloc::sync::Arc::new(crate::fs::fd::FileDescriptor::new(inode, flags));
-                        let cur_pid = current_pid();
-                        let mut proc_table = super::process::PROCESS_TABLE.lock();
-                        let proc = if proc_table.get_mut(cur_pid).is_some() {
-                            proc_table.get_mut(cur_pid)
-                        } else {
-                            proc_table.get_mut(super::process::ProcessId::INIT)
-                        };
-                        if let Some(proc) = proc {
-                            match proc.fd_table.alloc_fd(desc) {
-                                Ok(fd) => fd as u64,
-                                Err(_) => u64::MAX,
-                            }
-                        } else {
-                            u64::MAX
+            let flags = crate::fs::vfs::OpenFlags::from_bits(flags_bits);
+            match crate::fs::vfs::VFS.open(&path, flags) {
+                Ok(inode) => {
+                    let desc = alloc::sync::Arc::new(crate::fs::fd::FileDescriptor::new(inode, flags));
+                    let cur_pid = current_pid();
+                    let mut proc_table = super::process::PROCESS_TABLE.lock();
+                    let proc = if proc_table.get_mut(cur_pid).is_some() {
+                        proc_table.get_mut(cur_pid)
+                    } else {
+                        proc_table.get_mut(super::process::ProcessId::INIT)
+                    };
+                    if let Some(proc) = proc {
+                        match proc.fd_table.alloc_fd(desc) {
+                            Ok(fd) => fd as u64,
+                            Err(_) => u64::MAX,
                         }
+                    } else {
+                        u64::MAX
                     }
-                    Err(_) => u64::MAX,
                 }
-            } else {
-                u64::MAX
+                Err(_) => u64::MAX,
             }
         }
         SYS_CLOSE => {
@@ -283,36 +282,33 @@ pub extern "C" fn syscall_dispatcher(
         SYS_STAT => {
             let path_ptr = a1 as *const u8;
             let stat_ptr = a2 as *mut StatBuffer;
-            if path_ptr.is_null() || stat_ptr.is_null() {
+            if stat_ptr.is_null() || crate::security::validate_user_buffer(stat_ptr as *const u8, core::mem::size_of::<StatBuffer>()).is_err() {
                 return u64::MAX;
             }
-            let mut len = 0;
-            while len < 256 && unsafe { *path_ptr.add(len) } != 0 {
-                len += 1;
-            }
-            let path_slice = unsafe { core::slice::from_raw_parts(path_ptr, len) };
-            if let Ok(path) = core::str::from_utf8(path_slice) {
-                match crate::fs::vfs::VFS.resolve_path(path) {
-                    Ok(inode) => {
-                        let st = inode.stat();
-                        unsafe {
-                            (*stat_ptr).st_dev = 0;
-                            (*stat_ptr).st_ino = st.inode_num;
-                            (*stat_ptr).st_mode = st.mode;
-                            (*stat_ptr).st_nlink = 1;
-                            (*stat_ptr).st_uid = 0;
-                            (*stat_ptr).st_gid = 0;
-                            (*stat_ptr).st_rdev = 0;
-                            (*stat_ptr).st_size = st.size as i64;
-                            (*stat_ptr).st_blksize = 512;
-                            (*stat_ptr).st_blocks = ((st.size + 511) / 512) as i64;
-                        }
-                        0
+
+            let path = match crate::security::copy_str_from_user(path_ptr, 256) {
+                Ok(p) => p,
+                Err(_) => return u64::MAX,
+            };
+
+            match crate::fs::vfs::VFS.resolve_path(&path) {
+                Ok(inode) => {
+                    let st = inode.stat();
+                    unsafe {
+                        (*stat_ptr).st_dev = 0;
+                        (*stat_ptr).st_ino = st.inode_num;
+                        (*stat_ptr).st_mode = st.mode;
+                        (*stat_ptr).st_nlink = 1;
+                        (*stat_ptr).st_uid = 0;
+                        (*stat_ptr).st_gid = 0;
+                        (*stat_ptr).st_rdev = 0;
+                        (*stat_ptr).st_size = st.size as i64;
+                        (*stat_ptr).st_blksize = 512;
+                        (*stat_ptr).st_blocks = ((st.size + 511) / 512) as i64;
                     }
-                    Err(_) => u64::MAX,
+                    0
                 }
-            } else {
-                u64::MAX
+                Err(_) => u64::MAX,
             }
         }
         SYS_EXIT => {
@@ -346,8 +342,10 @@ pub extern "C" fn syscall_dispatcher(
                 Ok((reaped_pid, exit_code)) => {
                     let status_ptr = a2 as *mut i32;
                     if !status_ptr.is_null() {
-                        unsafe {
-                            *status_ptr = exit_code;
+                        if crate::security::validate_user_buffer(status_ptr as *const u8, core::mem::size_of::<i32>()).is_ok() {
+                            unsafe {
+                                *status_ptr = exit_code;
+                            }
                         }
                     }
                     reaped_pid.as_u64()

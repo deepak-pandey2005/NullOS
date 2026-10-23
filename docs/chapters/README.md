@@ -1,5 +1,5 @@
 # NullOS: The Complete Operating Systems Course
-### *A 20-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
+### *A 21-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
 
 Welcome to the comprehensive textbook documentation for **NullOS**. This curriculum teaches operating system engineering from absolute first principles: starting from raw motherboard electricity and transistors, all the way to multitasking, 4-level paging, and Ring 3 user mode with fast hardware system calls.
 
@@ -186,3 +186,12 @@ Welcome to the comprehensive textbook documentation for **NullOS**. This curricu
 - Avoiding silicon pitfalls: `EFER.NXE` propagation, `CR4.PAE/OSFXSR`, and Local APIC timer masking.
 - Interactive shell diagnostics (`cpus`, `smp`) and multi-core verification in QEMU.
 
+### [Chapter 21: Operating System Security & Kernel Hardening](chapter21_kernel_hardening_and_security.md)
+- The Ring 0 / Ring 3 threat model and privilege escalation attacks.
+- Hardware-enforced silicon defenses: SMEP (`CR4.SMEP = 1 << 20`) preventing user-code execution in Ring 0.
+- Supervisor Mode Access Prevention: SMAP (`CR4.SMAP = 1 << 21`) with `stac` and `clac` explicit guard blocks.
+- The Write XOR Execute ($W \oplus X$) memory permission policy via `CR0.WP` and `EFER.NXE` (PTE bit 63).
+- Canonical address space boundary isolation (`USER_SPACE_CEILING`) and pointer sanitization (`validate_user_buffer`).
+- Safe userspace memory transfer primitives (`copy_from_user`, `copy_to_user`, `copy_str_from_user`).
+- Stack defense-in-depth: 64-bit stack canaries (`__stack_chk_fail`) and unmapped 4 KiB guard pages.
+- Interactive security inspection with the `sec` shell command.

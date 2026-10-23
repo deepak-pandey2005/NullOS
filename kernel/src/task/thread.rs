@@ -35,7 +35,10 @@ pub struct KernelStack {
 
 impl KernelStack {
     pub fn new(size: usize) -> Self {
-        let memory = vec![0u8; size].into_boxed_slice();
+        let mut memory = vec![0u8; size].into_boxed_slice();
+        if memory.len() >= 8 {
+            crate::security::place_canary(memory.as_mut_ptr() as *mut u64);
+        }
         Self { memory }
     }
 
@@ -47,6 +50,15 @@ impl KernelStack {
     #[inline]
     pub fn top(&self) -> u64 {
         (self.bottom() + (self.memory.len() as u64)) & !0xF
+    }
+
+    #[inline]
+    pub fn verify_canary(&self) -> bool {
+        if self.memory.len() >= 8 {
+            crate::security::verify_canary(self.memory.as_ptr() as *const u64)
+        } else {
+            true
+        }
     }
 }
 

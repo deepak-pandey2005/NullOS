@@ -12,6 +12,65 @@ use crate::println;
 
 const IA32_EFER_MSR: u32 = 0xC000_0080;
 
+/// Queries the x86 CPUID instruction for the specified leaf and subleaf.
+#[inline]
+pub fn cpuid(leaf: u32, subleaf: u32) -> (u32, u32, u32, u32) {
+    let mut eax: u32;
+    let ebx: u32;
+    let mut ecx: u32;
+    let edx: u32;
+    unsafe {
+        core::arch::asm!(
+            "push rbx",
+            "cpuid",
+            "mov {tmp:e}, ebx",
+            "pop rbx",
+            inout("eax") leaf => eax,
+            inout("ecx") subleaf => ecx,
+            tmp = out(reg) ebx,
+            out("edx") edx,
+            options(nomem)
+        );
+    }
+    (eax, ebx, ecx, edx)
+}
+
+/// Temporarily enables supervisor mode access to user memory (sets EFLAGS.AC = 1).
+#[inline(always)]
+pub unsafe fn stac() {
+    unsafe {
+        core::arch::asm!("stac", options(nomem, nostack));
+    }
+}
+
+/// Disables supervisor mode access to user memory (clears EFLAGS.AC = 0).
+#[inline(always)]
+pub unsafe fn clac() {
+    unsafe {
+        core::arch::asm!("clac", options(nomem, nostack));
+    }
+}
+
+#[inline]
+pub fn is_wp_enabled() -> bool {
+    (read_cr0() & (1 << 16)) != 0
+}
+
+#[inline]
+pub fn is_nxe_enabled() -> bool {
+    unsafe { (read_msr(IA32_EFER_MSR) & (1 << 11)) != 0 }
+}
+
+#[inline]
+pub fn is_smep_enabled() -> bool {
+    (read_cr4() & (1 << 20)) != 0
+}
+
+#[inline]
+pub fn is_smap_enabled() -> bool {
+    (read_cr4() & (1 << 21)) != 0
+}
+
 #[inline]
 unsafe fn read_msr(msr: u32) -> u64 {
     let low: u32;
@@ -32,7 +91,7 @@ unsafe fn write_msr(msr: u32, val: u64) {
 }
 
 #[inline]
-unsafe fn read_cr0() -> u64 {
+pub fn read_cr0() -> u64 {
     let val: u64;
     unsafe {
         core::arch::asm!("mov {}, cr0", out(reg) val, options(nomem, nostack));
@@ -48,7 +107,7 @@ unsafe fn write_cr0(val: u64) {
 }
 
 #[inline]
-unsafe fn read_cr4() -> u64 {
+pub fn read_cr4() -> u64 {
     let val: u64;
     unsafe {
         core::arch::asm!("mov {}, cr4", out(reg) val, options(nomem, nostack));
@@ -86,10 +145,29 @@ pub fn init() {
         // - Bit 10: OSXMMEXCPT (Operating System Unmasked SIMD Exception Support)
         let mut cr4 = read_cr4();
         cr4 |= (1 << 7) | (1 << 9) | (1 << 10);
-        write_cr4(cr4);
-    }
 
-    println!(
-        "[CPU] Modern CPU features activated: CR0.WP (Write-Protect), EFER.NXE (No-Execute), CR4.PGE (Global Pages), CR4.OSFXSR (SSE/AVX)."
-    );
+        // 4. Query Extended Features via CPUID Leaf 7 Subleaf 0
+        let (max_leaf, _, _, _) = cpuid(0, 0);
+        let mut smep_supported = false;
+        let mut smap_supported = false;
+
+        if max_leaf >= 7 {
+            let (_, ebx, _, _) = cpuid(7, 0);
+            smep_supported = (ebx & (1 << 7)) != 0;
+            smap_supported = (ebx & (1 << 20)) != 0;
+        }
+
+        // Enable SMEP (Supervisor Mode Execution Prevention, Bit 20 in CR4) if supported
+        if smep_supported {
+            cr4 |= 1 << 20;
+        }
+
+        write_cr4(cr4);
+
+        println!(
+            "[CPU] Modern CPU features activated: CR0.WP, EFER.NXE, CR4.PGE, CR4.OSFXSR (SMEP: {}, SMAP: {}).",
+            if smep_supported { "Enabled" } else { "Unsupported" },
+            if smap_supported { "Supported" } else { "Unsupported" }
+        );
+    }
 }

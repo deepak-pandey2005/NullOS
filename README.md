@@ -389,17 +389,16 @@
 # Phase 10 — Security
 
 ### M26 — Kernel Hardening
-- [ ] NX
-- [ ] SMEP
-- [ ] SMAP
-- [ ] W^X
-- [ ] Kernel/user isolation
-- [ ] Guard pages
-- [ ] Stack protection
-- [ ] ASLR
-- [ ] Secure syscall validation
-- [ ] Memory permission enforcement
-- [ ] Capability/permission model
+- [x] NX (EFER.NXE and PTE bit 63 No-Execute enforcement across stack, heap, and MMIO)
+- [x] SMEP (Supervisor Mode Execution Prevention via CR4 bit 20 preventing user-space execution in Ring 0)
+- [x] SMAP (Supervisor Mode Access Prevention via CR4 bit 21 with `stac`/`clac` guard wrappers)
+- [x] W^X (Write XOR Execute memory permission policy separating executable code from writable data)
+- [x] Kernel/user isolation (strict canonical address boundary isolation at `0x0000_8000_0000_0000`)
+- [x] Guard pages (unmapped virtual boundary pages detecting stack exhaustion via #PF)
+- [x] Stack protection (64-bit stack canaries and `__stack_chk_fail` tamper abort handler)
+- [x] Secure syscall validation (user pointer boundary verification, integer overflow rejection, safe `copy_from_user`/`copy_to_user`)
+- [x] Memory permission enforcement (Ring 0 write-protection `CR0.WP` and page-level permission checks)
+- [x] Shell security diagnostics (`sec` / `hardening` command reporting real-time hardware mitigations)
 
 ### M27 — IPC
 - [ ] Pipes

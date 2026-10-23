@@ -430,6 +430,7 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str("  ping <ip>            - Send ICMP Echo Request packets to network host\n");
             out.push_str("  netstat              - Display active network sockets and TCP states\n");
             out.push_str("  cpus                 - Display symmetric multiprocessing CPU core statuses\n");
+            out.push_str("  sec                  - Display kernel security mitigations & hardening status\n");
             out.push_str("  mem                  - Display physical memory manager statistics\n");
             out.push_str("  uptime               - Display system timer ticks\n");
             out.push_str("  reboot               - Reboot physical or virtual machine\n");
@@ -959,6 +960,19 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             }
             (out, 0)
         }
+        "sec" | "hardening" => {
+            let rep = crate::security::get_security_report();
+            let mut out = alloc::format!("{:<30} {:<15}\n", "SECURITY FEATURE", "STATUS");
+            out.push_str("----------------------------------------------\n");
+            out.push_str(&alloc::format!("{:<30} {:<15}\n", "CR0.WP (Kernel Write Protect)", if rep.cr0_wp { "Enforced" } else { "Disabled" }));
+            out.push_str(&alloc::format!("{:<30} {:<15}\n", "EFER.NXE (No-Execute Pages)", if rep.efer_nxe { "Enforced" } else { "Disabled" }));
+            out.push_str(&alloc::format!("{:<30} {:<15}\n", "CR4.SMEP (Exec Prevention)", if rep.cr4_smep { "Active" } else { "Unsupported" }));
+            out.push_str(&alloc::format!("{:<30} {:<15}\n", "CR4.SMAP (Access Prevention)", if rep.smap_supported { "Supported" } else { "Unsupported" }));
+            out.push_str(&alloc::format!("{:<30} {:<15}\n", "W^X Memory Permission Policy", if rep.wx_enforced { "Enforced" } else { "Disabled" }));
+            out.push_str(&alloc::format!("{:<30} {:<15}\n", "Stack Smashing Canaries", if rep.stack_canary_active { "Active" } else { "Disabled" }));
+            out.push_str(&alloc::format!("{:<30} {:<15}\n", "User Pointer Sanitization", if rep.user_boundary_enforced { "Enforced" } else { "Disabled" }));
+            (out, 0)
+        }
         "mem" => {
             let mut out = String::new();
             out.push_str("Physical Memory Manager (PMM):\n");
@@ -1299,7 +1313,10 @@ pub fn run_automated_tests() {
     println!("[SHELL] 17. Testing SMP Multiprocessor Status (cpus)...");
     execute_command("cpus");
 
-    println!("[SHELL] All Phase 7, 8 & 9 Shell, Network and SMP tests passed successfully!");
+    println!("[SHELL] 18. Testing Kernel Security Mitigations (sec)...");
+    execute_command("sec");
+
+    println!("[SHELL] All Phase 7, 8, 9 & 10 Shell, Network, SMP and Security tests passed successfully!");
 }
 
 /// Interactive Shell Loop that listens on both PS/2 Keyboard and COM1 serial input

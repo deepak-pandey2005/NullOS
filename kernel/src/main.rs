@@ -8,6 +8,7 @@ mod drivers;
 mod fs;
 mod memory;
 mod net;
+mod security;
 mod sync;
 mod task;
 
@@ -106,6 +107,10 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // Initialize Multiprocessing & Bootstrap Application Processors (Phase 9 - M25 SMP)
     arch::x86_64::smp::init();
     arch::x86_64::smp::run_self_tests();
+
+    // Initialize Kernel Hardening & Security Subsystem (Phase 10 - M26)
+    security::init_canary();
+    security::run_self_tests();
 
     // Initialize Preemptive Multitasking & Kernel Threads (Phase 4 - M10, M11 & Phase 5 - M12, M13, M14)
     task::init();
