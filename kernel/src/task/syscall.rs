@@ -15,17 +15,28 @@ pub const SYS_MMAP: u64 = 9;
 pub const SYS_PIPE: u64 = 22;
 pub const SYS_YIELD: u64 = 24;
 pub const SYS_GETPID: u64 = 39;
+pub const SYS_CLONE: u64 = 56;
+pub const SYS_THREAD_EXIT: u64 = 57;
+pub const SYS_THREAD_JOIN: u64 = 58;
 pub const SYS_EXIT: u64 = 60;
 pub const SYS_WAITPID: u64 = 61;
 pub const SYS_KILL: u64 = 62;
 pub const SYS_SLEEP: u64 = 100;
+pub const SYS_ARCH_PRCTL: u64 = 158;
+pub const SYS_GETTID: u64 = 186;
+pub const SYS_FUTEX: u64 = 202;
+
+pub const ARCH_SET_GS: u64 = 0x1001;
+pub const ARCH_SET_FS: u64 = 0x1002;
+pub const ARCH_GET_FS: u64 = 0x1003;
+pub const ARCH_GET_GS: u64 = 0x1004;
 
 pub const PROT_READ: u64 = 1;
 pub const PROT_WRITE: u64 = 2;
 pub const PROT_EXEC: u64 = 4;
 
 const USER_CODE_VADDR: u64 = 0x0040_0000; // 4 MiB
-const USER_FAULT_CODE_VADDR: u64 = 0x0050_0000;
+const USER_FAULT_CODE_VADDR: u64 = 0x2000_0000;
 const USER_STACK_VADDR: u64 = 0x7000_0000;
 const USER_STACK_TOP: u64 = USER_STACK_VADDR + PAGE_SIZE_4K - 16;
 
@@ -110,7 +121,7 @@ pub extern "C" fn syscall_dispatcher(
     a2: u64,
     a3: u64,
     a4: u64,
-    _a5: u64,
+    a5: u64,
 ) -> u64 {
     match num {
         SYS_READ => {
@@ -411,6 +422,133 @@ pub extern "C" fn syscall_dispatcher(
                 u64::MAX
             }
         }
+        SYS_CLONE => {
+            let entry_point = a1;
+            let user_stack_top = a2;
+            let arg = a3;
+            let tls_base = a4;
+
+            if entry_point >= crate::security::USER_SPACE_CEILING
+                || user_stack_top >= crate::security::USER_SPACE_CEILING
+            {
+                return u64::MAX;
+            }
+            if tls_base != 0 && tls_base >= crate::security::USER_SPACE_CEILING {
+                return u64::MAX;
+            }
+
+            let cur_pid = current_pid();
+            let tid = crate::task::spawn_user(
+                "user_thread",
+                entry_point,
+                user_stack_top,
+                arg,
+                tls_base,
+                cur_pid,
+                1,
+            );
+            {
+                let mut proc_table = super::process::PROCESS_TABLE.lock();
+                if let Some(proc) = proc_table.get_mut(cur_pid) {
+                    proc.threads.push(tid);
+                }
+            }
+            tid.0
+        }
+        SYS_THREAD_EXIT => {
+            let status = a1 as i32;
+            let tid = crate::task::current_thread_id();
+            println!(
+                "\x1b[32m[USER THREAD]\x1b[0m Thread {:?} exited with code: {}",
+                tid, status
+            );
+            super::exit();
+        }
+        SYS_THREAD_JOIN => {
+            let target_tid = a1;
+            let status_ptr = a2 as *mut i32;
+            loop {
+                let thread_exists = {
+                    let list = crate::task::thread_list();
+                    list.iter().any(|t| t.id.0 == target_tid)
+                };
+                if !thread_exists {
+                    if !status_ptr.is_null()
+                        && crate::security::validate_user_buffer(status_ptr as *const u8, 4).is_ok()
+                    {
+                        unsafe {
+                            *status_ptr = 0;
+                        }
+                    }
+                    return 0;
+                }
+                super::yield_now();
+            }
+        }
+        SYS_ARCH_PRCTL => {
+            let code = a1;
+            let addr = a2;
+            match code {
+                ARCH_SET_FS => {
+                    if addr >= crate::security::USER_SPACE_CEILING {
+                        return u64::MAX;
+                    }
+                    unsafe {
+                        crate::arch::x86_64::syscall::write_msr(
+                            crate::arch::x86_64::syscall::IA32_FS_BASE_MSR,
+                            addr,
+                        );
+                    }
+                    0
+                }
+                ARCH_GET_FS => {
+                    let ptr = addr as *mut u64;
+                    if ptr.is_null()
+                        || crate::security::validate_user_buffer(ptr as *const u8, 8).is_err()
+                    {
+                        return u64::MAX;
+                    }
+                    unsafe {
+                        let fs = crate::arch::x86_64::syscall::read_msr(
+                            crate::arch::x86_64::syscall::IA32_FS_BASE_MSR,
+                        );
+                        *ptr = fs;
+                    }
+                    0
+                }
+                _ => u64::MAX,
+            }
+        }
+        SYS_GETTID => {
+            crate::task::current_thread_id().map(|t| t.0).unwrap_or(0)
+        }
+        SYS_FUTEX => {
+            let uaddr = a1;
+            let op = a2 as u32;
+            let val = a3 as u32;
+            let uaddr2 = a4;
+            let val3 = a5 as u32;
+
+            let op_type = op & 0x7F;
+            match op_type {
+                crate::sync::FUTEX_WAIT => match crate::sync::futex_wait(uaddr, val) {
+                    Ok(_) => 0,
+                    Err("EAGAIN") => (-11i64) as u64,
+                    Err(_) => (-14i64) as u64,
+                },
+                crate::sync::FUTEX_WAKE => match crate::sync::futex_wake(uaddr, val) {
+                    Ok(woken) => woken as u64,
+                    Err(_) => (-14i64) as u64,
+                },
+                crate::sync::FUTEX_REQUEUE => {
+                    match crate::sync::futex_requeue(uaddr, val, uaddr2, val3) {
+                        Ok(woken) => woken as u64,
+                        Err(_) => (-14i64) as u64,
+                    }
+                }
+                _ => u64::MAX,
+            }
+        }
         unknown => {
             println!("[SYSCALL] Unknown syscall number: {}", unknown);
             u64::MAX
@@ -537,6 +675,8 @@ pub fn run_user_mode_self_test() {
     for _ in 0..5 {
         super::yield_now();
     }
+
+    let _ = crate::memory::paging::unmap_page(fault_page);
 
     println!("[USER] User Mode Crash Handling verified: Faulting user thread was terminated cleanly while kernel remained intact!");
 

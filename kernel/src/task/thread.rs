@@ -62,7 +62,7 @@ impl KernelStack {
     }
 }
 
-/// Thread Control Block (TCB) representing an independent kernel thread of execution.
+/// Thread Control Block (TCB) representing an independent kernel or user thread of execution.
 pub struct Thread {
     pub id: ThreadId,
     pub name: String,
@@ -72,13 +72,17 @@ pub struct Thread {
     pub priority: u8,
     pub total_ticks: u64,
     pub sleep_until: u64,
+    pub fs_base: u64,
+    pub process_id: Option<super::process::ProcessId>,
+    pub is_user: bool,
+    pub exit_code: Option<i32>,
 }
 
 unsafe extern "C" {
     pub fn switch_threads(prev_rsp_ptr: *mut u64, next_rsp: u64);
 }
 
-/// Trampoline wrapper executed upon first entry into a newly created thread.
+/// Trampoline wrapper executed upon first entry into a newly created kernel thread.
 extern "C" fn thread_entry_wrapper() -> ! {
     let entry_fn_addr: u64;
     unsafe {
@@ -92,27 +96,40 @@ extern "C" fn thread_entry_wrapper() -> ! {
     super::exit();
 }
 
+/// Trampoline wrapper executed upon first entry into a newly created user thread.
+extern "C" fn user_thread_wrapper() -> ! {
+    let entry: u64;
+    let user_stack: u64;
+    let arg: u64;
+    let tls_base: u64;
+    unsafe {
+        core::arch::asm!(
+            "mov {}, r12",
+            "mov {}, r13",
+            "mov {}, r14",
+            "mov {}, r15",
+            out(reg) entry,
+            out(reg) user_stack,
+            out(reg) arg,
+            out(reg) tls_base,
+            options(nomem, nostack)
+        );
+        if tls_base != 0 {
+            crate::arch::x86_64::syscall::write_msr(crate::arch::x86_64::syscall::IA32_FS_BASE_MSR, tls_base);
+        }
+        crate::arch::x86_64::syscall::enter_user_mode_thread(entry, user_stack, arg);
+    }
+}
+
 impl Thread {
     /// Creates a new Thread with an allocated stack pre-configured for `switch_threads`.
     pub fn new(name: &str, entry: fn(), priority: u8) -> Self {
         let id = ThreadId::new();
         let stack = KernelStack::new(DEFAULT_STACK_SIZE);
 
-        // Pre-configure stack frame so switch_threads can "return" into thread_entry_wrapper.
-        // SysV AMD64 stack must be 16-byte aligned before `call`.
         let mut sp = stack.top() & !0xF;
 
         unsafe {
-            // Reserve space for the context frame pushed by switch_threads:
-            // 1. Return address (%rip): thread_entry_wrapper
-            // 2. Flags: RFLAGS (0x202 = Interrupts Enabled)
-            // 3. %rbp: 0
-            // 4. %rbx: 0
-            // 5. %r12: entry function address (read by thread_entry_wrapper)
-            // 6. %r13: 0
-            // 7. %r14: 0
-            // 8. %r15: 0
-
             let push = |sp: &mut u64, val: u64| {
                 *sp -= 8;
                 let ptr = *sp as *mut u64;
@@ -122,17 +139,15 @@ impl Thread {
             // 1. Thread entry point (popped 8th by `ret` in switch_threads)
             push(&mut sp, thread_entry_wrapper as *const () as usize as u64);
 
-            // 2. Callee-saved registers (popped in reverse order of switch_threads pushes)
-            // switch_threads pushes: r15, r14, r13, r12, rbx, rbp, flags
-            // switch_threads pops:   flags, rbp, rbx, r12, r13, r14, r15, ret
-            push(&mut sp, 0); // %r15 (popped 7th)
-            push(&mut sp, 0); // %r14 (popped 6th)
-            push(&mut sp, 0); // %r13 (popped 5th)
-            push(&mut sp, entry as *const () as usize as u64); // %r12 (popped 4th by switch_threads)
-            push(&mut sp, 0); // %rbx (popped 3rd)
-            push(&mut sp, 0); // %rbp (popped 2nd)
+            // 2. Callee-saved registers
+            push(&mut sp, 0); // %r15
+            push(&mut sp, 0); // %r14
+            push(&mut sp, 0); // %r13
+            push(&mut sp, entry as *const () as usize as u64); // %r12
+            push(&mut sp, 0); // %rbx
+            push(&mut sp, 0); // %rbp
 
-            // 3. Initial RFLAGS (popped 1st by `popfq`)
+            // 3. Initial RFLAGS
             push(&mut sp, 0x202); // RFLAGS with IF enabled
         }
 
@@ -145,6 +160,62 @@ impl Thread {
             priority,
             total_ticks: 0,
             sleep_until: 0,
+            fs_base: 0,
+            process_id: None,
+            is_user: false,
+            exit_code: None,
+        }
+    }
+
+    /// Creates a new Ring 3 user thread sharing its parent's process address space.
+    pub fn new_user(
+        name: &str,
+        entry: u64,
+        user_stack: u64,
+        arg: u64,
+        tls_base: u64,
+        process_id: super::process::ProcessId,
+        priority: u8,
+    ) -> Self {
+        let id = ThreadId::new();
+        let stack = KernelStack::new(DEFAULT_STACK_SIZE);
+        let mut sp = stack.top() & !0xF;
+
+        unsafe {
+            let push = |sp: &mut u64, val: u64| {
+                *sp -= 8;
+                let ptr = *sp as *mut u64;
+                *ptr = val;
+            };
+
+            // 1. Thread entry point
+            push(&mut sp, user_thread_wrapper as *const () as usize as u64);
+
+            // 2. Callee-saved registers
+            push(&mut sp, tls_base);   // %r15
+            push(&mut sp, arg);        // %r14
+            push(&mut sp, user_stack); // %r13
+            push(&mut sp, entry);      // %r12
+            push(&mut sp, 0);          // %rbx
+            push(&mut sp, 0);          // %rbp
+
+            // 3. Initial RFLAGS
+            push(&mut sp, 0x202);
+        }
+
+        Self {
+            id,
+            name: String::from(name),
+            state: ThreadState::Ready,
+            stack,
+            rsp: sp,
+            priority,
+            total_ticks: 0,
+            sleep_until: 0,
+            fs_base: tls_base,
+            process_id: Some(process_id),
+            is_user: true,
+            exit_code: None,
         }
     }
 
@@ -159,6 +230,10 @@ impl Thread {
             priority: 0,
             total_ticks: 0,
             sleep_until: 0,
+            fs_base: 0,
+            process_id: Some(super::process::ProcessId::INIT),
+            is_user: false,
+            exit_code: None,
         }
     }
 }

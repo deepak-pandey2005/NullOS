@@ -4,18 +4,31 @@
 #include <stdint.h>
 
 /* NullOS System Call Numbers matching kernel ABI */
-#define SYS_READ    0
-#define SYS_WRITE   1
-#define SYS_OPEN    2
-#define SYS_CLOSE   3
-#define SYS_STAT    4
-#define SYS_LSEEK   8
-#define SYS_MMAP    9
-#define SYS_YIELD   24
-#define SYS_GETPID  39
-#define SYS_EXIT    60
-#define SYS_WAITPID 61
-#define SYS_SLEEP   100
+#define SYS_READ        0
+#define SYS_WRITE       1
+#define SYS_OPEN        2
+#define SYS_CLOSE       3
+#define SYS_STAT        4
+#define SYS_LSEEK       8
+#define SYS_MMAP        9
+#define SYS_PIPE        22
+#define SYS_YIELD       24
+#define SYS_GETPID      39
+#define SYS_CLONE       56
+#define SYS_THREAD_EXIT 57
+#define SYS_THREAD_JOIN 58
+#define SYS_EXIT        60
+#define SYS_WAITPID     61
+#define SYS_KILL        62
+#define SYS_SLEEP       100
+#define SYS_ARCH_PRCTL  158
+#define SYS_GETTID      186
+#define SYS_FUTEX       202
+
+#define ARCH_SET_GS     0x1001
+#define ARCH_SET_FS     0x1002
+#define ARCH_GET_FS     0x1003
+#define ARCH_GET_GS     0x1004
 
 /*
  * x86_64 Fast System Call Invocations (SYSCALL / SYSRET ABI).

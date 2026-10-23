@@ -11,13 +11,14 @@ use super::thread::{switch_threads, Thread, ThreadId, ThreadState};
 use crate::println;
 use crate::sync::Spinlock;
 use alloc::boxed::Box;
-use alloc::collections::VecDeque;
+use alloc::collections::{BTreeMap, VecDeque};
 use alloc::vec::Vec;
 
 pub struct Scheduler {
     current: Option<Box<Thread>>,
     ready_queue: VecDeque<Box<Thread>>,
     sleeping_queue: Vec<Box<Thread>>,
+    blocked_threads: BTreeMap<ThreadId, Box<Thread>>,
     dead_threads: Vec<Box<Thread>>,
     total_switches: u64,
 }
@@ -30,6 +31,7 @@ impl Scheduler {
             current: None,
             ready_queue: VecDeque::new(),
             sleeping_queue: Vec::new(),
+            blocked_threads: BTreeMap::new(),
             dead_threads: Vec::new(),
             total_switches: 0,
         }
@@ -102,6 +104,12 @@ pub fn yield_now() {
 
         crate::arch::x86_64::gdt::set_tss_rsp0(next.stack.top());
         crate::arch::x86_64::syscall::set_kernel_rsp(next.stack.top());
+        unsafe {
+            crate::arch::x86_64::syscall::write_msr(
+                crate::arch::x86_64::syscall::IA32_FS_BASE_MSR,
+                next.fs_base,
+            );
+        }
         sched.current = Some(next);
 
         (prev_rsp_ptr, next_rsp)
@@ -169,6 +177,12 @@ pub fn timer_tick(current_tick: u64) {
 
         crate::arch::x86_64::gdt::set_tss_rsp0(next.stack.top());
         crate::arch::x86_64::syscall::set_kernel_rsp(next.stack.top());
+        unsafe {
+            crate::arch::x86_64::syscall::write_msr(
+                crate::arch::x86_64::syscall::IA32_FS_BASE_MSR,
+                next.fs_base,
+            );
+        }
         sched.current = Some(next);
 
         (prev_rsp_ptr, next_rsp)
@@ -214,6 +228,12 @@ pub fn sleep(ticks: u64) {
         sched.sleeping_queue.push(current);
         crate::arch::x86_64::gdt::set_tss_rsp0(next.stack.top());
         crate::arch::x86_64::syscall::set_kernel_rsp(next.stack.top());
+        unsafe {
+            crate::arch::x86_64::syscall::write_msr(
+                crate::arch::x86_64::syscall::IA32_FS_BASE_MSR,
+                next.fs_base,
+            );
+        }
         sched.current = Some(next);
 
         (prev_rsp_ptr, next_rsp)
@@ -222,6 +242,103 @@ pub fn sleep(ticks: u64) {
     unsafe {
         switch_threads(prev_rsp_ptr, next_rsp);
     }
+}
+
+/// Blocks the current thread, transitioning it to ThreadState::Blocked,
+/// and immediately context switches to the next ready thread.
+pub fn block_current_thread() {
+    let (prev_rsp_ptr, next_rsp) = {
+        let mut guard = SCHEDULER.lock();
+        let sched = match guard.as_mut() {
+            Some(s) => s,
+            None => return,
+        };
+
+        sched.dead_threads.clear();
+
+        let mut current = match sched.current.take() {
+            Some(c) => c,
+            None => return,
+        };
+
+        current.state = ThreadState::Blocked;
+        let prev_rsp_ptr = &mut current.rsp as *mut u64;
+        let tid = current.id;
+        sched.blocked_threads.insert(tid, current);
+
+        // Fetch next ready thread
+        let mut next = match sched.ready_queue.pop_front() {
+            Some(t) => t,
+            None => {
+                // If no threads ready, return and continue current thread
+                let cur = sched.blocked_threads.remove(&tid).unwrap();
+                sched.current = Some(cur);
+                return;
+            }
+        };
+
+        next.state = ThreadState::Running;
+        sched.total_switches += 1;
+        let next_rsp = next.rsp;
+
+        crate::arch::x86_64::gdt::set_tss_rsp0(next.stack.top());
+        crate::arch::x86_64::syscall::set_kernel_rsp(next.stack.top());
+        unsafe {
+            crate::arch::x86_64::syscall::write_msr(
+                crate::arch::x86_64::syscall::IA32_FS_BASE_MSR,
+                next.fs_base,
+            );
+        }
+        sched.current = Some(next);
+
+        (prev_rsp_ptr, next_rsp)
+    };
+
+    unsafe {
+        switch_threads(prev_rsp_ptr, next_rsp);
+    }
+}
+
+/// Unblocks a previously blocked thread by moving it back to the ready queue.
+pub fn wake_thread(id: ThreadId) -> bool {
+    let mut guard = SCHEDULER.lock();
+    if let Some(ref mut sched) = *guard {
+        if let Some(mut thread) = sched.blocked_threads.remove(&id) {
+            thread.state = ThreadState::Ready;
+            sched.ready_queue.push_back(thread);
+            return true;
+        }
+    }
+    false
+}
+
+/// Returns the ThreadId of the currently executing thread.
+pub fn current_thread_id() -> Option<ThreadId> {
+    let guard = SCHEDULER.lock();
+    guard.as_ref().and_then(|s| s.current.as_ref().map(|t| t.id))
+}
+
+/// Spawns a user thread in the specified process.
+pub fn spawn_user(
+    name: &str,
+    entry: u64,
+    user_stack: u64,
+    arg: u64,
+    tls_base: u64,
+    pid: super::process::ProcessId,
+    priority: u8,
+) -> ThreadId {
+    let thread = Box::new(Thread::new_user(name, entry, user_stack, arg, tls_base, pid, priority));
+    let id = thread.id;
+
+    if let Some(ref mut sched) = *SCHEDULER.lock() {
+        println!("[TASK] Spawned user thread #{} \"{}\" in PID {} (entry {:#x}, stack {:#x})",
+            id.0, thread.name, pid.0, entry, user_stack
+        );
+        sched.ready_queue.push_back(thread);
+    }
+
+    id
 }
 
 /// Terminates the current thread cleanly.
@@ -243,6 +360,12 @@ pub fn exit() -> ! {
             let rsp = next.rsp;
             crate::arch::x86_64::gdt::set_tss_rsp0(next.stack.top());
             crate::arch::x86_64::syscall::set_kernel_rsp(next.stack.top());
+            unsafe {
+                crate::arch::x86_64::syscall::write_msr(
+                    crate::arch::x86_64::syscall::IA32_FS_BASE_MSR,
+                    next.fs_base,
+                );
+            }
             sched.current = Some(next);
             sched.total_switches += 1;
             rsp
@@ -264,6 +387,86 @@ pub fn exit() -> ! {
             core::arch::asm!("sti; hlt");
         }
     }
+}
+
+/// Diagnostic thread information struct for inspection.
+#[derive(Debug, Clone)]
+pub struct ThreadInfo {
+    pub id: ThreadId,
+    pub name: alloc::string::String,
+    pub state: ThreadState,
+    pub priority: u8,
+    pub total_ticks: u64,
+    pub is_user: bool,
+    pub process_id: Option<super::process::ProcessId>,
+    pub stack_bottom: u64,
+    pub stack_top: u64,
+    pub fs_base: u64,
+}
+
+/// Returns a snapshot of all active, sleeping, and blocked threads.
+pub fn thread_list() -> Vec<ThreadInfo> {
+    let guard = SCHEDULER.lock();
+    let mut list = Vec::new();
+    if let Some(ref sched) = *guard {
+        if let Some(ref cur) = sched.current {
+            list.push(ThreadInfo {
+                id: cur.id,
+                name: cur.name.clone(),
+                state: cur.state,
+                priority: cur.priority,
+                total_ticks: cur.total_ticks,
+                is_user: cur.is_user,
+                process_id: cur.process_id,
+                stack_bottom: cur.stack.bottom(),
+                stack_top: cur.stack.top(),
+                fs_base: cur.fs_base,
+            });
+        }
+        for t in &sched.ready_queue {
+            list.push(ThreadInfo {
+                id: t.id,
+                name: t.name.clone(),
+                state: t.state,
+                priority: t.priority,
+                total_ticks: t.total_ticks,
+                is_user: t.is_user,
+                process_id: t.process_id,
+                stack_bottom: t.stack.bottom(),
+                stack_top: t.stack.top(),
+                fs_base: t.fs_base,
+            });
+        }
+        for (_, t) in &sched.blocked_threads {
+            list.push(ThreadInfo {
+                id: t.id,
+                name: t.name.clone(),
+                state: t.state,
+                priority: t.priority,
+                total_ticks: t.total_ticks,
+                is_user: t.is_user,
+                process_id: t.process_id,
+                stack_bottom: t.stack.bottom(),
+                stack_top: t.stack.top(),
+                fs_base: t.fs_base,
+            });
+        }
+        for t in &sched.sleeping_queue {
+            list.push(ThreadInfo {
+                id: t.id,
+                name: t.name.clone(),
+                state: t.state,
+                priority: t.priority,
+                total_ticks: t.total_ticks,
+                is_user: t.is_user,
+                process_id: t.process_id,
+                stack_bottom: t.stack.bottom(),
+                stack_top: t.stack.top(),
+                fs_base: t.fs_base,
+            });
+        }
+    }
+    list
 }
 
 /// Returns current scheduler statistics.

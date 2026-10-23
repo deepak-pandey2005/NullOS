@@ -993,6 +993,24 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             }
             (out, 0)
         }
+        "threads" => {
+            let mut out = String::new();
+            out.push_str("Active System Threads & Runtime State:\n");
+            out.push_str("----------------------------------------------------------------------------------\n");
+            out.push_str(&alloc::format!("{:<6} {:<6} {:<16} {:<12} {:<6} {:<10} {:<18}\n",
+                "TID", "PID", "NAME", "STATE", "PRIO", "TICKS", "FS_BASE"
+            ));
+            out.push_str("----------------------------------------------------------------------------------\n");
+            let list = crate::task::thread_list();
+            for t in list {
+                let pid_str = t.process_id.map(|p| alloc::format!("{}", p.0)).unwrap_or_else(|| String::from("-"));
+                let state_str = alloc::format!("{:?}", t.state);
+                out.push_str(&alloc::format!("{:<6} {:<6} {:<16} {:<12} {:<6} {:<10} {:#018x}\n",
+                    t.id.0, pid_str, t.name, state_str, t.priority, t.total_ticks, t.fs_base
+                ));
+            }
+            (out, 0)
+        }
         "mem" => {
             let mut out = String::new();
             out.push_str("Physical Memory Manager (PMM):\n");
@@ -1339,7 +1357,31 @@ pub fn run_automated_tests() {
     println!("[SHELL] 19. Testing Inter-Process Communication (ipc)...");
     execute_command("ipc");
 
-    println!("[SHELL] All Phase 7, 8, 9 & 10 Shell, Network, SMP, Security and IPC tests passed successfully!");
+    println!("[SHELL] 20. Testing User Threads & Synchronization (threads)...");
+    execute_command("threads");
+
+    // Kernel synchronization primitive self-tests
+    let test_mutex = crate::sync::Mutex::new(42);
+    {
+        let mut guard = test_mutex.lock();
+        *guard += 10;
+    }
+    assert_eq!(*test_mutex.lock(), 52);
+
+    let test_sem = crate::sync::Semaphore::new(2);
+    assert_eq!(test_sem.get_value(), 2);
+    test_sem.wait();
+    assert_eq!(test_sem.get_value(), 1);
+    assert!(test_sem.try_wait());
+    assert!(!test_sem.try_wait());
+    test_sem.post();
+    assert_eq!(test_sem.get_value(), 1);
+
+    if crate::fs::vfs::VFS.resolve_path("/disk/THREADS.ELF").is_ok() {
+        execute_command("exec /disk/THREADS.ELF");
+    }
+
+    println!("[SHELL] All Phase 7, 8, 9, 10 & 11 Shell, Network, SMP, Security, IPC and Threads tests passed successfully!");
 }
 
 /// Interactive Shell Loop that listens on both PS/2 Keyboard and COM1 serial input

@@ -1,4 +1,15 @@
 //! Thread-safe and interrupt-safe synchronization primitives for NullOS.
+#![allow(unused_imports, dead_code)]
+
+pub mod condvar;
+pub mod futex;
+pub mod mutex;
+pub mod semaphore;
+
+pub use condvar::Condvar;
+pub use futex::{futex_requeue, futex_wait, futex_wake, FUTEX_PRIVATE_FLAG, FUTEX_REQUEUE, FUTEX_WAIT, FUTEX_WAKE};
+pub use mutex::{Mutex, MutexGuard};
+pub use semaphore::Semaphore;
 
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
@@ -6,7 +17,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 /// Read RFLAGS register to check if interrupts are currently enabled (IF flag, bit 9).
 #[inline]
-fn are_interrupts_enabled() -> bool {
+pub fn are_interrupts_enabled() -> bool {
     let rflags: u64;
     unsafe {
         core::arch::asm!("pushfq; pop {}", out(reg) rflags, options(nomem, preserves_flags));
@@ -16,7 +27,7 @@ fn are_interrupts_enabled() -> bool {
 
 /// Disable interrupts on the current CPU core.
 #[inline]
-fn disable_interrupts() {
+pub fn disable_interrupts() {
     unsafe {
         core::arch::asm!("cli", options(nomem, nostack));
     }
@@ -24,7 +35,7 @@ fn disable_interrupts() {
 
 /// Enable interrupts on the current CPU core.
 #[inline]
-fn enable_interrupts() {
+pub fn enable_interrupts() {
     unsafe {
         core::arch::asm!("sti", options(nomem, nostack));
     }

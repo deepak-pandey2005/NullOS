@@ -2,14 +2,16 @@
 
 use crate::println;
 
-const IA32_EFER_MSR: u32 = 0xC000_0080;
-const IA32_STAR_MSR: u32 = 0xC000_0081;
-const IA32_LSTAR_MSR: u32 = 0xC000_0082;
-const IA32_FMASK_MSR: u32 = 0xC000_0084;
+pub const IA32_EFER_MSR: u32 = 0xC000_0080;
+pub const IA32_STAR_MSR: u32 = 0xC000_0081;
+pub const IA32_LSTAR_MSR: u32 = 0xC000_0082;
+pub const IA32_FMASK_MSR: u32 = 0xC000_0084;
+pub const IA32_FS_BASE_MSR: u32 = 0xC000_0100;
 
 unsafe extern "C" {
     fn syscall_entry();
     pub fn enter_user_mode(entry_point: u64, user_stack_top: u64) -> !;
+    pub fn enter_user_mode_thread(entry_point: u64, user_stack_top: u64, arg: u64) -> !;
     pub fn user_test_program_start();
     pub fn user_test_program_end();
     pub fn user_fault_program_start();
@@ -27,7 +29,7 @@ pub fn set_kernel_rsp(rsp: u64) {
 }
 
 #[inline]
-unsafe fn read_msr(msr: u32) -> u64 {
+pub unsafe fn read_msr(msr: u32) -> u64 {
     let low: u32;
     let high: u32;
     unsafe {
@@ -37,7 +39,7 @@ unsafe fn read_msr(msr: u32) -> u64 {
 }
 
 #[inline]
-unsafe fn write_msr(msr: u32, val: u64) {
+pub unsafe fn write_msr(msr: u32, val: u64) {
     let low = val as u32;
     let high = (val >> 32) as u32;
     unsafe {

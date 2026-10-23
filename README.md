@@ -415,16 +415,16 @@
 # Phase 11 — Threads & Runtime
 
 ### M28 — User Threads
-- [ ] User thread creation
-- [ ] User thread termination
-- [ ] Thread scheduling
-- [ ] Thread-local storage
-- [ ] TLS ABI
-- [ ] Mutex
-- [ ] Semaphore
-- [ ] Condition variable
-- [ ] Futex-like primitive
-- [ ] pthread-like API
+- [x] User thread creation (`SYS_CLONE` / `SYS_THREAD_CREATE` [56] with dedicated stack & entry point)
+- [x] User thread termination (`SYS_THREAD_EXIT` [57], scheduler cleanup, thread joining)
+- [x] Thread scheduling (preemptive round-robin time slicing, APIC timer interrupts, sleep/wake queues)
+- [x] Thread-local storage (`fs_base` register backing thread-local storage)
+- [x] TLS ABI (`SYS_ARCH_PRCTL` [158] `ARCH_SET_FS` / `ARCH_GET_FS` with `IA32_FS_BASE` MSR `0xC000_0100`)
+- [x] Mutex (fast userspace mutex with atomic CAS and slow-path futex sleep, kernel `Mutex<T>`)
+- [x] Semaphore (counting semaphore `sem_t` with wait queues, kernel `Semaphore`)
+- [x] Condition variable (`pthread_cond_t` sequence counter & atomic lock release, kernel `Condvar`)
+- [x] Futex-like primitive (`SYS_FUTEX` [202] supporting `FUTEX_WAIT`, `FUTEX_WAKE`, `FUTEX_REQUEUE`)
+- [x] pthread-like API (`pthread_create`, `pthread_join`, `pthread_exit`, `pthread_self`, `sem_init`, `sem_wait`, `sem_post`)
 
 ### M29 — Async & Event Infrastructure
 - [ ] Event queues
@@ -680,7 +680,7 @@ sudo ./scripts/create_bootable_usb.sh --device /dev/sdX
 - [x] M25
 - [x] M26
 - [x] M27
-- [ ] M28
+- [x] M28
 
 ## Checkpoint 7 — Advanced OS
 - [ ] M29

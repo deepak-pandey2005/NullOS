@@ -6,7 +6,7 @@ CFLAGS = -Wall -Wextra -O2 -nostdlib -fno-builtin -fno-stack-protector -mno-red-
 ASFLAGS = --64
 
 BUILD_DIR = build
-OBJS = $(BUILD_DIR)/string.o $(BUILD_DIR)/stdio.o $(BUILD_DIR)/stdlib.o $(BUILD_DIR)/unistd.o $(BUILD_DIR)/syscall.o
+OBJS = $(BUILD_DIR)/string.o $(BUILD_DIR)/stdio.o $(BUILD_DIR)/stdlib.o $(BUILD_DIR)/unistd.o $(BUILD_DIR)/syscall.o $(BUILD_DIR)/pthread.o $(BUILD_DIR)/semaphore.o
 
 all: $(BUILD_DIR)/crt0.o $(BUILD_DIR)/libc.a
 

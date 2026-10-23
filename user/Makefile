@@ -12,7 +12,7 @@ LIBC_DIR = libc
 LIBC = $(LIBC_DIR)/build/libc.a
 CRT0 = $(LIBC_DIR)/build/crt0.o
 
-BINS = $(BIN_DIR)/hello.elf $(BIN_DIR)/cat.elf
+BINS = $(BIN_DIR)/hello.elf $(BIN_DIR)/cat.elf $(BIN_DIR)/threads.elf
 
 all: libc_build $(BINS)
 

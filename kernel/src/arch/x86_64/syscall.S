@@ -86,6 +86,29 @@ enter_user_mode:
     iretq
 
 /*
+ * Switches CPU from Ring 0 to Ring 3 user thread with an argument in %rdi.
+ * Prototype:
+ *   extern "C" fn enter_user_mode_thread(entry_point: u64, user_stack_top: u64, arg: u64) -> !;
+ */
+.global enter_user_mode_thread
+.type enter_user_mode_thread, @function
+
+enter_user_mode_thread:
+    # %rdi = entry_point (u64)
+    # %rsi = user_stack_top (u64)
+    # %rdx = arg (u64)
+    cli
+    push $0x1B       # User Data Selector (0x18 | 3)
+    push %rsi        # User Stack Top
+    push $0x202      # RFLAGS with Interrupts Enabled
+    push $0x23       # User Code Selector (0x20 | 3)
+    push %rdi        # User RIP
+    mov %rdx, %rdi   # First argument in SysV AMD64 is %rdi
+    xor %rsi, %rsi   # Clear other registers
+    xor %rdx, %rdx
+    iretq
+
+/*
  * Self-contained Position-Independent User Mode Program for Ring 3 testing.
  */
 .global user_test_program_start

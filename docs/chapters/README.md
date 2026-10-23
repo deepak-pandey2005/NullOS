@@ -1,5 +1,5 @@
 # NullOS: The Complete Operating Systems Course
-### *A 22-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
+### *A 23-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
 
 Welcome to the comprehensive textbook documentation for **NullOS**. This curriculum teaches operating system engineering from absolute first principles: starting from raw motherboard electricity and transistors, all the way to multitasking, 4-level paging, and Ring 3 user mode with fast hardware system calls.
 
@@ -204,3 +204,13 @@ Welcome to the comprehensive textbook documentation for **NullOS**. This curricu
 - Unix Domain Sockets: Bidirectional streaming communication, connection pairing via `socketpair()`, and backpressure.
 - IPC Security & Permissions: Enforcing POSIX octal mode permissions (`0o660`), owner validation, and kernel pointer sanitization.
 - Interactive shell diagnostics with the `ipc` command.
+
+### [Chapter 23: User Threads & Synchronization — 1:1 Threading, Futex, TLS & POSIX pthread Runtime](chapter23_user_threads_and_synchronization.md)
+- Concurrency within an address space: Threads vs. Processes and shared memory models.
+- The 1:1 Kernel-Managed Threading Architecture: Multi-core hardware parallelism and preemptive scheduling.
+- User Thread Creation (`SYS_CLONE` / `SYS_THREAD_CREATE`): Stack preparation, SysV AMD64 argument passing, and `iretq` entry.
+- Thread-Local Storage (TLS): The x86_64 `%fs` segment base ABI and `IA32_FS_BASE` MSR (`0xC000_0100`).
+- Fast Userspace Mutexes (Futex): Zero-syscall uncontended fast paths, `FUTEX_WAIT`, `FUTEX_WAKE`, and wait queues.
+- High-level synchronization primitives: Mutex (`pthread_mutex_t`), counting Semaphore (`sem_t`), and Condition Variable (`pthread_cond_t`).
+- POSIX C standard runtime in libc (`pthread_create`, `pthread_join`, `pthread_exit`, `sem_init`, `sem_wait`, `sem_post`).
+- Shell thread diagnostics with the `threads` command.
