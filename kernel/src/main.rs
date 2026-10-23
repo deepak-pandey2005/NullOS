@@ -6,6 +6,7 @@ extern crate alloc;
 mod arch;
 mod drivers;
 mod fs;
+mod ipc;
 mod memory;
 mod net;
 mod security;
@@ -119,6 +120,9 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // Initialize Virtual File System & Initramfs (Phase 6 - M15, M16)
     fs::init();
     fs::run_self_tests();
+
+    // Initialize Inter-Process Communication Subsystem (Phase 10 - M27 IPC)
+    ipc::run_self_tests();
 
     // Initialize PCI Bus Enumeration & Hardware Device Discovery (Phase 6 - M17 PCI)
     drivers::pci::init();

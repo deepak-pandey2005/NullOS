@@ -12,10 +12,12 @@ pub const SYS_CLOSE: u64 = 3;
 pub const SYS_STAT: u64 = 4;
 pub const SYS_LSEEK: u64 = 8;
 pub const SYS_MMAP: u64 = 9;
+pub const SYS_PIPE: u64 = 22;
 pub const SYS_YIELD: u64 = 24;
 pub const SYS_GETPID: u64 = 39;
 pub const SYS_EXIT: u64 = 60;
 pub const SYS_WAITPID: u64 = 61;
+pub const SYS_KILL: u64 = 62;
 pub const SYS_SLEEP: u64 = 100;
 
 pub const PROT_READ: u64 = 1;
@@ -359,6 +361,55 @@ pub extern "C" fn syscall_dispatcher(
             let prot = a3;
             let flags = a4;
             sys_mmap(addr, len, prot, flags)
+        }
+        SYS_PIPE => {
+            let pipefd_ptr = a1 as *mut i32;
+            if pipefd_ptr.is_null() || crate::security::validate_user_buffer(pipefd_ptr as *const u8, 2 * core::mem::size_of::<i32>()).is_err() {
+                return u64::MAX;
+            }
+
+            let (read_fd, write_fd) = crate::ipc::create_pipe();
+            let cur_pid = current_pid();
+            let mut proc_table = super::process::PROCESS_TABLE.lock();
+            let proc = if proc_table.get_mut(cur_pid).is_some() {
+                proc_table.get_mut(cur_pid)
+            } else {
+                proc_table.get_mut(super::process::ProcessId::INIT)
+            };
+
+            if let Some(proc) = proc {
+                let fd0 = match proc.fd_table.alloc_fd(read_fd) {
+                    Ok(f) => f,
+                    Err(_) => return u64::MAX,
+                };
+                let fd1 = match proc.fd_table.alloc_fd(write_fd) {
+                    Ok(f) => f,
+                    Err(_) => {
+                        let _ = proc.fd_table.close(fd0);
+                        return u64::MAX;
+                    }
+                };
+
+                unsafe {
+                    *pipefd_ptr = fd0;
+                    *pipefd_ptr.add(1) = fd1;
+                }
+                0
+            } else {
+                u64::MAX
+            }
+        }
+        SYS_KILL => {
+            let pid = super::process::ProcessId(a1);
+            let sig = a2 as i32;
+            if let Some(signal) = crate::ipc::Signal::from_i32(sig) {
+                match crate::ipc::send_signal(pid, signal) {
+                    Ok(_) => 0,
+                    Err(_) => u64::MAX,
+                }
+            } else {
+                u64::MAX
+            }
         }
         unknown => {
             println!("[SYSCALL] Unknown syscall number: {}", unknown);

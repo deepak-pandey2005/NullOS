@@ -431,6 +431,7 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str("  netstat              - Display active network sockets and TCP states\n");
             out.push_str("  cpus                 - Display symmetric multiprocessing CPU core statuses\n");
             out.push_str("  sec                  - Display kernel security mitigations & hardening status\n");
+            out.push_str("  ipc                  - Display inter-process communication resources (pipes, shm, unix)\n");
             out.push_str("  mem                  - Display physical memory manager statistics\n");
             out.push_str("  uptime               - Display system timer ticks\n");
             out.push_str("  reboot               - Reboot physical or virtual machine\n");
@@ -973,6 +974,25 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str(&alloc::format!("{:<30} {:<15}\n", "User Pointer Sanitization", if rep.user_boundary_enforced { "Enforced" } else { "Disabled" }));
             (out, 0)
         }
+        "ipc" => {
+            let mut out = String::new();
+            out.push_str("Inter-Process Communication (IPC) Resources:\n");
+            out.push_str("----------------------------------------------\n");
+            out.push_str(&alloc::format!("  Anonymous Pipes:      Circular ring buffers (default cap: {} bytes)\n", crate::ipc::DEFAULT_PIPE_CAPACITY));
+            out.push_str(&alloc::format!("  Unix Domain Sockets:  Bidirectional socketpairs (default cap: {} bytes)\n", crate::ipc::DEFAULT_UNIX_SOCKET_CAPACITY));
+            out.push_str("  Process Signals:      POSIX SIGHUP, SIGINT, SIGKILL, SIGSEGV, SIGTERM, SIGCHLD\n");
+            out.push_str("\nShared Memory Segments (SHM):\n");
+            let shms = crate::ipc::shm_list();
+            if shms.is_empty() {
+                out.push_str("  (No shared memory segments registered)\n");
+            } else {
+                out.push_str(&alloc::format!("  {:<6} {:<12} {:<10} {:<8} {:<12}\n", "SHMID", "KEY", "SIZE", "PAGES", "ATTACHMENTS"));
+                for s in shms {
+                    out.push_str(&alloc::format!("  {:<6} {:#010x} {:<10} {:<8} {:<12}\n", s.id, s.key, s.size, s.pages, s.attachments));
+                }
+            }
+            (out, 0)
+        }
         "mem" => {
             let mut out = String::new();
             out.push_str("Physical Memory Manager (PMM):\n");
@@ -1316,7 +1336,10 @@ pub fn run_automated_tests() {
     println!("[SHELL] 18. Testing Kernel Security Mitigations (sec)...");
     execute_command("sec");
 
-    println!("[SHELL] All Phase 7, 8, 9 & 10 Shell, Network, SMP and Security tests passed successfully!");
+    println!("[SHELL] 19. Testing Inter-Process Communication (ipc)...");
+    execute_command("ipc");
+
+    println!("[SHELL] All Phase 7, 8, 9 & 10 Shell, Network, SMP, Security and IPC tests passed successfully!");
 }
 
 /// Interactive Shell Loop that listens on both PS/2 Keyboard and COM1 serial input

@@ -401,13 +401,14 @@
 - [x] Shell security diagnostics (`sec` / `hardening` command reporting real-time hardware mitigations)
 
 ### M27 — IPC
-- [ ] Pipes
-- [ ] Shared memory
-- [ ] Message queues
-- [ ] Signals
-- [ ] Unix-style sockets
-- [ ] Process synchronization
-- [ ] IPC permissions
+- [x] Pipes (anonymous unidirectional ring-buffered byte streams, `SYS_PIPE` [22], EOF & `EPIPE` signaling)
+- [x] Shared memory (zero-copy physical memory frame sharing, `shmget`/`shmat`, process page table mapping)
+- [x] Message queues (fixed-size message buffering and asynchronous message passing)
+- [x] Signals (POSIX standard signals: SIGHUP, SIGINT, SIGKILL, SIGSEGV, SIGTERM, SIGCHLD, `SYS_KILL` [62])
+- [x] Unix-style sockets (bidirectional stream IPC via `AF_UNIX` / `socketpair()` cross-connected ring buffers)
+- [x] Process synchronization (atomic wait queues and cross-thread/process cooperative wakeups)
+- [x] IPC permissions (POSIX owner/group read/write access control bitmasks `0o660`)
+- [x] Shell IPC diagnostics (`ipc` command displaying real-time IPC stats, pipes, and shared memory segments)
 
 ---
 
@@ -662,23 +663,23 @@ sudo ./scripts/create_bootable_usb.sh --device /dev/sdX
 4. The OS will boot through `BOOTX64.EFI`, initialize the GOP framebuffer display, and run kernel diagnostics & Ring 3 user mode directly on the screen.
 
 ## Checkpoint 4 — Usable OS
-- [ ] M15
-- [ ] M16
-- [ ] M17
-- [ ] M18
-- [ ] M19
-- [ ] M20
-- [ ] M21
-- [ ] M22
+- [x] M15
+- [x] M16
+- [x] M17
+- [x] M18
+- [x] M19
+- [x] M20
+- [x] M21
+- [x] M22
 
 ## Checkpoint 5 — Networked OS
-- [ ] M23
-- [ ] M24
+- [x] M23
+- [x] M24
 
 ## Checkpoint 6 — SMP & Secure OS
-- [ ] M25
-- [ ] M26
-- [ ] M27
+- [x] M25
+- [x] M26
+- [x] M27
 - [ ] M28
 
 ## Checkpoint 7 — Advanced OS

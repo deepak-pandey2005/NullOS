@@ -1,5 +1,5 @@
 # NullOS: The Complete Operating Systems Course
-### *A 21-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
+### *A 22-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
 
 Welcome to the comprehensive textbook documentation for **NullOS**. This curriculum teaches operating system engineering from absolute first principles: starting from raw motherboard electricity and transistors, all the way to multitasking, 4-level paging, and Ring 3 user mode with fast hardware system calls.
 
@@ -195,3 +195,12 @@ Welcome to the comprehensive textbook documentation for **NullOS**. This curricu
 - Safe userspace memory transfer primitives (`copy_from_user`, `copy_to_user`, `copy_str_from_user`).
 - Stack defense-in-depth: 64-bit stack canaries (`__stack_chk_fail`) and unmapped 4 KiB guard pages.
 - Interactive security inspection with the `sec` shell command.
+
+### [Chapter 22: Inter-Process Communication (IPC) — Pipes, Shared Memory, Signals & Unix Sockets](chapter22_inter_process_communication_ipc.md)
+- Process isolation vs. cooperation: The fundamental IPC dilemma and memory barriers.
+- Anonymous unidirectional Pipes: Ring-buffered byte streams, write atomic limits, EOF detection, and `EPIPE` broken pipe handling.
+- Zero-copy Shared Memory: Multi-process physical frame mapping into independent PML4 address spaces (`shmget`/`shmat`).
+- POSIX Process Signals: Asynchronous notification, signal bitmasks, default handlers, and uncatchable termination (`SIGKILL`).
+- Unix Domain Sockets: Bidirectional streaming communication, connection pairing via `socketpair()`, and backpressure.
+- IPC Security & Permissions: Enforcing POSIX octal mode permissions (`0o660`), owner validation, and kernel pointer sanitization.
+- Interactive shell diagnostics with the `ipc` command.
