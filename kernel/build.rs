@@ -6,6 +6,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/arch/x86_64/interrupts.S");
     println!("cargo:rerun-if-changed=src/arch/x86_64/switch.S");
     println!("cargo:rerun-if-changed=src/arch/x86_64/syscall.S");
+    println!("cargo:rerun-if-changed=src/arch/x86_64/trampoline.S");
     println!("cargo:rerun-if-changed=../linker/x86_64.ld");
 
     cc::Build::new()
@@ -13,6 +14,7 @@ fn main() {
         .file("src/arch/x86_64/interrupts.S")
         .file("src/arch/x86_64/switch.S")
         .file("src/arch/x86_64/syscall.S")
+        .file("src/arch/x86_64/trampoline.S")
         .flag("-ffreestanding")
         .flag("-fno-stack-protector")
         .flag("-mno-red-zone")

@@ -1,5 +1,5 @@
 # NullOS: The Complete Operating Systems Course
-### *A 16-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
+### *A 20-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
 
 Welcome to the comprehensive textbook documentation for **NullOS**. This curriculum teaches operating system engineering from absolute first principles: starting from raw motherboard electricity and transistors, all the way to multitasking, 4-level paging, and Ring 3 user mode with fast hardware system calls.
 
@@ -176,7 +176,13 @@ Welcome to the comprehensive textbook documentation for **NullOS**. This curricu
 - Layer 5 Berkeley Sockets abstraction (`socket`, `bind`, `listen`, `accept`, `connect`, `send`, `recv`, `close`).
 - Shell CLI diagnostic tools: `ifconfig`, `arp`, `netstat`, and `ping`.
 
-
-
-
+### [Chapter 20: Symmetric Multiprocessing (SMP) & Multi-Core Architecture](chapter20_symmetric_multiprocessing_smp.md)
+- From single-core execution to parallel silicon: Uniprocessor vs SMP and cache coherency.
+- Hardware topology discovery via ACPI: RSDP (`"RSD PTR "`), XSDT, and the MADT (`"APIC"`).
+- The 16-bit real-mode reset vector and why Application Processors (APs) wake up in real mode.
+- The 16-to-64 bit bootstrap trampoline at physical address `0x8000` (Real $\rightarrow$ Protected $\rightarrow$ Long mode).
+- The INIT-SIPI-SIPI Inter-Processor Interrupt (IPI) protocol via Local APIC ICR.
+- Per-CPU 16 KiB kernel stacks, CPU Control Blocks (`CPU_TABLE`), and atomic handshake status.
+- Avoiding silicon pitfalls: `EFER.NXE` propagation, `CR4.PAE/OSFXSR`, and Local APIC timer masking.
+- Interactive shell diagnostics (`cpus`, `smp`) and multi-core verification in QEMU.
 

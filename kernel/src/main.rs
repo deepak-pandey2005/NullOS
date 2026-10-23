@@ -99,6 +99,14 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     memory::init(boot_info);
     memory::run_self_tests();
 
+    // Initialize ACPI Subsystem & MADT CPU Enumeration (Phase 9 - M25 SMP)
+    arch::x86_64::acpi::init(boot_info.acpi_rsdp);
+    arch::x86_64::acpi::run_self_tests();
+
+    // Initialize Multiprocessing & Bootstrap Application Processors (Phase 9 - M25 SMP)
+    arch::x86_64::smp::init();
+    arch::x86_64::smp::run_self_tests();
+
     // Initialize Preemptive Multitasking & Kernel Threads (Phase 4 - M10, M11 & Phase 5 - M12, M13, M14)
     task::init();
     task::run_self_tests();

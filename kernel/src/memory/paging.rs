@@ -517,9 +517,13 @@ pub fn init(boot_info: &'static BootInfo) {
     )
     .expect("Failed to identity-map kernel image");
 
-    // c. Conventional Memory (RAM) regions
+    // c. Conventional Memory (RAM) and ACPI/Runtime data regions
     for desc in super::uefi_mmap::MemoryMapIterator::new(&boot_info.memory_map) {
-        if desc.memory_type().is_usable() || desc.memory_type().is_reclaimable() {
+        let mtype = desc.memory_type();
+        if mtype.is_usable()
+            || mtype.is_reclaimable()
+            || matches!(mtype, super::uefi_mmap::UefiMemoryType::AcpiReclaim | super::uefi_mmap::UefiMemoryType::AcpiNvs | super::uefi_mmap::UefiMemoryType::RuntimeServicesData)
+        {
             let start = PhysAddr::new(desc.phys_start);
             let size = desc.size_in_bytes();
             kpt.identity_map_range(
@@ -527,7 +531,7 @@ pub fn init(boot_info: &'static BootInfo) {
                 size,
                 PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
             )
-            .expect("Failed to map conventional memory");
+            .expect("Failed to map conventional/ACPI memory");
         }
     }
 

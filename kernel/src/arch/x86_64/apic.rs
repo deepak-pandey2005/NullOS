@@ -17,11 +17,13 @@ const IA32_APIC_BASE_MSR: u32 = 0x1B;
 const LAPIC_ID: usize = 0x020;
 const LAPIC_EOI: usize = 0x0B0;
 const LAPIC_SPURIOUS: usize = 0x0F0;
-const LAPIC_TIMER: usize = 0x320;
-const LAPIC_TIMER_INIT_CNT: usize = 0x380;
+pub const LAPIC_ICR_LOW: usize = 0x300;
+pub const LAPIC_ICR_HIGH: usize = 0x310;
+pub const LAPIC_TIMER: usize = 0x320;
+pub const LAPIC_TIMER_INIT_CNT: usize = 0x380;
 #[allow(dead_code)]
-const LAPIC_TIMER_CURR_CNT: usize = 0x390;
-const LAPIC_TIMER_DIV: usize = 0x3E0;
+pub const LAPIC_TIMER_CURR_CNT: usize = 0x390;
+pub const LAPIC_TIMER_DIV: usize = 0x3E0;
 
 pub const TIMER_INTERRUPT_VECTOR: u8 = 0x20; // IRQ 0 / Vector 32
 pub const SPURIOUS_INTERRUPT_VECTOR: u8 = 0xFF;
@@ -158,5 +160,95 @@ pub fn sleep(ticks: u64) {
     let start = get_ticks();
     while get_ticks() - start < ticks {
         core::hint::spin_loop();
+    }
+}
+
+/// Delay execution by busy-spinning for approximately `us` microseconds without requiring interrupts.
+pub fn spin_delay_us(us: u64) {
+    let iterations = us * 500;
+    for _ in 0..iterations {
+        core::hint::spin_loop();
+    }
+}
+
+/// Waits until the ICR delivery status bit (bit 12) becomes idle with a bounded timeout.
+unsafe fn wait_icr_idle() {
+    unsafe {
+        for _ in 0..100_000 {
+            if (read_lapic(LAPIC_ICR_LOW) & (1 << 12)) == 0 {
+                return;
+            }
+            core::hint::spin_loop();
+        }
+    }
+}
+
+/// Sends an INIT IPI to the target Local APIC ID.
+pub fn send_init_ipi(apic_id: u8) {
+    unsafe {
+        wait_icr_idle();
+        write_lapic(LAPIC_ICR_HIGH, (apic_id as u32) << 24);
+        // Delivery mode 5 (INIT), Edge triggered
+        write_lapic(LAPIC_ICR_LOW, 0x00000500);
+        wait_icr_idle();
+    }
+}
+
+/// Sends an INIT De-assert IPI to the target Local APIC ID.
+#[allow(dead_code)]
+pub fn send_init_deassert(apic_id: u8) {
+    unsafe {
+        wait_icr_idle();
+        write_lapic(LAPIC_ICR_HIGH, (apic_id as u32) << 24);
+        // Delivery mode 5 (INIT), De-assert (bit 14 clear, bit 15 level)
+        write_lapic(LAPIC_ICR_LOW, 0x00008500);
+        wait_icr_idle();
+    }
+}
+
+/// Sends a Startup IPI (SIPI) to the target Local APIC ID with the specified page vector.
+pub fn send_sipi(apic_id: u8, vector: u8) {
+    unsafe {
+        wait_icr_idle();
+        write_lapic(LAPIC_ICR_HIGH, (apic_id as u32) << 24);
+        // Delivery mode 6 (Startup), Edge triggered, vector
+        write_lapic(LAPIC_ICR_LOW, 0x00000600 | (vector as u32));
+        wait_icr_idle();
+    }
+}
+
+/// Initializes Local APIC on an Application Processor (AP) core.
+pub fn init_ap() {
+    unsafe {
+        // Read APIC base from MSR 0x1B
+        let mut eax: u32;
+        let mut edx: u32;
+        core::arch::asm!(
+            "rdmsr",
+            in("ecx") IA32_APIC_BASE_MSR,
+            out("eax") eax,
+            out("edx") edx,
+            options(nomem, nostack)
+        );
+
+        let apic_base_msr = ((edx as u64) << 32) | (eax as u64);
+
+        // Enable APIC by setting bit 11 in MSR 0x1B if not already enabled
+        if (apic_base_msr & (1 << 11)) == 0 {
+            let new_eax = eax | (1 << 11);
+            core::arch::asm!(
+                "wrmsr",
+                in("ecx") IA32_APIC_BASE_MSR,
+                in("eax") new_eax,
+                in("edx") edx,
+                options(nomem, nostack)
+            );
+        }
+
+        // Enable Spurious Interrupt Vector register (bit 8 = software enable APIC)
+        write_lapic(LAPIC_SPURIOUS, 0x100 | (SPURIOUS_INTERRUPT_VECTOR as u32));
+
+        // Mask AP Local APIC timer so it doesn't conflict with BSP scheduler
+        write_lapic(LAPIC_TIMER, 0x10000); // Masked (bit 16 = 1)
     }
 }

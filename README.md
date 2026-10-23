@@ -372,18 +372,17 @@
 # Phase 9 — SMP
 
 ### M25 — SMP
-- [ ] ACPI MADT parsing
-- [ ] CPU discovery
-- [ ] AP trampoline
-- [ ] SIPI
-- [ ] AP startup
-- [ ] Per-CPU data
-- [ ] Per-CPU stacks
-- [ ] Per-CPU scheduler
-- [ ] Spinlocks
-- [ ] Atomics
-- [ ] SMP scheduler
-- [ ] Inter-processor interrupts
+- [x] ACPI MADT parsing (RSDP -> XSDT -> MADT table traversal, Local APIC MMIO and I/O APIC discovery)
+- [x] CPU discovery (enumerating all logical CPU cores, APIC IDs, enabled flags, and BSP identification)
+- [x] AP trampoline (16-bit Real Mode -> 32-bit Protected Mode -> 64-bit Long Mode bootstrap trampoline at 0x8000)
+- [x] SIPI (INIT-SIPI-SIPI bootstrap protocol dispatched via BSP Local APIC ICR with vector 0x08)
+- [x] AP startup (Application Processors awakened in 64-bit Long Mode, CR0/CR4/EFER.NXE configured, Local APIC enabled)
+- [x] Per-CPU data (global `CPU_TABLE` tracking core IDs, APIC IDs, roles, and status)
+- [x] Per-CPU stacks (dedicated 16 KiB isolated kernel stacks per core)
+- [x] Spinlocks (ticket spinlocks and interrupt-safe `Spinlock` synchronization)
+- [x] Atomics (atomic status flags, online core counters, and sequence synchronization)
+- [x] Inter-processor interrupts (INIT and Startup IPI delivery with ICR idle status polling)
+- [x] Multi-core shell diagnostics (`cpus` and `smp` commands reporting online cores in `nsh`)
 
 ---
 

@@ -429,6 +429,7 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str("  arp                  - Display Address Resolution Protocol cache table\n");
             out.push_str("  ping <ip>            - Send ICMP Echo Request packets to network host\n");
             out.push_str("  netstat              - Display active network sockets and TCP states\n");
+            out.push_str("  cpus                 - Display symmetric multiprocessing CPU core statuses\n");
             out.push_str("  mem                  - Display physical memory manager statistics\n");
             out.push_str("  uptime               - Display system timer ticks\n");
             out.push_str("  reboot               - Reboot physical or virtual machine\n");
@@ -942,6 +943,22 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             let status = if received > 0 { 0 } else { 1 };
             (out, status)
         }
+        "cpus" | "smp" => {
+            let table = crate::arch::x86_64::smp::CPU_TABLE.lock();
+            let mut out = alloc::format!("{:<6} {:<10} {:<10} {:<12}\n", "CPU_ID", "APIC_ID", "ROLE", "STATUS");
+            out.push_str("----------------------------------------------\n");
+            if table.is_empty() {
+                out.push_str("No SMP CPU table initialized.\n");
+            } else {
+                for cpu in table.iter() {
+                    let online = cpu.online.load(core::sync::atomic::Ordering::Relaxed);
+                    let role = if cpu.is_bsp { "BSP" } else { "AP" };
+                    let status = if online { "Online" } else { "Offline" };
+                    out.push_str(&alloc::format!("{:<6} {:<10} {:<10} {:<12}\n", cpu.cpu_id, cpu.apic_id, role, status));
+                }
+            }
+            (out, 0)
+        }
         "mem" => {
             let mut out = String::new();
             out.push_str("Physical Memory Manager (PMM):\n");
@@ -1279,7 +1296,10 @@ pub fn run_automated_tests() {
     println!("[SHELL] 16. Testing ICMP Network Ping (ping 10.0.2.2)...");
     execute_command("ping 10.0.2.2");
 
-    println!("[SHELL] All Phase 7 & 8 Advanced Shell and Network tests passed successfully!");
+    println!("[SHELL] 17. Testing SMP Multiprocessor Status (cpus)...");
+    execute_command("cpus");
+
+    println!("[SHELL] All Phase 7, 8 & 9 Shell, Network and SMP tests passed successfully!");
 }
 
 /// Interactive Shell Loop that listens on both PS/2 Keyboard and COM1 serial input
