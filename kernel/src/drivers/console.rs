@@ -120,18 +120,34 @@ impl FramebufferConsole {
         match c {
             '\n' => self.newline(),
             '\r' => self.cursor_x = 0,
+            '\x08' => {
+                if self.cursor_x >= CHAR_WIDTH {
+                    self.cursor_x -= CHAR_WIDTH;
+                } else if self.cursor_y >= CHAR_HEIGHT {
+                    self.cursor_y -= CHAR_HEIGHT;
+                    self.cursor_x = (self.width / CHAR_WIDTH) * CHAR_WIDTH - CHAR_WIDTH;
+                }
+            }
             '\t' => {
                 for _ in 0..4 {
                     self.write_char(' ');
                 }
             }
-            c => {
+            ' ' => {
+                if self.cursor_x + CHAR_WIDTH > self.width {
+                    self.newline();
+                }
+                self.clear_char(self.cursor_x, self.cursor_y);
+                self.cursor_x += CHAR_WIDTH;
+            }
+            c if !c.is_control() => {
                 if self.cursor_x + CHAR_WIDTH > self.width {
                     self.newline();
                 }
                 self.draw_char(self.cursor_x, self.cursor_y, c);
                 self.cursor_x += CHAR_WIDTH;
             }
+            _ => {}
         }
     }
 
@@ -185,6 +201,24 @@ impl FramebufferConsole {
         }
 
         self.cursor_y = lines_to_move;
+    }
+
+    fn clear_char(&mut self, x_pos: usize, y_pos: usize) {
+        let ptr = self.address as *mut u32;
+        for row_idx in 0..CHAR_HEIGHT {
+            if y_pos + row_idx >= self.height {
+                break;
+            }
+            let row_offset = (y_pos + row_idx) * self.stride;
+            for col_idx in 0..CHAR_WIDTH {
+                if x_pos + col_idx >= self.width {
+                    break;
+                }
+                unsafe {
+                    *ptr.add(row_offset + x_pos + col_idx) = self.bg_color;
+                }
+            }
+        }
     }
 
     fn draw_char(&mut self, x_pos: usize, y_pos: usize, c: char) {

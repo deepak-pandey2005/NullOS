@@ -1419,7 +1419,7 @@ pub fn interactive_loop() {
                     line_buf.clear();
                     print!("nullos> ");
                 }
-                '\x08' => {
+                '\x08' | '\x7F' => {
                     // Backspace handling
                     if !line_buf.is_empty() {
                         line_buf.pop();
