@@ -7,6 +7,7 @@ mod arch;
 mod drivers;
 mod fs;
 mod memory;
+mod net;
 mod sync;
 mod task;
 
@@ -120,6 +121,10 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // Initialize VirtIO Network Subsystem (Phase 8 - M23 Network Driver)
     drivers::virtio_net::init();
     drivers::virtio_net::run_self_tests();
+
+    // Initialize TCP/IP Network Stack (Phase 8 - M24 Network Stack)
+    net::init();
+    net::run_self_tests();
 
     // Initialize PS/2 Keyboard Driver (Scan Code Set 1 & Input Decoding)
     drivers::keyboard::init();

@@ -351,21 +351,21 @@
 
 
 ### M24 — Network Stack
-- [ ] Ethernet
-- [ ] ARP
-- [ ] IPv4
-- [ ] ICMP
-- [ ] `ping`
-- [ ] UDP
-- [ ] TCP
-- [ ] Socket abstraction
-- [ ] `socket`
-- [ ] `bind`
-- [ ] `listen`
-- [ ] `accept`
-- [ ] `connect`
-- [ ] `send`
-- [ ] `recv`
+- [x] Ethernet (Ethernet II 14-byte frame parsing, serialization, padding to 60 bytes, EtherType dispatching)
+- [x] ARP (Address Resolution Protocol packet encoding, dynamic BTreeMap ARP table cache, query broadcast, reply handling)
+- [x] IPv4 (IPv4 20-byte header, RFC 1071 one's complement Internet checksumming, subnet mask evaluation, default gateway routing)
+- [x] ICMP (Internet Control Message Protocol 8-byte header, automated Echo Reply responder, echo serialization)
+- [x] `ping` (ICMP ping diagnostic routine measuring round-trip latency via APIC timer ticks)
+- [x] UDP (User Datagram Protocol 8-byte datagram framing, IPv4 pseudo-header checksum, port demultiplexing)
+- [x] TCP (Transmission Control Protocol 20-byte segment framing, 11-state TCP finite state machine, 3-way handshake)
+- [x] Socket abstraction (Berkeley Sockets API `Socket` abstraction, global `SOCKET_TABLE`, POSIX error reporting)
+- [x] `socket` (create AF_INET stream or datagram socket descriptor)
+- [x] `bind` (bind socket to local port)
+- [x] `listen` (transition TCP stream socket to LISTEN state)
+- [x] `accept` (accept incoming TCP stream connection)
+- [x] `connect` (active TCP 3-way handshake initiation)
+- [x] `send` (transmit datagram or stream data through network stack)
+- [x] `recv` (receive buffered packet or stream data from socket queue)
 
 ---
 

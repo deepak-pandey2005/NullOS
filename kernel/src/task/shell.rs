@@ -426,6 +426,9 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str("  lspci                - Discover PCI hardware buses and devices\n");
             out.push_str("  disks                - List registered block storage devices\n");
             out.push_str("  ifconfig             - Display network interface configuration and statistics\n");
+            out.push_str("  arp                  - Display Address Resolution Protocol cache table\n");
+            out.push_str("  ping <ip>            - Send ICMP Echo Request packets to network host\n");
+            out.push_str("  netstat              - Display active network sockets and TCP states\n");
             out.push_str("  mem                  - Display physical memory manager statistics\n");
             out.push_str("  uptime               - Display system timer ticks\n");
             out.push_str("  reboot               - Reboot physical or virtual machine\n");
@@ -879,7 +882,9 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             if let Some(dev) = crate::drivers::virtio_net::NETWORK_DEVICE.lock().as_ref() {
                 let mac = dev.mac();
                 let stats = dev.stats;
+                let cfg = *crate::net::INTERFACE_CONFIG.lock();
                 out.push_str("eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500\n");
+                out.push_str(&alloc::format!("        inet {}  netmask {}  broadcast 10.0.2.255\n", cfg.ip, cfg.netmask));
                 out.push_str(&alloc::format!("        ether {}  txqueuelen 1000  (Ethernet)\n", mac));
                 out.push_str(&alloc::format!("        RX packets {}  bytes {} ({} B)\n", stats.rx_packets, stats.rx_bytes, stats.rx_bytes));
                 out.push_str(&alloc::format!("        TX packets {}  bytes {} ({} B)\n", stats.tx_packets, stats.tx_bytes, stats.tx_bytes));
@@ -887,6 +892,55 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
                 out.push_str("No network interfaces detected.\n");
             }
             (out, 0)
+        }
+        "arp" => {
+            let entries = crate::net::arp_table();
+            let mut out = alloc::format!("{:<16} {:<10} {:<18}\n", "IP Address", "HW Type", "HW Address");
+            out.push_str("----------------------------------------------------\n");
+            if entries.is_empty() {
+                out.push_str("ARP cache is empty.\n");
+            } else {
+                for (ip, mac) in entries {
+                    out.push_str(&alloc::format!("{:<16} {:<10} {:<18}\n", ip, "ether", mac));
+                }
+            }
+            (out, 0)
+        }
+        "netstat" => {
+            let sockets = crate::net::socket::socket_list();
+            let mut out = alloc::format!("{:<6} {:<22} {:<22} {:<12}\n", "Proto", "Local Address", "Foreign Address", "State");
+            out.push_str("--------------------------------------------------------------------\n");
+            if sockets.is_empty() {
+                out.push_str("No active sockets.\n");
+            } else {
+                for s in sockets {
+                    let local_str = alloc::format!("0.0.0.0:{}", s.local_port);
+                    let foreign_str = alloc::format!("{}:{}", s.remote_addr, s.remote_port);
+                    out.push_str(&alloc::format!("{:<6} {:<22} {:<22} {:<12}\n", s.proto, local_str, foreign_str, s.state));
+                }
+            }
+            (out, 0)
+        }
+        "ping" => {
+            if args.is_empty() {
+                return ("Usage: ping <destination_ip>\n".to_string(), 1);
+            }
+            let target_ip = match crate::net::Ipv4Addr::parse(&args[0]) {
+                Ok(ip) => ip,
+                Err(_) => return (alloc::format!("ping: invalid IPv4 address: '{}'\n", args[0]), 1),
+            };
+
+            println!("PING {} 56(84) bytes of data.", target_ip);
+            let (sent, received) = crate::net::icmp::ping(target_ip, 3);
+            let loss = if sent > 0 {
+                ((sent - received) * 100) / sent
+            } else {
+                100
+            };
+            let mut out = alloc::format!("\n--- {} ping statistics ---\n", target_ip);
+            out.push_str(&alloc::format!("{} packets transmitted, {} received, {}% packet loss\n", sent, received, loss));
+            let status = if received > 0 { 0 } else { 1 };
+            (out, status)
         }
         "mem" => {
             let mut out = String::new();
@@ -1215,6 +1269,15 @@ pub fn run_automated_tests() {
 
     println!("[SHELL] 13. Testing Network Interface Configuration (ifconfig)...");
     execute_command("ifconfig");
+
+    println!("[SHELL] 14. Testing ARP Table Cache (arp)...");
+    execute_command("arp");
+
+    println!("[SHELL] 15. Testing Active Network Sockets (netstat)...");
+    execute_command("netstat");
+
+    println!("[SHELL] 16. Testing ICMP Network Ping (ping 10.0.2.2)...");
+    execute_command("ping 10.0.2.2");
 
     println!("[SHELL] All Phase 7 & 8 Advanced Shell and Network tests passed successfully!");
 }

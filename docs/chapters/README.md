@@ -163,6 +163,19 @@ Welcome to the comprehensive textbook documentation for **NullOS**. This curricu
 - Asynchronous background execution (`cmd &`) and zero-heap job table tracking (`jobs`).
 - Ring 3 ELF binary loading and execution from both RamFS and persistent FAT32 storage.
 
+### [Chapter 19: The Network Stack — VirtIO-Net, Ethernet, ARP, IPv4, ICMP, UDP, TCP & Sockets](chapter19_network_stack_virtio_and_tcp_ip.md)
+- Bridging bare-metal silicon to the global Internet: Paravirtualized VirtIO Network drivers.
+- PCI discovery (`0x1AF4:0x1000`/`0x1041`) and hardware MAC extraction from configuration space.
+- Split Virtqueues: Pre-allocated RX ring buffer descriptors and dynamic TX queue notifications.
+- Layer 2 Ethernet II framing: 14-byte headers, EtherTypes (`0x0800`, `0x0806`), and 60-byte padding.
+- Layer 3 Address Resolution Protocol (ARP): Dynamic IP-to-MAC caching, request broadcasting, and replies.
+- Layer 3 Internet Protocol Version 4 (IPv4): 20-byte header, RFC 1071 one's complement checksumming, and subnet/gateway routing.
+- Layer 3 Internet Control Message Protocol (ICMP): Automated Echo Reply responder and `ping` diagnostic engine.
+- Layer 4 User Datagram Protocol (UDP): 8-byte datagram framing and IPv4 pseudo-header checksum.
+- Layer 4 Transmission Control Protocol (TCP): 20-byte segment framing, 11-state machine, and 3-way handshake.
+- Layer 5 Berkeley Sockets abstraction (`socket`, `bind`, `listen`, `accept`, `connect`, `send`, `recv`, `close`).
+- Shell CLI diagnostic tools: `ifconfig`, `arp`, `netstat`, and `ping`.
+
 
 
 
