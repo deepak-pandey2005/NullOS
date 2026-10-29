@@ -57,9 +57,9 @@ pub fn init() {
         // 2. Configure STAR MSR:
         // Bits 47:32 = Kernel CS (0x08)
         // Bits 63:48 = User CS/SS Base:
-        //   sysretq loads User CS = (Base + 16) | 3, User SS = (Base + 8) | 3
-        //   Base = 0x10 -> User SS = 0x18 | 3 = 0x1B, User CS = 0x20 | 3 = 0x23
-        let star_val: u64 = (0x0010u64 << 48) | (0x0008u64 << 32);
+        //   sysretq loads User CS = Base + 16, User SS = Base + 8
+        //   Base = 0x10 | 3 = 0x13 -> User SS = 0x13 + 8 = 0x1B, User CS = 0x13 + 16 = 0x23
+        let star_val: u64 = ((0x0010u64 | 3) << 48) | (0x0008u64 << 32);
         write_msr(IA32_STAR_MSR, star_val);
 
         // 3. Configure LSTAR MSR with address of our assembly syscall entry point
