@@ -35,7 +35,19 @@ pub enum FileType {
     BlockDevice,
     Fifo,
     Socket,
+    // TODO(vfs): Add `Symlink` variant to support POSIX symbolic links.
+    // Traversal must implement `follow_symlinks` with a recursion limit (e.g. `MAX_SYMLINK_DEPTH = 32`)
+    // to prevent infinite loops from circular links (`ELOOP`).
 }
+
+// TODO(vfs): Implement POSIX Discretionary Access Control (DAC):
+// - Extend `FileStat` and Inode abstractions with `uid: u32` and `gid: u32`.
+// - Verify file permissions (`mode & 0777`) against caller's effective credentials `(euid, egid)`:
+//   - Root (`euid == 0`) bypasses read/write permissions.
+//   - Match owner if `euid == inode.uid`, check user bits (`rwx`).
+//   - Match group if `egid == inode.gid`, check group bits (`rwx`).
+//   - Fallback to other bits (`rwx`).
+// - Return `FsError::PermissionDenied` (`EACCES`) upon unauthorized access.
 
 /// File metadata returned by stat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

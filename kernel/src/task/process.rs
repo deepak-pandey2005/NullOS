@@ -50,6 +50,22 @@ pub enum ProcessState {
     Terminated,                 // Fully reaped and deallocated
 }
 
+// TODO(process): Implement POSIX `sys_fork()` syscall:
+// 1. Allocate a new unique PID and clone the parent Process Control Block (PCB).
+// 2. Clone the parent's file descriptor table (duplicate open file descriptions / increment refcounts).
+// 3. Clone the parent's AddressSpace using Copy-on-Write (CoW):
+//    - Walk parent PML4/PDPT/PD/PT tables.
+//    - For user-space pages, map them into the child page tables with WRITABLE cleared and COW bit set.
+//    - Mark the parent's own PTEs with WRITABLE cleared and COW bit set, flushing TLB.
+//    - Increment physical frame reference counts in the global frame tracker.
+// 4. Duplicate the caller thread state (registers, RIP, RSP), configuring RAX=0 in child context
+//    and RAX=child_pid in parent context.
+// 5. Enqueue the child thread into the scheduler runqueue.
+//
+// TODO(process): Implement Process Credentials and Job Control:
+// - Track real and effective UID/GID (euid, ruid, egid, rgid) for POSIX permissions and setuid binaries.
+// - Implement Process Groups (PGID) and Sessions (SID) for terminal job control and signal routing (SIGINT, SIGTSTP).
+
 /// Process Control Block (PCB) representing an isolated program with its own address space.
 pub struct Process {
     pub pid: ProcessId,

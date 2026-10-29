@@ -6,6 +6,22 @@
 //! - Full 11-state TCP Connection State Machine (`Closed` through `Established`).
 //! - Three-way handshake generation (`SYN`, `SYN-ACK`, `ACK`).
 //! - Graceful connection teardown (`FIN`, `ACK`).
+//!
+//! TODO(net/tcp): Implement RFC 793 Sliding Window Flow Control:
+//! - Track send sequence variables: `SND.UNA` (oldest unacknowledged seq), `SND.NXT` (next seq to send),
+//!   and `SND.WND` (peer's advertised receive window).
+//! - Track receive sequence variables: `RCV.NXT` (next expected incoming seq) and `RCV.WND` (local advertised window).
+//! - Enforce sender window throttling so NullOS does not transmit beyond `SND.UNA + SND.WND`.
+//!
+//! TODO(net/tcp): Implement Packet Retransmission & RTO Estimation (RFC 6298):
+//! - Maintain a retransmission queue for transmitted segments awaiting ACK.
+//! - Implement smoothed Round-Trip Time (`SRTT`) and RTT variation (`RTTVAR`) calculations:
+//!   `RTO = SRTT + max(G, 4 * RTTVAR)`.
+//! - Backoff timer exponentially on timeout (`RTO = min(RTO * 2, 60s)`).
+//!
+//! TODO(net/tcp): Implement Out-of-Order Segment Reassembly:
+//! - Buffer segments arriving with `seq_num > RCV.NXT` in a priority queue.
+//! - When missing intermediate packets arrive, stitch buffered contiguous segments into the receive stream.
 
 use alloc::vec::Vec;
 use core::fmt;

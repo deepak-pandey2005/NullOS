@@ -2,6 +2,24 @@
 //!
 //! Handles PML4, PDPT, PD, and PT structures, page table entry flags,
 //! address translation, page mapping/unmapping, recursive mapping, and CR3 management.
+//!
+//! TODO(memory): Implement Copy-on-Write (CoW) page fault handling:
+//! - Utilize software-available bits in PageTableEntry (e.g. bit 9 `COW_FLAG` or bit 10).
+//! - When cloning an AddressSpace for `fork()`, mark all private user pages as read-only (`WRITABLE` cleared)
+//!   and set `COW_FLAG`. Increment the reference count of the underlying physical frame in a frame tracker.
+//! - Upon a `#PF` (Page Fault) with write access violation on a page with `COW_FLAG`:
+//!   - If frame reference count > 1: allocate a new physical frame, copy 4096 bytes, point PTE to new frame,
+//!     set `WRITABLE`, clear `COW_FLAG`, decrement old frame refcount, and flush TLB via `invlpg`.
+//!   - If frame reference count == 1: promote page directly to `WRITABLE`, clear `COW_FLAG`, and flush TLB.
+//!
+//! TODO(memory): Implement Demand Paging & Lazy Allocation:
+//! - Support mapping virtual memory regions (mmap / brk heap expansion) without immediately allocating physical frames.
+//! - In the page fault handler, detect demand-paged addresses, allocate a zeroed physical frame on demand,
+//!   and map it transparently before resuming user execution.
+//!
+//! TODO(memory): Implement Swap Backing Store:
+//! - Support paging cold anonymous memory to disk/swap partition when physical memory is exhausted.
+//! - Use non-present PTE bit patterns (present=0, swap_slot identifier) to restore swapped-out frames.
 #![allow(dead_code)]
 
 use super::address::{Page, PhysAddr, PhysFrame, VirtAddr, PAGE_SIZE_4K};

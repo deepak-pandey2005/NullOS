@@ -14,6 +14,19 @@ use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::vec::Vec;
 
+// TODO(scheduler): Multi-Core SMP Scalability (Per-CPU Runqueues):
+// - Replace the single global `SCHEDULER` spinlock with per-CPU runqueues (e.g. `PerCpuScheduler`).
+// - A single global lock creates severe bus lock contention when all APs (Application Processors)
+//   field timer ticks and attempt to reschedule concurrently.
+// - Implement work-stealing: an idle core whose local ready queue is empty should probe and steal
+//   ready threads from busy neighbor cores' queues with minimal lock contention.
+//
+// TODO(scheduler): Fair Scheduling Algorithms (CFS or MLFQ):
+// - Replace simple FIFO round-robin scheduling with a Completely Fair Scheduler (CFS) or Multi-Level
+//   Feedback Queue (MLFQ).
+// - Maintain virtual runtime (`vruntime`) tracked via high-precision APIC/TSC timestamps, prioritizing
+//   I/O-bound interactive tasks while preventing CPU starvation for compute-intensive threads.
+
 pub struct Scheduler {
     current: Option<Box<Thread>>,
     ready_queue: VecDeque<Box<Thread>>,
