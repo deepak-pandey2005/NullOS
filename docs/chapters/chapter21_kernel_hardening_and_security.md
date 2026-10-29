@@ -78,7 +78,7 @@ To facilitate authorized, controlled memory transfers between user and kernel sp
 - **`stac` (Set AC Flag)**: Temporarily allows Ring 0 access to user-space pages.
 - **`clac` (Clear AC Flag)**: Re-engages the lock, blocking all further user memory access.
 
-In NullOS, `stac` and `clac` are wrapped in low-level primitives in [`kernel/src/arch/x86_64/cpu.rs`](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/arch/x86_64/cpu.rs):
+In NullOS, `stac` and `clac` are wrapped in low-level primitives in [`kernel/src/arch/x86_64/cpu.rs`](../../kernel/src/arch/x86_64/cpu.rs):
 ```rust
 #[inline(always)]
 pub unsafe fn stac() {
@@ -130,7 +130,7 @@ x86_64 defines a 48-bit canonical virtual address space divided into two halves:
 Any pointer with address $\ge$ `0x0000_8000_0000_0000` belongs to kernel space or non-canonical space!
 
 ### 4.2 The Validation Primitive: `validate_user_buffer`
-NullOS implements strict buffer verification in [`kernel/src/security/usercopy.rs`](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/security/usercopy.rs):
+NullOS implements strict buffer verification in [`kernel/src/security/usercopy.rs`](../../kernel/src/security/usercopy.rs):
 ```rust
 pub const USER_SPACE_CEILING: u64 = 0x0000_8000_0000_0000;
 

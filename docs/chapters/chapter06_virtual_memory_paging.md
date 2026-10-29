@@ -130,7 +130,7 @@ Suppose you want to map a user page at virtual address `0x400000` with `USER_ACC
 - **BUT**, what if the `PML4` entry, `PDPT` entry, or `PD` entry has `U/S = 0`?
 - **Result:** The CPU denies user access and raises a Page Fault!
 
-In NullOS ([kernel/src/memory/paging.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/memory/paging.rs)), when `map_page` traverses existing parent tables, if the page being mapped requires `USER_ACCESSIBLE`, we automatically propagate that flag up the tree:
+In NullOS ([kernel/src/memory/paging.rs](../../kernel/src/memory/paging.rs)), when `map_page` traverses existing parent tables, if the page being mapped requires `USER_ACCESSIBLE`, we automatically propagate that flag up the tree:
 ```rust
 if flags.contains(PageTableFlags::USER_ACCESSIBLE) {
     pml4[pml4_idx].add_flags(PageTableFlags::USER_ACCESSIBLE);
@@ -190,7 +190,7 @@ Here is a chicken-and-egg dilemma in operating systems:
 - But Page Tables are physical frames! How does the kernel modify a Page Table entry when it doesn't have a virtual address for it?
 
 ### The Recursive Mapping Solution:
-During initialization in NullOS ([paging.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/memory/paging.rs#L480-L487)):
+During initialization in NullOS ([paging.rs](../../kernel/src/memory/paging.rs#L480-L487)):
 We point the **very last entry of the PML4 table (`PML4[511]`) back to the PML4 table itself!**
 
 ```

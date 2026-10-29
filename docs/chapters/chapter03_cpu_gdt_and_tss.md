@@ -87,7 +87,7 @@ This is where the magic happens:
 
 ## 4. The NullOS GDT Layout
 
-In NullOS ([kernel/src/arch/x86_64/gdt.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/arch/x86_64/gdt.rs)), our GDT is configured with 6 entries:
+In NullOS ([kernel/src/arch/x86_64/gdt.rs](../../kernel/src/arch/x86_64/gdt.rs)), our GDT is configured with 6 entries:
 
 | Index | Offset / Selector | Name | DPL (Ring) | Type | Flags |
 | :---: | :---: | :--- | :---: | :--- | :--- |

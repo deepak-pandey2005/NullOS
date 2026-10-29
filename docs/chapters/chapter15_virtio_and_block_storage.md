@@ -162,7 +162,7 @@ Every read or write request submitted to a VirtIO block device is composed of a 
 
 ## 5. Implementation in NullOS
 
-Let us study the complete driver in [kernel/src/drivers/virtio_blk.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/drivers/virtio_blk.rs).
+Let us study the complete driver in [kernel/src/drivers/virtio_blk.rs](../../kernel/src/drivers/virtio_blk.rs).
 
 ### Probing and Initializing the VirtIO Device
 ```rust

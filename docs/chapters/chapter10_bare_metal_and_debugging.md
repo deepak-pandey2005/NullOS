@@ -52,7 +52,7 @@ Secure Boot is a UEFI security standard designed to prevent rootkits and malware
 
 ## 3. Creating a Bootable USB Drive (`scripts/create_bootable_usb.sh`)
 
-In NullOS, we created a specialized automated tool ([scripts/create_bootable_usb.sh](file:///home/deepak/OPENSOURCE/NullOS/scripts/create_bootable_usb.sh)) to format and flash bare-metal bootable USB media.
+In NullOS, we created a specialized automated tool ([scripts/create_bootable_usb.sh](../../scripts/create_bootable_usb.sh)) to format and flash bare-metal bootable USB media.
 
 ### What the Script Does Under the Hood:
 ```

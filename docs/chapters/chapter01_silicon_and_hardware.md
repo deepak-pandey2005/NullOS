@@ -136,7 +136,7 @@ To talk to an I/O port, you must use special CPU instructions:
 - **`in %dx, %al`**: Reads an 8-bit byte from hardware port address in `%dx` into register `%al`.
 - **`out %al, %dx`**: Writes the byte in `%al` out to hardware port address in `%dx`.
 
-In NullOS, we use Port I/O to initialize the **COM1 Serial Port** at port `0x3F8` ([kernel/src/drivers/serial.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/drivers/serial.rs)):
+In NullOS, we use Port I/O to initialize the **COM1 Serial Port** at port `0x3F8` ([kernel/src/drivers/serial.rs](../../kernel/src/drivers/serial.rs)):
 ```rust
 pub unsafe fn outb(port: u16, value: u8) {
     core::arch::asm!(

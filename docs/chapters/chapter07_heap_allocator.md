@@ -72,7 +72,7 @@ The simplest possible allocator:
 - **Cons**: **Cannot free individual allocations!** Memory can only be reclaimed all at once by resetting `next` to zero.
 
 ### Strategy 2: The Linked-List Allocator (Free-List)
-Used by NullOS ([kernel/src/memory/heap.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/memory/heap.rs)):
+Used by NullOS ([kernel/src/memory/heap.rs](../../kernel/src/memory/heap.rs)):
 - When a memory block is freed, the allocator writes a small header into the freed memory block itself:
   ```rust
   struct FreeBlockNode {

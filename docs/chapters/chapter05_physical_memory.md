@@ -57,7 +57,7 @@ The lowest 12 bits ($2^{12} = 4096$) represent the offset inside the page!
 
 When the computer turns on, RAM is not a continuous empty field. Parts of RAM are used by motherboard firmware, ACPI power tables, and GPU framebuffers.
 
-In NullOS ([kernel/src/memory/mod.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/memory/mod.rs)), the kernel inspects the **UEFI Memory Map** passed by the bootloader:
+In NullOS ([kernel/src/memory/mod.rs](../../kernel/src/memory/mod.rs)), the kernel inspects the **UEFI Memory Map** passed by the bootloader:
 
 ```text
 [00] Conventional (Free RAM) Start: 0x000000000000 End: 0x000000087000 Pages: 135 (540 KiB)
@@ -80,7 +80,7 @@ The PMM iterates through this list:
 
 How do we track whether each of those 123,216 frames is free or used?
 
-We use a **Bitmap** ([kernel/src/memory/frame_allocator.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/memory/frame_allocator.rs)):
+We use a **Bitmap** ([kernel/src/memory/frame_allocator.rs](../../kernel/src/memory/frame_allocator.rs)):
 - **Bit = `0`** $\rightarrow$ Frame is **FREE**!
 - **Bit = `1`** $\rightarrow$ Frame is **ALLOCATED**!
 

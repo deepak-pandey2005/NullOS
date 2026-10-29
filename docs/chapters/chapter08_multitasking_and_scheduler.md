@@ -24,7 +24,7 @@ By switching between threads every 10 milliseconds (100 times per second), human
 
 ## 2. Anatomy of a Thread: The Thread Control Block (TCB)
 
-In NullOS ([kernel/src/task/thread.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/task/thread.rs)), every thread is represented by a `Thread` struct:
+In NullOS ([kernel/src/task/thread.rs](../../kernel/src/task/thread.rs)), every thread is represented by a `Thread` struct:
 
 ```rust
 pub struct Thread {
@@ -81,7 +81,7 @@ In NullOS:
 
 How do you pause Thread A in the middle of a loop and switch to Thread B?
 
-In NullOS, this is handled by a hand-tuned assembly function: `switch_threads` ([kernel/src/arch/x86_64/switch.S](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/arch/x86_64/switch.S)):
+In NullOS, this is handled by a hand-tuned assembly function: `switch_threads` ([kernel/src/arch/x86_64/switch.S](../../kernel/src/arch/x86_64/switch.S)):
 
 ```rust
 extern "C" {
@@ -159,7 +159,7 @@ If `switch_threads` switches to a new thread's stack and executes `pop` and `ret
 **It would pop garbage and crash!**
 
 ### The Solution: The Artificial Initial Stack Frame
-When `Thread::new()` creates a thread ([kernel/src/task/thread.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/task/thread.rs#L70-L115)), we manually pre-populate its stack to look **identical** to a thread that was suspended by `switch_threads`:
+When `Thread::new()` creates a thread ([kernel/src/task/thread.rs](../../kernel/src/task/thread.rs#L70-L115)), we manually pre-populate its stack to look **identical** to a thread that was suspended by `switch_threads`:
 
 ```
 Top of New Thread Stack:
@@ -240,7 +240,7 @@ Why can't we use a normal spinlock inside the scheduler?
 8. **Permanent deadlock. The computer freezes.**
 
 ### The Solution:
-In NullOS ([kernel/src/sync.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/sync.rs)), our scheduler uses an **`IrqSpinlock`**:
+In NullOS ([kernel/src/sync.rs](../../kernel/src/sync/mod.rs)), our scheduler uses an **`IrqSpinlock`**:
 - Before acquiring the lock, it executes the `cli` assembly instruction to **disable interrupts on the local CPU core**.
 - It acquires the spinlock safely.
 - When the lock is released, it restores the previous interrupt state (`sti`).

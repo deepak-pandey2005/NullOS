@@ -199,7 +199,7 @@ When our driver encounters `0xE0`, it sets an internal boolean `extended = true`
 
 ## 5. Implementation in NullOS
 
-Let us study the complete driver in [kernel/src/drivers/keyboard.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/drivers/keyboard.rs).
+Let us study the complete driver in [kernel/src/drivers/keyboard.rs](../../kernel/src/drivers/keyboard.rs).
 
 ### Step 1: Low-Level Port I/O
 First, we define hardware port read/write primitives using the x86 `in` and `out` assembly instructions:
@@ -316,7 +316,7 @@ When you launch QEMU:
 - Keystrokes inside the **terminal emulator** running QEMU go to **COM1 serial** (`0x3F8`).
 - Keystrokes inside the **graphical window** (and physical laptops) go to the **8042 PS/2 controller** (`0x60`).
 
-In [kernel/src/task/shell.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/task/shell.rs), we unified both into a single input stream:
+In [kernel/src/task/shell.rs](../../kernel/src/task/shell.rs), we unified both into a single input stream:
 
 ```rust
 // In interactive_loop():

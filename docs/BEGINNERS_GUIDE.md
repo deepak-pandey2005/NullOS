@@ -102,7 +102,7 @@ A standard GDT entry (a Segment Descriptor) is exactly **8 bytes (64 bits)** wid
   - `Executable`: `1` for Code Segments, `0` for Data/Stack Segments.
 - **Flags**: Contains the `L` bit (Long Mode flag). When `1`, tells the CPU this is native 64-bit code.
 
-In NullOS ([kernel/src/arch/x86_64/gdt.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/arch/x86_64/gdt.rs)), our GDT has 6 entries:
+In NullOS ([kernel/src/arch/x86_64/gdt.rs](../kernel/src/arch/x86_64/gdt.rs)), our GDT has 6 entries:
 1. `Index 0 (Offset 0x00)`: **Null Descriptor** (8 bytes of zeroes, mandatory by x86 architecture).
 2. `Index 1 (Offset 0x08)`: **Kernel Code Segment (64-bit, Ring 0)**.
 3. `Index 2 (Offset 0x10)`: **Kernel Data Segment (Ring 0)**.
@@ -235,7 +235,7 @@ Physical memory is the actual RAM sticks plugged into the motherboard slots.
 - Address `0x0` is Frame 0; address `0x1000` (4096) is Frame 1; address `0x2000` (8192) is Frame 2, and so on.
 
 #### How does NullOS track which frames are free?
-We use a **Bitmap Allocator** ([kernel/src/memory/frame_allocator.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/memory/frame_allocator.rs)).
+We use a **Bitmap Allocator** ([kernel/src/memory/frame_allocator.rs](../kernel/src/memory/frame_allocator.rs)).
 - Every single bit represents one 4 KiB frame.
 - Bit = `0` -> Frame is FREE!
 - Bit = `1` -> Frame is USED.
@@ -277,7 +277,7 @@ The CPU has a register called **`CR3`**. It stores the physical frame address of
 
 ### Layer 3: The Kernel Heap
 The PMM only allocates 4 KiB chunks. But in Rust or C++, what if your code wants a `String` with 15 bytes, or a `Vec` with 8 numbers?
-That is what the **Heap Allocator** ([kernel/src/memory/heap.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/memory/heap.rs)) does:
+That is what the **Heap Allocator** ([kernel/src/memory/heap.rs](../kernel/src/memory/heap.rs)) does:
 - Maps virtual memory pages starting at `0x4444_4444_0000`.
 - Manages sub-page memory allocations (implementing Rust's `GlobalAlloc`).
 - Allows standard collections: `Box<T>`, `Vec<T>`, `String`, `format!()`.
@@ -291,7 +291,7 @@ How can a single-core CPU run a web browser, music player, and terminal at the s
 **Time Slicing!** The CPU executes Thread 1 for 10 milliseconds, pauses it, executes Thread 2 for 10 milliseconds, pauses it, and cycles through them so fast that humans perceive them as running simultaneously.
 
 ### What is a Thread?
-A thread is an execution context ([kernel/src/task/thread.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/task/thread.rs)):
+A thread is an execution context ([kernel/src/task/thread.rs](../kernel/src/task/thread.rs)):
 1. **Thread ID & Name**: Unique identifier.
 2. **State**: `Ready` (waiting for CPU), `Running` (currently on CPU), `Blocked` (sleeping/waiting), `Terminated` (finished).
 3. **Dedicated Stack**: A 16 KiB region in memory where this thread's local variables, function calls, and return addresses live.
@@ -367,7 +367,7 @@ Once an application is in Ring 3, it cannot access hardware or kernel memory. Wh
 Historically, CPUs used software interrupts (`int 0x80`). But software interrupts are slow—they flush CPU pipeline stages and look up descriptors in the IDT, taking hundreds of cycles.
 
 Modern x86_64 CPUs introduce two dedicated hardware instructions: **`syscall`** and **`sysret`**.
-They work via Model Specific Registers (MSRs) configured at boot ([kernel/src/arch/x86_64/syscall.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/arch/x86_64/syscall.rs)):
+They work via Model Specific Registers (MSRs) configured at boot ([kernel/src/arch/x86_64/syscall.rs](../kernel/src/arch/x86_64/syscall.rs)):
 - **`LSTAR` MSR**: Holds the kernel address of `syscall_entry`. When user code calls `syscall`, the hardware jumps here in **1 instruction**!
 - **`STAR` MSR**: Configures the segment selectors for kernel and user mode.
 - **`FMASK` MSR**: Automatically clears the interrupt flag (`IF`) on entry for atomic entry.

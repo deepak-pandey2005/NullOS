@@ -67,7 +67,7 @@ The **pipe** is one of the most celebrated abstractions in computing history, in
 ```
 
 ### 2.1 The Circular Ring Buffer (`PipeBuffer`)
-In NullOS, a pipe is backed by a thread-safe circular ring buffer ([`kernel/src/ipc/pipe.rs`](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/ipc/pipe.rs)):
+In NullOS, a pipe is backed by a thread-safe circular ring buffer ([`kernel/src/ipc/pipe.rs`](../../kernel/src/ipc/pipe.rs)):
 ```rust
 pub struct PipeBuffer {
     buffer: Vec<u8>,
@@ -116,7 +116,7 @@ pub fn sys_pipe(pipefd_ptr: *mut i32) -> u64 {
 }
 ```
 
-Because `PipeReadInode` and `PipeWriteInode` implement the generic VFS [`Inode`](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/fs/vfs.rs) trait, standard system calls (`SYS_READ`, `SYS_WRITE`, `SYS_CLOSE`) operate on pipes without modification!
+Because `PipeReadInode` and `PipeWriteInode` implement the generic VFS [`Inode`](../../kernel/src/fs/vfs.rs) trait, standard system calls (`SYS_READ`, `SYS_WRITE`, `SYS_CLOSE`) operate on pipes without modification!
 
 ---
 
@@ -147,7 +147,7 @@ For high-throughput systems (e.g. video processing, shared caches), double-copyi
 ```
 
 ### 3.1 Paging Mechanics of Shared Memory
-In [`kernel/src/ipc/shm.rs`](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/ipc/shm.rs):
+In [`kernel/src/ipc/shm.rs`](../../kernel/src/ipc/shm.rs):
 1. `shmget(key, size, create)` allocates physical frames via the Physical Memory Manager (PMM):
    ```rust
    let frame = crate::memory::alloc_frame()?;
@@ -194,7 +194,7 @@ Signal Delivery Pipeline:
 ```
 
 ### 4.1 Standard POSIX Signals in NullOS
-Defined in [`kernel/src/ipc/signal.rs`](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/ipc/signal.rs):
+Defined in [`kernel/src/ipc/signal.rs`](../../kernel/src/ipc/signal.rs):
 
 | Signal | Number | Default Action | Description |
 | :--- | :---: | :--- | :--- |
@@ -240,7 +240,7 @@ Unlike network Internet sockets (`AF_INET`), Unix sockets completely bypass:
 ```
 
 ### 5.1 The `socketpair()` Primitive
-Implemented in [`kernel/src/ipc/unix_socket.rs`](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/ipc/unix_socket.rs):
+Implemented in [`kernel/src/ipc/unix_socket.rs`](../../kernel/src/ipc/unix_socket.rs):
 ```rust
 pub fn socketpair() -> (UnixSocket, UnixSocket) {
     let a_to_b = Arc::new(Spinlock::new(PipeBuffer::new(8192)));

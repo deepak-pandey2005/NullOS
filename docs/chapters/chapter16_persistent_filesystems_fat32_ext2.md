@@ -157,7 +157,7 @@ In ext2, Inode number `2` is always the root directory `/`. Each 128-byte inode 
 
 ## 4. Integration with the NullOS VFS
 
-In [kernel/src/fs/mod.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/fs/mod.rs), `mount_block_devices()` automatically connects any detected block device to our Virtual File System:
+In [kernel/src/fs/mod.rs](../../kernel/src/fs/mod.rs), `mount_block_devices()` automatically connects any detected block device to our Virtual File System:
 
 ```rust
 pub fn mount_block_devices() {

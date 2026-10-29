@@ -120,7 +120,7 @@ Because the CPU only pushes `RIP, CS, RFLAGS, RSP, SS`, all other 15 general-pur
 
 If our Rust code immediately started running, the Rust compiler would overwrite `%rax`, `%rdi`, etc., corrupting the interrupted program!
 
-Therefore, every interrupt **must** enter a carefully hand-crafted assembly stub ([kernel/src/arch/x86_64/interrupts.S](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/arch/x86_64/interrupts.S)):
+Therefore, every interrupt **must** enter a carefully hand-crafted assembly stub ([kernel/src/arch/x86_64/interrupts.S](../../kernel/src/arch/x86_64/interrupts.S)):
 
 ```assembly
 # Macro for exceptions that DO NOT push an error code:
@@ -197,7 +197,7 @@ How does the OS keep track of time and preempt threads?
 In 1981 PCs, motherboards used the **Intel 8259 PIC** (Programmable Interrupt Controller). The 8259 was slow, supported only 15 interrupt lines, and could not handle multi-core systems.
 
 ### Disabling the Legacy PIC
-Before using the modern APIC, we must permanently disable the legacy 8259 PIC so it doesn't fire spurious interrupts. We do this by writing `0xFF` to I/O ports `0x21` and `0xA1` ([apic.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/arch/x86_64/apic.rs)):
+Before using the modern APIC, we must permanently disable the legacy 8259 PIC so it doesn't fire spurious interrupts. We do this by writing `0xFF` to I/O ports `0x21` and `0xA1` ([apic.rs](../../kernel/src/arch/x86_64/apic.rs)):
 ```rust
 outb(0x21, 0xFF); // Mask all interrupts on Master PIC
 outb(0xA1, 0xFF); // Mask all interrupts on Slave PIC
@@ -221,7 +221,7 @@ Register Offset   Name                         Function
 ### How the APIC Timer Drives NullOS:
 1. We configure the APIC Timer in **Periodic Mode** on Vector 32 (`0x20`).
 2. Every time the timer ticks, the hardware raises Interrupt 32.
-3. The CPU pauses the current thread and enters `timer_handler` in [idt.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/arch/x86_64/idt.rs):
+3. The CPU pauses the current thread and enters `timer_handler` in [idt.rs](../../kernel/src/arch/x86_64/idt.rs):
    ```rust
    pub extern "C" fn timer_handler() {
        super::apic::on_timer_tick();       // Increment tick counter

@@ -29,7 +29,7 @@ The x86_64 CPU hardware strictly forbids arbitrary privilege changes. There are 
 
 ## 2. The `iretq` Privilege Drop (Ring 0 $\rightarrow$ Ring 3)
 
-To transition into User Mode for the first time, we use a clever architectural technique: **The Fake Interrupt Stack Frame** ([kernel/src/arch/x86_64/syscall.S](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/arch/x86_64/syscall.S#L65-L87)).
+To transition into User Mode for the first time, we use a clever architectural technique: **The Fake Interrupt Stack Frame** ([kernel/src/arch/x86_64/syscall.S](../../kernel/src/arch/x86_64/syscall.S#L65-L87)).
 
 Normally, `iretq` is used to return from an interrupt. The CPU pops 5 values from the stack: `RIP`, `CS`, `RFLAGS`, `RSP`, `SS`.
 
@@ -92,7 +92,7 @@ In **one instruction**, the CPU transitions from Ring 3 to Ring 0 at lightning s
 ---
 
 ### Hardware MSR Configuration (The Setup)
-To enable `syscall`, the kernel configures Model Specific Registers (MSRs) during boot ([kernel/src/arch/x86_64/syscall.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/arch/x86_64/syscall.rs)):
+To enable `syscall`, the kernel configures Model Specific Registers (MSRs) during boot ([kernel/src/arch/x86_64/syscall.rs](../../kernel/src/arch/x86_64/syscall.rs)):
 
 1. **`IA32_EFER` (MSR `0xC000_0080`)**: Set Bit 0 (`SCE` - System Call Extension) to `1`.
 2. **`STAR` MSR (`0xC000_0081`)**: Tells the CPU which GDT segment selectors to load:
@@ -112,7 +112,7 @@ When user space executes `syscall`:
 
 ---
 
-### The `syscall_entry` Assembly Stub ([syscall.S](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/arch/x86_64/syscall.S)):
+### The `syscall_entry` Assembly Stub ([syscall.S](../../kernel/src/arch/x86_64/syscall.S)):
 ```assembly
 syscall_entry:
     # 1. Save user RSP into scratch variable
@@ -154,7 +154,7 @@ syscall_entry:
 
 ## 4. The NullOS System Call ABI
 
-In NullOS ([kernel/src/task/syscall.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/task/syscall.rs)), user applications invoke system calls using these standardized numbers:
+In NullOS ([kernel/src/task/syscall.rs](../../kernel/src/task/syscall.rs)), user applications invoke system calls using these standardized numbers:
 
 | Number | Name | Arguments | Description |
 | :---: | :--- | :--- | :--- |
@@ -171,7 +171,7 @@ In NullOS ([kernel/src/task/syscall.rs](file:///home/deepak/OPENSOURCE/NullOS/ke
 ## 5. Process Address Space Isolation (`AddressSpace`)
 
 How do we guarantee that Process A cannot spy on Process B?
-In NullOS ([kernel/src/memory/address_space.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/memory/address_space.rs)), every process receives its own dedicated **`AddressSpace`**:
+In NullOS ([kernel/src/memory/address_space.rs](../../kernel/src/memory/address_space.rs)), every process receives its own dedicated **`AddressSpace`**:
 
 ```
 +=============================================================================+
@@ -207,7 +207,7 @@ What happens if a user application has a bug (e.g. divides by zero, executes an 
 
 In older or naive kernels, any unhandled exception halted the entire operating system.
 
-In NullOS, we implemented **User-Mode Crash Resilience** ([kernel/src/arch/x86_64/idt.rs](file:///home/deepak/OPENSOURCE/NullOS/kernel/src/arch/x86_64/idt.rs#L188-L200)):
+In NullOS, we implemented **User-Mode Crash Resilience** ([kernel/src/arch/x86_64/idt.rs](../../kernel/src/arch/x86_64/idt.rs#L188-L200)):
 When an exception arrives:
 ```rust
 // Check if the fault occurred in Ring 3 User Mode (CPL == 3)
