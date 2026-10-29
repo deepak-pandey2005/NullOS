@@ -6,6 +6,35 @@
 >
 > 🎓 **Learning Operating Systems from Scratch?** Read the [**Absolute Beginner's Guide to Operating Systems & NullOS**](docs/BEGINNERS_GUIDE.md) — an in-depth, first-principles textbook explaining the GDT, TSS, ISRs (hardware vs. software interrupts), 4-level paging, and Ring 3 user mode!
 
+---
+
+## 🚀 Quick Start: Building & Running
+
+### Linux / macOS
+```bash
+./scripts/build.sh           # Build bootloader, kernel, and assemble disk image
+./scripts/run.sh             # Launch graphical QEMU session
+./scripts/run.sh --headless  # Run automated headless test suite
+```
+
+### Windows (PowerShell or Command Prompt)
+*Prerequisites: Rust Nightly (`rustup default nightly`), QEMU (`winget install SoftwareFreedomConservancy.QEMU`).*
+
+**PowerShell:**
+```powershell
+.\run.ps1             # Automatically builds and starts QEMU
+.\run.ps1 -Headless   # Run automated headless test suite
+```
+
+**Command Prompt:**
+```cmd
+run.bat               # Automatically builds and starts QEMU
+run.bat --headless    # Run automated headless test suite
+```
+*(OVMF UEFI firmware is automatically detected in standard QEMU install directories or downloaded automatically on first run).*
+
+---
+
 # NullOS — Milestone Roadmap
 
 ## Phase 0 — Foundation
