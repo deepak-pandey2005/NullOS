@@ -563,9 +563,9 @@
 
 # Phase 18 — Developer Experience
 
-### M39 — Helios SDK
-- [ ] Helios headers
-- [ ] Helios libc
+### M39 — NullOS SDK
+- [ ] NullOS headers
+- [ ] NullOS libc
 - [ ] Startup code
 - [ ] Linker scripts
 - [ ] Compiler configuration
@@ -590,7 +590,7 @@
 
 # Phase 19 — Release
 
-### M41 — Bootable Helios Distribution
+### M41 — Bootable NullOS Distribution
 - [ ] x86_64 UEFI image
 - [ ] AArch64 UEFI image
 - [ ] FAT32 ESP
