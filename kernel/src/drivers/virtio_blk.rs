@@ -6,6 +6,18 @@
 //! - Split Virtqueue memory management (Descriptor Table, Available Ring, Used Ring).
 //! - 512-byte sector read and write DMA transfers.
 //! - Integration with the generic `BlockDevice` trait and global block registry.
+//!
+//! # Real Hardware vs. Virtual Machine Note:
+//! VirtIO-Blk is a paravirtualized hypervisor standard (QEMU/KVM/VirtualBox).
+//! On real physical computers (bare metal USB boot), VirtIO PCI devices (0x1AF4:0x1001)
+//! DO NOT exist. Physical computers attach drives via:
+//! 1. AHCI / SATA controllers (PCI Class 0x01, Subclass 0x06) for SATA SSDs/HDDs.
+//! 2. NVMe controllers (PCI Class 0x01, Subclass 0x08) for modern M.2 PCIe SSDs.
+//! 3. USB Mass Storage (BOT/UAS) via xHCI (PCI Class 0x0C, Subclass 0x03).
+//!
+//! // TODO(real-hardware-storage): Implement AHCI/SATA (`ahci.rs`) and NVMe (`nvme.rs`)
+//! // drivers implementing the `BlockDevice` trait and register them with `register_block_device()`.
+//! // Without these drivers, real hardware boots using the in-memory RamFS (`/`) only.
 #![allow(dead_code)]
 
 use alloc::sync::Arc;
@@ -431,6 +443,7 @@ pub fn init() {
 
     if found_count == 0 {
         println!("[VIRTIO-BLK] Note: No VirtIO block device detected on PCI bus.");
+        println!("[VIRTIO-BLK] (Hypervisor-only: Physical PCs require AHCI/SATA or NVMe drivers).");
     }
 }
 

@@ -28,6 +28,13 @@ use crate::println;
 use crate::sync::Spinlock;
 
 /// Default network configuration parameters (QEMU user-mode NAT network).
+// TODO(dhcp): Currently, NullOS relies on static IP defaults tailored to QEMU SLIRP (10.0.2.15/24).
+// On real physical hardware connected to a home or corporate router, static IP assignment fails or
+// causes IP conflicts. Implement a DHCP client protocol (RFC 2131) over UDP ports 67/68 to lease
+// a dynamic IPv4 address, subnet mask, default gateway router, and DNS servers.
+//
+// TODO(dns): Implement a DNS client resolver (RFC 1035) over UDP port 53. Currently, applications
+// can only connect to literal numeric IPv4 addresses; hostnames cannot be resolved.
 pub const DEFAULT_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 2, 15);
 pub const DEFAULT_NETMASK: Ipv4Addr = Ipv4Addr::new(255, 255, 255, 0);
 pub const DEFAULT_GATEWAY: Ipv4Addr = Ipv4Addr::new(10, 0, 2, 2);

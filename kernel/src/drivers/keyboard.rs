@@ -3,6 +3,12 @@
 /// Implements standard Scan Code Set 1 translation, modifier state tracking
 /// (Shift, CapsLock, Ctrl, Alt), non-blocking input polling, and integration
 /// with the interactive shell and graphical window.
+///
+/// // TODO(phase12-m31-mouse): Implement PS/2 Auxiliary Mouse Driver:
+/// // 1. Enable 2nd PS/2 port (auxiliary mouse device) via 8042 command 0xA8.
+/// // 2. Enable IRQ12 interrupt delivery via Local APIC / IOAPIC (IDT Vector 0x2C).
+/// // 3. Decode 3-byte mouse packets: byte 0 flags (buttons, sign bits), byte 1 (X delta), byte 2 (Y delta).
+/// // 4. Dispatch mouse position updates to the graphical window canvas and cursor overlay.
 
 use crate::println;
 use crate::sync::Spinlock;

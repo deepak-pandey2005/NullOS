@@ -129,6 +129,9 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     drivers::pci::run_self_tests();
 
     // Initialize VirtIO Block Storage Subsystem (Phase 6 - M18 Block Devices)
+    // NOTE: VirtIO block devices operate in virtualized environments (QEMU/KVM).
+    // On physical bare-metal hardware, storage requires AHCI/SATA or NVMe drivers.
+    // If no VirtIO disk is detected, the kernel boots using the in-memory RamFS ('/').
     drivers::virtio_blk::init();
     drivers::virtio_blk::run_self_tests();
 
@@ -136,6 +139,8 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     fs::mount_block_devices();
 
     // Initialize VirtIO Network Subsystem (Phase 8 - M23 Network Driver)
+    // NOTE: VirtIO network operates in hypervisors. Physical bare metal requires
+    // native PCI Ethernet drivers (Intel e1000e / Realtek RTL8168) and DHCP.
     drivers::virtio_net::init();
     drivers::virtio_net::run_self_tests();
 

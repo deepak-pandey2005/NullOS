@@ -5,6 +5,12 @@
 //! - Optimized fast burst memory copy for instantaneous screen scrolling.
 //! - ANSI escape code parsing for colored kernel diagnostic logs.
 //! - Antialiased vector-quality font rasterization via noto-sans-mono-bitmap.
+//!
+//! // TODO(phase12-m30-gui): Implement double-buffered 2D graphics canvas and window compositor:
+//! // 1. Allocate an off-screen secondary backbuffer to prevent tearing and flicker during fast animations.
+//! // 2. Add 2D drawing primitives: line (Bresenham algorithm), rect, filled rect, and bitmap sprite blitting.
+//! // 3. Implement overlapping Window abstraction with title bars, draggable headers, and dirty region redraws.
+//! // 4. Hardware Mouse Cursor: Render transparent mouse arrow sprite updated on PS/2 / USB mouse input events.
 
 use crate::sync::Spinlock;
 use bootinfo::{FramebufferInfo, PixelFormat};

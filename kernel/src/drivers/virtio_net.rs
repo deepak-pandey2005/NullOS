@@ -9,6 +9,17 @@
 //! - VirtIO 10-byte network packet header (`VirtIoNetHdr`) encapsulation.
 //! - Raw packet transmission and reception primitives.
 //! - Device statistics tracking (RX/TX packets, RX/TX bytes).
+//!
+//! # Real Hardware vs. Virtual Machine Note:
+//! VirtIO-Net is a paravirtualized hypervisor standard (QEMU/KVM/VirtualBox).
+//! On real physical computers (bare metal USB boot), VirtIO network PCI devices (0x1AF4:0x1000)
+//! DO NOT exist. Physical computers communicate over real vendor-specific NICs:
+//! 1. Intel Gigabit Ethernet (e1000 / e1000e / I217 / I219-V, PCI Vendor 0x8086).
+//! 2. Realtek PCIe Gigabit Family (RTL8168 / RTL8111 / RTL8125, PCI Vendor 0x10EC).
+//! 3. Modern Intel / Broadcom Wi-Fi PCI adapters.
+//!
+//! // TODO(real-hardware-networking): Implement physical NIC drivers (e.g., `e1000.rs` and `rtl8168.rs`)
+//! // to support bare-metal Ethernet connections on physical motherboards and laptops.
 #![allow(dead_code)]
 
 use alloc::vec::Vec;
@@ -523,6 +534,7 @@ pub fn init() {
     }
 
     println!("[VIRTIO-NET] Note: No VirtIO network device detected on PCI bus.");
+    println!("[VIRTIO-NET] (Hypervisor-only: Physical PCs require Intel e1000e or Realtek RTL8168 drivers).");
 }
 
 /// Transmits a raw packet through the global network device.

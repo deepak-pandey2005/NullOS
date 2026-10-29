@@ -6,6 +6,9 @@
 //! - Directory traversal (8.3 filenames with case-insensitive matching).
 //! - File and Directory `Inode` implementation (`read_at`, `write_at`, `lookup`, `read_dir`, `create`).
 //! - Full integration with the VFS mount table.
+//!
+//! // TODO(fat32-lfn): Implement Microsoft VFAT Long File Name (LFN) entries (ATTR_LFN = 0x0F).
+//! // Currently, filenames are strictly constrained to 8.3 short format (e.g. `README.TXT`).
 #![allow(dead_code)]
 
 use alloc::format;
@@ -580,6 +583,16 @@ impl Inode for Fat32Inode {
                 entry_offset,
             }),
         }))
+    }
+
+    // TODO(fat32-unlink): Implement `unlink` to support persistent file deletion (`rm`) on FAT32:
+    // 1. Locate the 32-byte directory entry matching `name`.
+    // 2. Mark the entry as deleted by writing byte 0xE5 to `raw_entry.name[0]`.
+    // 3. Traverse the file's cluster chain starting at `first_cluster` and write 0x00000000 to the FAT
+    //    for each cluster to free the sectors back to the filesystem.
+    // 4. Update the FAT32 FSInfo free cluster count.
+    fn unlink(&self, _name: &str) -> Result<(), FsError> {
+        Err(FsError::Unsupported)
     }
 }
 

@@ -374,3 +374,10 @@ pub fn run_self_tests() {
         info.bsp_apic_id
     );
 }
+
+// TODO(phase13-m33-acpi-power): Implement ACPI Power Management & Extended Tables:
+// 1. FADT (Fixed ACPI Description Table) parser: Locate PM1a_CNT_BLK, PM1b_CNT_BLK, and DSDT physical address.
+// 2. DSDT / AML parser: Parse the `\_S5` object to discover SLP_TYPa and SLP_TYPb values.
+// 3. `poweroff()`: Write `(SLP_TYPa << 10) | (1 << 13)` to PM1a_CNT for clean hardware and VM shutdown.
+// 4. `reboot()`: Pulse CPU reset line via 8042 keyboard controller (port 0x64, command 0xFE) or ACPI RESET_REG.
+// 5. HPET (High Precision Event Timer) table parser for sub-microsecond hardware timestamping.

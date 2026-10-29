@@ -26,6 +26,15 @@ pub const SYS_ARCH_PRCTL: u64 = 158;
 pub const SYS_GETTID: u64 = 186;
 pub const SYS_FUTEX: u64 = 202;
 
+// TODO(phase11-m29-async): Implement Phase 11 M29 Async & Event Infrastructure:
+// - SYS_POLL: 7
+// - SYS_EPOLL_CREATE / epoll_create1: 213 / 291
+// - SYS_EPOLL_CTL: 233
+// - SYS_EPOLL_WAIT: 232
+// - SYS_TIMERFD_CREATE / SYS_TIMERFD_SETTIME: 283 / 286
+// - SYS_EVENTFD / eventfd2: 290
+// - Support O_NONBLOCK (0x800) across pipes, unix sockets, and network sockets returning -EAGAIN (-11).
+
 pub const ARCH_SET_GS: u64 = 0x1001;
 pub const ARCH_SET_FS: u64 = 0x1002;
 pub const ARCH_GET_FS: u64 = 0x1003;

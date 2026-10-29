@@ -375,6 +375,10 @@ impl Inode for Ext2InodeWrapper {
         Ok(entries)
     }
 
+    // TODO(ext2-write): Currently, ext2 is mounted strictly read-only. Implement ext2 write support:
+    // 1. Block bitmap and inode bitmap allocation routines.
+    // 2. Inode table updates and directory entry insertion.
+    // 3. Superblock and Block Group Descriptor free block/inode counter synchronization.
     fn create(&self, _name: &str, _file_type: FileType) -> Result<Arc<dyn Inode>, FsError> {
         Err(FsError::PermissionDenied)
     }

@@ -1432,6 +1432,9 @@ pub fn interactive_loop() {
                     line_buf.push(c);
                     print!("{}", c);
                 }
+                // TODO(shell-history): Implement circular history buffer with Up/Down arrow ANSI escape sequences (\x1b[A / \x1b[B).
+                // TODO(shell-completion): Implement Tab key ('\t') auto-completion for builtin commands and VFS filesystem paths.
+                // TODO(shell-navigation): Implement Left/Right cursor movement (\x1b[D / \x1b[C) and inline line-editing.
                 _ => {}
             }
         } else {

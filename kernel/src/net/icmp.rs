@@ -192,6 +192,8 @@ pub fn ping(target_ip: Ipv4Addr, count: usize) -> (usize, usize) {
 
             if !got_reply {
                 println!("Request timeout for icmp_seq {}", seq);
+                // NOTE: QEMU's default SLIRP user-mode network gateway (10.0.2.2) does not reply to ICMP Echo requests
+                // without host root socket permissions. On real physical hardware or TAP bridges, ICMP replies normally.
             }
         } else {
             println!("ping: sendto failed for {}", target_ip);
