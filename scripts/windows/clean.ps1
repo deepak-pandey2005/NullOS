@@ -35,3 +35,4 @@ if ($All) {
 }
 
 Write-Host "==> Clean complete." -ForegroundColor Green
+

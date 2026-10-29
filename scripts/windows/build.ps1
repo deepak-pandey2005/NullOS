@@ -108,3 +108,4 @@ if (Test-Path (Join-Path $UserBinDir "threads.elf")) {
 }
 
 Write-Host "==> NullOS build complete! Boot files ready in: $EspDir" -ForegroundColor Green
+
