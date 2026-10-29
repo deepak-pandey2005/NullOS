@@ -12,3 +12,4 @@ This phase establishes the foundational build systems, toolchains, linker script
 - [x] **Linker Scripts**: Designed `kernel/linker.ld` ensuring high/low memory placement (`0x100000` physical entry) and page alignment (`4 KiB`).
 - [x] **GPT & FAT32 Disk Pipeline**: Engineered `scripts/build.sh` using `mtools`, `parted`, and `dosfstools` to assemble bootable GPT images with EFI System Partitions (ESP).
 - [x] **QEMU Virtual Runner**: Developed `scripts/run.sh` supporting OVMF UEFI firmware, graphical GOP display, and COM1 headless automated test verification (`--headless`).
+

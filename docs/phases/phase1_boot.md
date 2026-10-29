@@ -21,3 +21,4 @@ This phase establishes the UEFI bootloader, Graphics Output Protocol (GOP) initi
 - [x] **Memory Map Acquisition**: Retrieved UEFI memory map buffer with descriptor sizes and versioning.
 - [x] **ExitBootServices()**: Irreversibly transitioned from UEFI firmware execution to bare-metal control.
 - [x] **BootInfo Contract**: Passed validated `BootInfo` structure containing GOP framebuffer, memory map, ACPI RSDP, and command line to `kernel_main`.
+
