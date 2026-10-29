@@ -22,14 +22,14 @@
 
 **PowerShell:**
 ```powershell
-.\run.ps1             # Automatically builds and starts QEMU (or .\scripts\windows\run.ps1)
-.\run.ps1 -Headless   # Run automated headless test suite
+.\scripts\windows\run.ps1             # Automatically builds and starts QEMU
+.\scripts\windows\run.ps1 -Headless   # Run automated headless test suite
 ```
 
 **Command Prompt:**
 ```cmd
-run.bat               # Automatically builds and starts QEMU (or scripts\windows\run.bat)
-run.bat --headless    # Run automated headless test suite
+scripts\windows\run.bat               # Automatically builds and starts QEMU
+scripts\windows\run.bat --headless    # Run automated headless test suite
 ```
 *(OVMF UEFI firmware is automatically detected in standard QEMU install directories or downloaded automatically on first run).*
 
