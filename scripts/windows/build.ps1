@@ -12,7 +12,7 @@ param()
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RootDir = Split-Path -Parent $ScriptDir
+$RootDir = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $BuildDir = Join-Path $RootDir "build"
 $EspDir = Join-Path $BuildDir "esp"
 $DataDir = Join-Path $BuildDir "data"

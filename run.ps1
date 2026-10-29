@@ -1,1 +1,1 @@
-& "$PSScriptRoot\scripts\run.ps1" @args
+& "$PSScriptRoot\scripts\windows\run.ps1" @args

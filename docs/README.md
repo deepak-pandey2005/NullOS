@@ -32,9 +32,9 @@ This documentation serves as an architectural blueprint, implementation guide, a
 - [**Phase 3: Memory Management (M7 - M10)** *(Upcoming)*](phases/phase3_memory.md) — Physical frame allocator, paging, heap.
 
 ### 5. Development & Scripts
-- `./scripts/build.sh` / `build.bat` (`build.ps1`): Compiles bootloader & kernel and builds the GPT disk image or ESP partition.
-- `./scripts/run.sh` / `run.bat` (`run.ps1`): Launches QEMU with OVMF firmware, `-serial stdio`, and graphical GOP window (`--headless` for automated test check).
-- `./scripts/clean.sh` / `clean.bat` (`clean.ps1`): Removes all build artifacts, temporary mount points, and backup files (`--all` or `-All` to clean Cargo target caches).
+- `./scripts/build.sh` / `build.bat` (`scripts/windows/build.ps1`): Compiles bootloader & kernel and builds the GPT disk image or ESP partition.
+- `./scripts/run.sh` / `run.bat` (`scripts/windows/run.ps1`): Launches QEMU with OVMF firmware, `-serial stdio`, and graphical GOP window (`--headless` for automated test check).
+- `./scripts/clean.sh` / `clean.bat` (`scripts/windows/clean.ps1`): Removes all build artifacts, temporary mount points, and backup files (`--all` or `-All` to clean Cargo target caches).
 
 ---
 

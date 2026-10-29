@@ -1,1 +1,1 @@
-& "$PSScriptRoot\scripts\clean.ps1" @args
+& "$PSScriptRoot\scripts\windows\clean.ps1" @args

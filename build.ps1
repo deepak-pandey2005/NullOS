@@ -1,1 +1,1 @@
-& "$PSScriptRoot\scripts\build.ps1" @args
+& "$PSScriptRoot\scripts\windows\build.ps1" @args

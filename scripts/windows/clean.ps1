@@ -10,7 +10,7 @@ param(
 )
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RootDir = Split-Path -Parent $ScriptDir
+$RootDir = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $BuildDir = Join-Path $RootDir "build"
 
 Write-Host "==> Cleaning NullOS build directory..." -ForegroundColor Cyan
