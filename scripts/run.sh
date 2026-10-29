@@ -19,6 +19,8 @@ for path in \
     "/usr/share/edk2/x64/OVMF_CODE.4m.fd" \
     "/usr/share/ovmf/OVMF.fd" \
     "/usr/share/ovmf/x64/OVMF.fd" \
+    "/usr/share/OVMF/OVMF.fd" \
+    "/usr/share/OVMF/x64/OVMF.fd" \
     "/usr/share/edk2-ovmf/x64/OVMF.fd"; do
     if [ -f "$path" ]; then
         OVMF_PATH="$path"
@@ -80,11 +82,13 @@ if [[ "${1:-}" == "--headless" || "${1:-}" == "--test" ]]; then
     qemu-system-x86_64 "${HEADLESS_ARGS[@]}" > "${SERIAL_LOG}" 2>&1 &
     QEMU_PID=$!
     
+    TEST_PASSED=false
     for i in {1..160}; do
         sleep 0.5
         if grep -q -E "All shell verification commands executed successfully|All Phase 7 Advanced Shell tests passed successfully|All Phase 7 & 8 Advanced Shell and Network tests passed successfully|All Phase 7, 8 & 9 Shell, Network and SMP tests passed successfully|All Phase 7, 8, 9 & 10 Shell, Network, SMP and Security tests passed successfully|All Phase 7, 8, 9 & 10 Shell, Network, SMP, Security and IPC tests passed successfully|All Phase 7, 8, 9, 10 & 11 Shell, Network, SMP, Security, IPC and Threads tests passed successfully" "${SERIAL_LOG}" 2>/dev/null; then
             sleep 0.5
             echo "==> Kernel reached and all automated tests passed!"
+            TEST_PASSED=true
             break
         fi
         if ! kill -0 "${QEMU_PID}" 2>/dev/null; then
@@ -99,6 +103,11 @@ if [[ "${1:-}" == "--headless" || "${1:-}" == "--test" ]]; then
     echo "==> Serial Log:"
     if [ -f "${SERIAL_LOG}" ]; then
         cat "${SERIAL_LOG}"
+    fi
+
+    if [ "${TEST_PASSED}" != "true" ]; then
+        echo "ERROR: Automated tests failed or timed out!" >&2
+        exit 1
     fi
 elif [[ "${1:-}" == "--cli" || "${1:-}" == "-n" || "${1:-}" == "--nographic" ]]; then
     echo "==> Launching QEMU in interactive terminal CLI mode (Press Ctrl+A then X to exit)..."

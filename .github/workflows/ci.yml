@@ -1,0 +1,52 @@
+name: NullOS CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    name: Build & Headless Verification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            qemu-system-x86 \
+            ovmf \
+            mtools \
+            parted \
+            dosfstools \
+            gcc-multilib \
+            build-essential
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+          targets: x86_64-unknown-none, x86_64-unknown-uefi
+
+      - name: Cargo Check Workspace
+        run: cargo check --workspace
+
+      - name: Build Bootloader, Libc, Kernel & Disk Images
+        run: ./scripts/build.sh
+
+      - name: Run Headless QEMU Automated Verification
+        run: ./scripts/run.sh --headless
+
+      - name: Upload Serial Test Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-serial-log
+          path: build/serial.log
+          if-no-files-found: ignore
+
