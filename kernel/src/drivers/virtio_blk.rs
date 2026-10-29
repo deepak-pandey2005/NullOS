@@ -344,7 +344,7 @@ impl VirtIoBlockDevice {
             let used = &*self.used_ring;
             let expected_used_idx = last_used.wrapping_add(1);
 
-            let mut timeout = 1_000_000;
+            let mut timeout = 20_000_000;
             while used.idx != expected_used_idx {
                 core::hint::spin_loop();
                 timeout -= 1;

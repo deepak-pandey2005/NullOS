@@ -1,7 +1,7 @@
 CC ?= gcc
 LD ?= ld
 
-CFLAGS = -Wall -Wextra -O2 -nostdlib -fno-builtin -fno-stack-protector -mno-red-zone -Ilibc/include -mcmodel=small
+CFLAGS = -Wall -Wextra -O2 -march=x86-64 -mtune=generic -nostdlib -fno-builtin -fno-stack-protector -mno-red-zone -Ilibc/include -mcmodel=small
 LDFLAGS = -m elf_x86_64 -static -nostdlib -T linker.ld
 
 BUILD_DIR = build

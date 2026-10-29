@@ -33,6 +33,15 @@ jobs:
           components: rust-src
           targets: x86_64-unknown-none, x86_64-unknown-uefi
 
+      - name: Configure KVM acceleration
+        run: |
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+            echo "KVM acceleration enabled on runner"
+          else
+            echo "KVM not present, using QEMU TCG acceleration"
+          fi
+
       - name: Cargo Check Workspace
         run: cargo check --workspace
 

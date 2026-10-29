@@ -2,7 +2,7 @@ CC ?= gcc
 AR ?= ar
 AS ?= as
 
-CFLAGS = -Wall -Wextra -O2 -nostdlib -fno-builtin -fno-stack-protector -mno-red-zone -Iinclude -mcmodel=small
+CFLAGS = -Wall -Wextra -O2 -march=x86-64 -mtune=generic -nostdlib -fno-builtin -fno-stack-protector -mno-red-zone -Iinclude -mcmodel=small
 ASFLAGS = --64
 
 BUILD_DIR = build

@@ -39,7 +39,7 @@ KVM_FLAG=()
 if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
     KVM_FLAG=(-enable-kvm -cpu host)
 else
-    KVM_FLAG=(-cpu qemu64)
+    KVM_FLAG=(-cpu max)
 fi
 
 QEMU_ARGS=(

@@ -422,7 +422,7 @@ impl VirtIoNetDevice {
 
             // Poll for transmission completion
             let expected_idx = self.tx_last_used_idx.wrapping_add(1);
-            let mut timeout = 1_000_000;
+            let mut timeout = 20_000_000;
             while used.idx != expected_idx {
                 core::hint::spin_loop();
                 timeout -= 1;

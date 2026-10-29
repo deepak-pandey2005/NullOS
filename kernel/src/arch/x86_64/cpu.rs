@@ -125,12 +125,16 @@ unsafe fn write_cr4(val: u64) {
 /// Initializes modern x86_64 CPU hardware features and security flags.
 pub fn init() {
     unsafe {
-        // 1. Enable CR0.WP (Bit 16 - Write Protect in Ring 0)
-        let cr0 = read_cr0();
-        let wp_flag = 1 << 16;
-        if (cr0 & wp_flag) == 0 {
-            write_cr0(cr0 | wp_flag);
-        }
+        // 1. Configure CR0:
+        // - Bit 1: MP (Monitor Coprocessor) -> 1
+        // - Bit 2: EM (Emulation) -> 0 (Clear EM to allow CPU hardware execution of x87/SSE/AVX without #UD)
+        // - Bit 3: TS (Task Switched) -> 0 (Clear TS to prevent #NM exceptions on SSE instructions)
+        // - Bit 16: WP (Write Protect) -> 1 (Enforce Ring 0 write protection on read-only pages)
+        let mut cr0 = read_cr0();
+        cr0 |= (1 << 16) | (1 << 1); // Enable WP and MP
+        cr0 &= !(1 << 2);            // Clear EM (prevents #UD on FPU/SSE/AVX)
+        cr0 &= !(1 << 3);            // Clear TS (prevents #NM on FPU/SSE/AVX)
+        write_cr0(cr0);
 
         // 2. Enable EFER.NXE (Bit 11 - No-Execute / Execute-Disable Enable)
         let efer = read_msr(IA32_EFER_MSR);
