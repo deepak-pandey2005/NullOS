@@ -209,6 +209,9 @@ pub fn init() {
 /// 64-Bit Rust Kernel Entry Point for Application Processors.
 #[unsafe(no_mangle)]
 pub extern "C" fn ap_kernel_entry(cpu_id: usize) -> ! {
+    // 0. Load GDT on this core
+    super::gdt::load_ap();
+
     // 1. Initialize CPU control registers & SSE
     super::cpu::init();
 

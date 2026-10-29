@@ -43,10 +43,12 @@ jobs:
           sudo modprobe kvm_amd || true
           if [ -e /dev/kvm ]; then
             sudo chmod 666 /dev/kvm
-            echo "KVM acceleration successfully enabled on runner:"
+          fi
+          if [ -r /dev/kvm ] && [ -w /dev/kvm ] && qemu-system-x86_64 -accel kvm -version > /dev/null 2>&1; then
+            echo "KVM acceleration successfully verified and active on runner:"
             ls -la /dev/kvm
           else
-            echo "KVM device not found, falling back to multi-threaded QEMU TCG"
+            echo "Hardware KVM acceleration not functional on runner, falling back to multi-threaded QEMU TCG"
           fi
 
       - name: Cargo Check Workspace

@@ -65,9 +65,13 @@ static mut TSS: TaskStateSegment = TaskStateSegment::new();
 // GDT entries: 5 standard 8-byte entries + 1 16-byte TSS descriptor = 7 u64 entries
 static mut GDT: [u64; 7] = [0; 7];
 
-/// Build a standard segment descriptor
+/// Build a standard flat segment descriptor with 4-GiB limit (0xFFFFF 4KiB pages)
 const fn create_descriptor(flags: u64, access: u64) -> u64 {
-    (flags << 52) | (access << 40)
+    let limit_low = 0xFFFFu64;
+    let limit_high = 0x0Fu64 << 48;
+    let flags_shifted = (flags & 0x0F) << 52;
+    let access_shifted = (access & 0xFF) << 40;
+    flags_shifted | access_shifted | limit_high | limit_low
 }
 
 /// Initialize and load GDT and TSS
@@ -84,20 +88,22 @@ pub fn init() {
         // Entry 1 (0x08): Kernel Code 64-bit (Ring 0, Executable, Readable, Long Mode)
         // Access: Present(1) | Ring 0(00) | S=1(Code/Data) | Exec(1) | Direction/Conforming(0) | Readable(1) | Accessed(0) = 0x9A
         // Flags: Granularity(1) | LongMode(1) = 0xA
-        GDT[1] = create_descriptor(0x2, 0x9A); // 0x00209A0000000000 (Long mode flag is bit 53: 0x2 << 52)
+        GDT[1] = create_descriptor(0xA, 0x9A); // 0x00AF9A000000FFFF
 
         // Entry 2 (0x10): Kernel Data (Ring 0, Writable)
         // Access: Present(1) | Ring 0(00) | S=1 | Exec(0) | Dir(0) | Writable(1) | Accessed(0) = 0x92
-        GDT[2] = create_descriptor(0x0, 0x92);
+        // Flags: Granularity(1) | Default/Big(1) = 0xC
+        GDT[2] = create_descriptor(0xC, 0x92); // 0x00CF92000000FFFF
 
         // Entry 3 (0x18): User Data (Ring 3, Writable)
         // Access: Present(1) | Ring 3(11) | S=1 | Exec(0) | Dir(0) | Writable(1) | Accessed(0) = 0xF2
-        GDT[3] = create_descriptor(0x0, 0xF2);
+        // Flags: Granularity(1) | Default/Big(1) = 0xC
+        GDT[3] = create_descriptor(0xC, 0xF2); // 0x00CFF2000000FFFF
 
         // Entry 4 (0x20): User Code 64-bit (Ring 3, Executable, Readable, Long Mode)
         // Access: Present(1) | Ring 3(11) | S=1 | Exec(1) | Dir(0) | Readable(1) | Accessed(0) = 0xFA
-        // Flags: LongMode(1) = 0x2
-        GDT[4] = create_descriptor(0x2, 0xFA);
+        // Flags: Granularity(1) | LongMode(1) = 0xA
+        GDT[4] = create_descriptor(0xA, 0xFA); // 0x00AFFA000000FFFF
 
         // Entry 5 & 6 (0x28): TSS Descriptor (16 bytes in long mode)
         let tss_addr = core::ptr::addr_of!(TSS) as u64;
@@ -163,5 +169,41 @@ pub fn init() {
 pub fn set_tss_rsp0(rsp0: u64) {
     unsafe {
         TSS.rsp0 = rsp0;
+    }
+}
+
+/// Loads the Global Descriptor Table on an Application Processor (AP) core.
+pub fn load_ap() {
+    unsafe {
+        let gdt_ptr = core::ptr::addr_of!(GDT) as *const u64;
+        let gdt_desc = GdtDescriptor {
+            size: (size_of::<[u64; 7]>() - 1) as u16,
+            offset: gdt_ptr as u64,
+        };
+
+        core::arch::asm!(
+            "lgdt [{}]",
+            in(reg) &gdt_desc,
+            options(nostack, readonly)
+        );
+
+        core::arch::asm!(
+            "push {cs}",
+            "lea 1f(%rip), {tmp}",
+            "push {tmp}",
+            "lretq",
+            "1:",
+            "mov {data_sel:x}, %ds",
+            "mov {data_sel:x}, %es",
+            "mov {data_sel:x}, %ss",
+            "xor %eax, %eax",
+            "mov %ax, %fs",
+            "mov %ax, %gs",
+            cs = in(reg) KERNEL_CODE_SELECTOR as u64,
+            data_sel = in(reg) KERNEL_DATA_SELECTOR,
+            tmp = out(reg) _,
+            out("eax") _,
+            options(att_syntax)
+        );
     }
 }

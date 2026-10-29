@@ -36,7 +36,7 @@ fi
 echo "==> Using OVMF: ${OVMF_PATH}"
 
 KVM_FLAG=()
-if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+if [ -r /dev/kvm ] && [ -w /dev/kvm ] && qemu-system-x86_64 -accel kvm -version > /dev/null 2>&1; then
     KVM_FLAG=(-accel kvm -cpu host)
 else
     KVM_FLAG=(-accel tcg,thread=multi -cpu max)
