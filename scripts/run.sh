@@ -37,9 +37,9 @@ echo "==> Using OVMF: ${OVMF_PATH}"
 
 KVM_FLAG=()
 if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
-    KVM_FLAG=(-enable-kvm -cpu host)
+    KVM_FLAG=(-accel kvm -cpu host)
 else
-    KVM_FLAG=(-cpu max)
+    KVM_FLAG=(-accel tcg,thread=multi -cpu max)
 fi
 
 QEMU_ARGS=(
@@ -83,7 +83,7 @@ if [[ "${1:-}" == "--headless" || "${1:-}" == "--test" ]]; then
     QEMU_PID=$!
     
     TEST_PASSED=false
-    for i in {1..160}; do
+    for i in {1..360}; do
         sleep 0.5
         if grep -q -E "All shell verification commands executed successfully|All Phase 7 Advanced Shell tests passed successfully|All Phase 7 & 8 Advanced Shell and Network tests passed successfully|All Phase 7, 8 & 9 Shell, Network and SMP tests passed successfully|All Phase 7, 8, 9 & 10 Shell, Network, SMP and Security tests passed successfully|All Phase 7, 8, 9 & 10 Shell, Network, SMP, Security and IPC tests passed successfully|All Phase 7, 8, 9, 10 & 11 Shell, Network, SMP, Security, IPC and Threads tests passed successfully" "${SERIAL_LOG}" 2>/dev/null; then
             sleep 0.5

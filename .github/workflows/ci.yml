@@ -35,11 +35,18 @@ jobs:
 
       - name: Configure KVM acceleration
         run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo modprobe kvm || true
+          sudo modprobe kvm_intel || true
+          sudo modprobe kvm_amd || true
           if [ -e /dev/kvm ]; then
             sudo chmod 666 /dev/kvm
-            echo "KVM acceleration enabled on runner"
+            echo "KVM acceleration successfully enabled on runner:"
+            ls -la /dev/kvm
           else
-            echo "KVM not present, using QEMU TCG acceleration"
+            echo "KVM device not found, falling back to multi-threaded QEMU TCG"
           fi
 
       - name: Cargo Check Workspace
