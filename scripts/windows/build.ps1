@@ -106,6 +106,9 @@ if (Test-Path (Join-Path $UserBinDir "cat.elf")) {
 if (Test-Path (Join-Path $UserBinDir "threads.elf")) {
     Copy-Item -Force (Join-Path $UserBinDir "threads.elf") (Join-Path $DataDir "THREADS.ELF")
 }
+if (Test-Path (Join-Path $UserBinDir "async_test.elf")) {
+    Copy-Item -Force (Join-Path $UserBinDir "async_test.elf") (Join-Path $DataDir "ASYNC.ELF")
+}
 
 Write-Host "==> NullOS build complete! Boot files ready in: $EspDir" -ForegroundColor Green
 

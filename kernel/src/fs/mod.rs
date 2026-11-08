@@ -149,6 +149,7 @@ fn verify_fat32_operations() {
         create: true,
         append: false,
         truncate: true,
+        nonblock: false,
     }) {
         Ok(file) => {
             match file.write_at(0, test_data) {
@@ -269,6 +270,7 @@ fn test_vfs_file_create_and_write() {
             create: true,
             append: false,
             truncate: false,
+            nonblock: false,
         })
         .expect("Failed to create /tmp/test.txt");
 

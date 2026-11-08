@@ -43,6 +43,11 @@ pub fn has_incoming_byte() -> bool {
     }
 }
 
+/// Returns true if an unread byte is pending in the COM1 receive FIFO.
+pub fn has_byte() -> bool {
+    has_incoming_byte()
+}
+
 /// Reads a byte from COM1 if one is available, without blocking.
 pub fn read_byte() -> Option<u8> {
     if has_incoming_byte() {

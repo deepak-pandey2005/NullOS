@@ -40,6 +40,12 @@ impl FileDescriptor {
         }
         let mut offset = self.offset.lock();
         let bytes_read = self.inode.read_at(*offset, buf)?;
+        if bytes_read == 0 && self.flags.nonblock && !buf.is_empty() {
+            let p = self.inode.poll();
+            if (p & crate::fs::vfs::POLLIN) == 0 {
+                return Err(FsError::WouldBlock);
+            }
+        }
         *offset += bytes_read;
         Ok(bytes_read)
     }
@@ -48,6 +54,12 @@ impl FileDescriptor {
     pub fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
         if !self.flags.write {
             return Err(FsError::PermissionDenied);
+        }
+        if self.flags.nonblock && !buf.is_empty() {
+            let p = self.inode.poll();
+            if (p & crate::fs::vfs::POLLOUT) == 0 {
+                return Err(FsError::WouldBlock);
+            }
         }
         let mut offset = self.offset.lock();
         let write_pos = if self.flags.append {

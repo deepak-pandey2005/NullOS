@@ -124,6 +124,9 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // Initialize Inter-Process Communication Subsystem (Phase 10 - M27 IPC)
     ipc::run_self_tests();
 
+    // Initialize Async & Event Infrastructure (Phase 11 - M29 Async)
+    task::event::init();
+
     // Initialize PCI Bus Enumeration & Hardware Device Discovery (Phase 6 - M17 PCI)
     drivers::pci::init();
     drivers::pci::run_self_tests();

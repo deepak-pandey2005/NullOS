@@ -23,7 +23,16 @@ pub enum FsError {
     NoSpace,
     Unsupported,
     BadFileDescriptor,
+    WouldBlock,
 }
+
+/// Standard poll event flags conforming to POSIX `poll(2)` and `epoll(7)`.
+pub const POLLIN: u32 = 0x0001;     // There is data to read
+pub const POLLPRI: u32 = 0x0002;    // Exceptional condition / urgent data
+pub const POLLOUT: u32 = 0x0004;    // Writing will not block
+pub const POLLERR: u32 = 0x0008;    // Error condition
+pub const POLLHUP: u32 = 0x0010;    // Stream disconnected / hung up
+pub const POLLNVAL: u32 = 0x0020;   // Invalid request: fd not open
 
 /// The type of file node in the VFS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,22 +77,35 @@ pub struct DirEntry {
 }
 
 /// Flags specified when opening a file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct OpenFlags {
     pub read: bool,
     pub write: bool,
     pub create: bool,
     pub append: bool,
     pub truncate: bool,
+    pub nonblock: bool,
 }
 
 impl OpenFlags {
+    #[allow(dead_code)]
+    pub const fn empty() -> Self {
+        Self {
+            read: false,
+            write: false,
+            create: false,
+            append: false,
+            truncate: false,
+            nonblock: false,
+        }
+    }
     pub const READ_ONLY: Self = Self {
         read: true,
         write: false,
         create: false,
         append: false,
         truncate: false,
+        nonblock: false,
     };
 
     pub const WRITE_ONLY: Self = Self {
@@ -92,6 +114,7 @@ impl OpenFlags {
         create: false,
         append: false,
         truncate: false,
+        nonblock: false,
     };
 
     pub const READ_WRITE: Self = Self {
@@ -100,6 +123,7 @@ impl OpenFlags {
         create: false,
         append: false,
         truncate: false,
+        nonblock: false,
     };
 
     /// Converts raw integer flags (e.g. from POSIX syscalls) into `OpenFlags`.
@@ -110,6 +134,7 @@ impl OpenFlags {
         let create = (bits & 0o100) != 0; // O_CREAT (0100)
         let truncate = (bits & 0o1000) != 0; // O_TRUNC (01000)
         let append = (bits & 0o2000) != 0; // O_APPEND (02000)
+        let nonblock = (bits & 0o4000) != 0; // O_NONBLOCK (04000 = 0x800)
 
         Self {
             read,
@@ -117,6 +142,7 @@ impl OpenFlags {
             create,
             append,
             truncate,
+            nonblock,
         }
     }
 }
@@ -147,9 +173,19 @@ pub trait Inode: Send + Sync {
         Ok(())
     }
 
+    /// Polls file node for ready I/O conditions (POLLIN, POLLOUT, POLLERR, POLLHUP).
+    fn poll(&self) -> u32 {
+        POLLIN | POLLOUT
+    }
+
     /// Removes a child entry by name from this directory.
     fn unlink(&self, _name: &str) -> Result<(), FsError> {
         Err(FsError::Unsupported)
+    }
+
+    /// Provides dynamic type inspection and downcasting for specialized inode types.
+    fn as_any(&self) -> Option<&dyn core::any::Any> {
+        None
     }
 }
 

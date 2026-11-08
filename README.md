@@ -456,14 +456,14 @@ scripts\windows\run.bat --headless    # Run automated headless test suite
 - [x] pthread-like API (`pthread_create`, `pthread_join`, `pthread_exit`, `pthread_self`, `sem_init`, `sem_wait`, `sem_post`)
 
 ### M29 — Async & Event Infrastructure
-- [ ] Event queues
-- [ ] Async I/O
-- [ ] Completion queues
-- [ ] Timers
-- [ ] Event polling
-- [ ] Non-blocking I/O
-- [ ] Zero-copy buffers
-- [ ] Scatter/gather I/O
+- [x] Event queues (kernel event dispatch and userspace notification queues)
+- [x] Async I/O (in-kernel asynchronous completion queues and non-blocking I/O dispatch)
+- [x] Completion queues (`AsyncCompletionQueue` thread-safe posting and reaping)
+- [x] Timers (`timerfd_create(2)` [283], `timerfd_settime(2)` [286], `timerfd_gettime(2)` [287], `ITimerSpec`)
+- [x] Event polling (`poll(2)` [7], `epoll_create(2)` [213], `epoll_create1(2)` [291], `epoll_ctl(2)` [233], `epoll_wait(2)` [232])
+- [x] Non-blocking I/O (`O_NONBLOCK` [0x800] returning `-EAGAIN` [-11] across pipes, sockets, and character devices)
+- [x] Zero-copy buffers & EventFd (`eventfd(2)` [284], `eventfd2(2)` [290] 64-bit event counter notifications)
+- [x] Scatter/gather I/O (`readv(2)` [19] and `writev(2)` [20] with `struct iovec`)
 
 ---
 
@@ -712,7 +712,7 @@ sudo ./scripts/create_bootable_usb.sh --device /dev/sdX
 - [x] M28
 
 ## Checkpoint 7 — Advanced OS
-- [ ] M29
+- [x] M29
 - [ ] M30
 - [ ] M31
 - [ ] M32

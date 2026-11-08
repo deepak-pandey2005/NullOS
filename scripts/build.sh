@@ -79,5 +79,9 @@ if [ -f "${ROOT_DIR}/user/build/bin/threads.elf" ]; then
     mcopy -o -i "${DATA_DISK_IMG}" "${ROOT_DIR}/user/build/bin/threads.elf" ::THREADS.ELF
     echo "==> Copied THREADS.ELF to FAT32 data disk."
 fi
+if [ -f "${ROOT_DIR}/user/build/bin/async_test.elf" ]; then
+    mcopy -o -i "${DATA_DISK_IMG}" "${ROOT_DIR}/user/build/bin/async_test.elf" ::ASYNC.ELF
+    echo "==> Copied ASYNC.ELF to FAT32 data disk."
+fi
 
 

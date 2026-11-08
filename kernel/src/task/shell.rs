@@ -390,6 +390,7 @@ fn write_file_content(path: &str, content: &str, append: bool) -> Result<usize, 
         create: true,
         append,
         truncate: !append,
+        nonblock: false,
     })?;
     let offset = if append { file.stat().size } else { 0 };
     file.write_at(offset, content.as_bytes())
@@ -539,6 +540,7 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
                     create: true,
                     append: false,
                     truncate: false,
+                    nonblock: false,
                 }) {
                     Ok(_) => (alloc::format!("Created file: {}\n", resolved), 0),
                     Err(e) => (alloc::format!("touch: cannot create '{}': {:?}\n", resolved, e), 1),
@@ -1381,7 +1383,36 @@ pub fn run_automated_tests() {
         execute_command("exec /disk/THREADS.ELF");
     }
 
-    println!("[SHELL] All Phase 7, 8, 9, 10 & 11 Shell, Network, SMP, Security, IPC and Threads tests passed successfully!");
+    println!("[SHELL] 21. Testing Async & Event Infrastructure (poll, epoll, eventfd, timerfd, writev)...");
+    use crate::fs::vfs::Inode;
+    let evfd = crate::task::event::EventFd::new(10, 0);
+    assert_eq!(evfd.poll() & crate::fs::vfs::POLLIN, crate::fs::vfs::POLLIN);
+    let mut buf = [0u8; 8];
+    assert_eq!(evfd.read_at(0, &mut buf), Ok(8));
+    assert_eq!(u64::from_ne_bytes(buf), 10);
+    assert_eq!(evfd.poll() & crate::fs::vfs::POLLIN, 0);
+
+    let tfd = crate::task::event::TimerFd::new(crate::task::event::CLOCK_MONOTONIC, 0);
+    let ts = crate::task::event::ITimerSpec {
+        it_interval: crate::task::event::TimeSpec { tv_sec: 0, tv_nsec: 0 },
+        it_value: crate::task::event::TimeSpec { tv_sec: 0, tv_nsec: 10_000_000 },
+    };
+    tfd.set_time(ts);
+
+    let ep = crate::task::event::EpollInstance::new();
+    let ev = crate::task::event::EpollEvent {
+        events: crate::task::event::EPOLLIN,
+        data: 0x1234,
+    };
+    assert!(ep.ctl(crate::task::event::EPOLL_CTL_ADD, 100, ev).is_ok());
+    assert!(ep.ctl(crate::task::event::EPOLL_CTL_ADD, 100, ev).is_err());
+    assert!(ep.ctl(crate::task::event::EPOLL_CTL_DEL, 100, ev).is_ok());
+
+    if crate::fs::vfs::VFS.resolve_path("/disk/ASYNC.ELF").is_ok() {
+        execute_command("exec /disk/ASYNC.ELF");
+    }
+
+    println!("[SHELL] All Phase 7, 8, 9, 10 & 11 Shell, Network, SMP, Security, IPC, Threads and Async tests passed successfully!");
 }
 
 /// Interactive Shell Loop that listens on both PS/2 Keyboard and COM1 serial input

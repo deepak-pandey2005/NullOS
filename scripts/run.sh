@@ -85,7 +85,7 @@ if [[ "${1:-}" == "--headless" || "${1:-}" == "--test" ]]; then
     TEST_PASSED=false
     for i in {1..360}; do
         sleep 0.5
-        if grep -q -E "All shell verification commands executed successfully|All Phase 7 Advanced Shell tests passed successfully|All Phase 7 & 8 Advanced Shell and Network tests passed successfully|All Phase 7, 8 & 9 Shell, Network and SMP tests passed successfully|All Phase 7, 8, 9 & 10 Shell, Network, SMP and Security tests passed successfully|All Phase 7, 8, 9 & 10 Shell, Network, SMP, Security and IPC tests passed successfully|All Phase 7, 8, 9, 10 & 11 Shell, Network, SMP, Security, IPC and Threads tests passed successfully" "${SERIAL_LOG}" 2>/dev/null; then
+        if grep -q -E "All shell verification commands executed successfully|All Phase 7.*passed successfully" "${SERIAL_LOG}" 2>/dev/null; then
             sleep 0.5
             echo "==> Kernel reached and all automated tests passed!"
             TEST_PASSED=true

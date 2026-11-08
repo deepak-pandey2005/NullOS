@@ -6,6 +6,7 @@
 #![allow(unused_imports, dead_code)]
 
 pub mod elf;
+pub mod event;
 pub mod process;
 pub mod scheduler;
 pub mod shell;

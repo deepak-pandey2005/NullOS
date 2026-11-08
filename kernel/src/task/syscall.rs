@@ -26,14 +26,18 @@ pub const SYS_ARCH_PRCTL: u64 = 158;
 pub const SYS_GETTID: u64 = 186;
 pub const SYS_FUTEX: u64 = 202;
 
-// TODO(phase11-m29-async): Implement Phase 11 M29 Async & Event Infrastructure:
-// - SYS_POLL: 7
-// - SYS_EPOLL_CREATE / epoll_create1: 213 / 291
-// - SYS_EPOLL_CTL: 233
-// - SYS_EPOLL_WAIT: 232
-// - SYS_TIMERFD_CREATE / SYS_TIMERFD_SETTIME: 283 / 286
-// - SYS_EVENTFD / eventfd2: 290
-// - Support O_NONBLOCK (0x800) across pipes, unix sockets, and network sockets returning -EAGAIN (-11).
+pub const SYS_POLL: u64 = 7;
+pub const SYS_READV: u64 = 19;
+pub const SYS_WRITEV: u64 = 20;
+pub const SYS_EPOLL_CREATE: u64 = 213;
+pub const SYS_EPOLL_WAIT: u64 = 232;
+pub const SYS_EPOLL_CTL: u64 = 233;
+pub const SYS_TIMERFD_CREATE: u64 = 283;
+pub const SYS_EVENTFD: u64 = 284;
+pub const SYS_TIMERFD_SETTIME: u64 = 286;
+pub const SYS_TIMERFD_GETTIME: u64 = 287;
+pub const SYS_EVENTFD2: u64 = 290;
+pub const SYS_EPOLL_CREATE1: u64 = 291;
 
 pub const ARCH_SET_GS: u64 = 0x1001;
 pub const ARCH_SET_FS: u64 = 0x1002;
@@ -180,6 +184,7 @@ pub extern "C" fn syscall_dispatcher(
                     let slice = unsafe { core::slice::from_raw_parts_mut(buf_ptr, len) };
                     match handle.read(slice) {
                         Ok(bytes) => bytes as u64,
+                        Err(crate::fs::vfs::FsError::WouldBlock) => (-11i64) as u64,
                         Err(_) => u64::MAX,
                     }
                 } else {
@@ -222,6 +227,7 @@ pub extern "C" fn syscall_dispatcher(
                     if let Ok(handle) = proc.fd_table.get(fd) {
                         match handle.write(slice) {
                             Ok(bytes) => bytes as u64,
+                            Err(crate::fs::vfs::FsError::WouldBlock) => (-11i64) as u64,
                             Err(_) => u64::MAX,
                         }
                     } else {
@@ -556,6 +562,492 @@ pub extern "C" fn syscall_dispatcher(
                     }
                 }
                 _ => u64::MAX,
+            }
+        }
+        SYS_POLL => {
+            let fds_ptr = a1 as *mut crate::task::event::PollFd;
+            let nfds = a2 as usize;
+            let timeout_ms = a3 as i32;
+
+            if fds_ptr.is_null() && nfds > 0 {
+                return (-14i64) as u64;
+            }
+            if nfds > 1024 {
+                return (-22i64) as u64;
+            }
+            if nfds > 0 && crate::security::validate_user_buffer(fds_ptr as *const u8, nfds * core::mem::size_of::<crate::task::event::PollFd>()).is_err() {
+                return (-14i64) as u64;
+            }
+
+            let start_ticks = crate::arch::x86_64::apic::get_ticks();
+            let timeout_ticks = if timeout_ms < 0 {
+                u64::MAX
+            } else {
+                (timeout_ms as u64) / 10
+            };
+
+            let cur_pid = current_pid();
+            let poll_slice = if nfds > 0 {
+                unsafe { core::slice::from_raw_parts_mut(fds_ptr, nfds) }
+            } else {
+                &mut []
+            };
+
+            loop {
+                let mut ready_count = 0usize;
+                {
+                    let proc_table = super::process::PROCESS_TABLE.lock();
+                    let proc = proc_table.get(cur_pid).or_else(|| proc_table.get(super::process::ProcessId::INIT));
+                    if let Some(proc) = proc {
+                        for pfd in poll_slice.iter_mut() {
+                            pfd.revents = 0;
+                            if pfd.fd < 0 {
+                                continue;
+                            }
+                            if let Ok(handle) = proc.fd_table.get(pfd.fd) {
+                                let mask = handle.inode.poll();
+                                let matching = (mask as i16) & (pfd.events | (crate::fs::vfs::POLLERR | crate::fs::vfs::POLLHUP) as i16);
+                                if matching != 0 {
+                                    pfd.revents = matching;
+                                    ready_count += 1;
+                                }
+                            } else {
+                                pfd.revents = crate::fs::vfs::POLLNVAL as i16;
+                                ready_count += 1;
+                            }
+                        }
+                    }
+                }
+
+                if ready_count > 0 || timeout_ticks == 0 {
+                    return ready_count as u64;
+                }
+
+                let elapsed = crate::arch::x86_64::apic::get_ticks().saturating_sub(start_ticks);
+                if timeout_ticks != u64::MAX && elapsed >= timeout_ticks {
+                    return 0;
+                }
+
+                super::yield_now();
+            }
+        }
+        SYS_READV => {
+            let fd = a1 as i32;
+            let iov_ptr = a2 as *const crate::task::event::IoVec;
+            let iovcnt = a3 as usize;
+
+            if iov_ptr.is_null() && iovcnt > 0 {
+                return (-14i64) as u64;
+            }
+            if iovcnt > 1024 {
+                return (-22i64) as u64;
+            }
+            if iovcnt > 0 && crate::security::validate_user_buffer(iov_ptr as *const u8, iovcnt * core::mem::size_of::<crate::task::event::IoVec>()).is_err() {
+                return (-14i64) as u64;
+            }
+
+            let iovs = unsafe { core::slice::from_raw_parts(iov_ptr, iovcnt) };
+            let cur_pid = current_pid();
+            let proc_table = super::process::PROCESS_TABLE.lock();
+            let proc = proc_table.get(cur_pid).or_else(|| proc_table.get(super::process::ProcessId::INIT));
+            if let Some(proc) = proc {
+                if let Ok(handle) = proc.fd_table.get(fd) {
+                    let mut total_read = 0usize;
+                    for iov in iovs {
+                        if iov.iov_len == 0 {
+                            continue;
+                        }
+                        let buf_ptr = iov.iov_base as *mut u8;
+                        if crate::security::validate_user_buffer(buf_ptr, iov.iov_len).is_err() {
+                            if total_read > 0 { return total_read as u64; }
+                            return (-14i64) as u64;
+                        }
+                        let slice = unsafe { core::slice::from_raw_parts_mut(buf_ptr, iov.iov_len) };
+                        match handle.read(slice) {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                total_read += n;
+                                if n < iov.iov_len {
+                                    break;
+                                }
+                            }
+                            Err(crate::fs::vfs::FsError::WouldBlock) => {
+                                if total_read > 0 { return total_read as u64; }
+                                return (-11i64) as u64;
+                            }
+                            Err(_) => {
+                                if total_read > 0 { return total_read as u64; }
+                                return u64::MAX;
+                            }
+                        }
+                    }
+                    total_read as u64
+                } else {
+                    (-9i64) as u64
+                }
+            } else {
+                u64::MAX
+            }
+        }
+        SYS_WRITEV => {
+            let fd = a1 as i32;
+            let iov_ptr = a2 as *const crate::task::event::IoVec;
+            let iovcnt = a3 as usize;
+
+            if iov_ptr.is_null() && iovcnt > 0 {
+                return (-14i64) as u64;
+            }
+            if iovcnt > 1024 {
+                return (-22i64) as u64;
+            }
+            if iovcnt > 0 && crate::security::validate_user_buffer(iov_ptr as *const u8, iovcnt * core::mem::size_of::<crate::task::event::IoVec>()).is_err() {
+                return (-14i64) as u64;
+            }
+
+            let iovs = unsafe { core::slice::from_raw_parts(iov_ptr, iovcnt) };
+            if fd == 1 || fd == 2 {
+                let mut total_written = 0usize;
+                for iov in iovs {
+                    if iov.iov_len == 0 {
+                        continue;
+                    }
+                    let buf_ptr = iov.iov_base as *const u8;
+                    if crate::security::validate_user_buffer(buf_ptr, iov.iov_len).is_err() {
+                        if total_written > 0 { return total_written as u64; }
+                        return (-14i64) as u64;
+                    }
+                    let slice = unsafe { core::slice::from_raw_parts(buf_ptr, iov.iov_len) };
+                    if let Ok(s) = core::str::from_utf8(slice) {
+                        print!("{}", s);
+                    } else {
+                        for &b in slice {
+                            unsafe {
+                                crate::drivers::serial::write_byte(b);
+                            }
+                        }
+                    }
+                    total_written += iov.iov_len;
+                }
+                total_written as u64
+            } else {
+                let cur_pid = current_pid();
+                let proc_table = super::process::PROCESS_TABLE.lock();
+                let proc = proc_table.get(cur_pid).or_else(|| proc_table.get(super::process::ProcessId::INIT));
+                if let Some(proc) = proc {
+                    if let Ok(handle) = proc.fd_table.get(fd) {
+                        let mut total_written = 0usize;
+                        for iov in iovs {
+                            if iov.iov_len == 0 {
+                                continue;
+                            }
+                            let buf_ptr = iov.iov_base as *const u8;
+                            if crate::security::validate_user_buffer(buf_ptr, iov.iov_len).is_err() {
+                                if total_written > 0 { return total_written as u64; }
+                                return (-14i64) as u64;
+                            }
+                            let slice = unsafe { core::slice::from_raw_parts(buf_ptr, iov.iov_len) };
+                            match handle.write(slice) {
+                                Ok(n) => {
+                                    total_written += n;
+                                    if n < iov.iov_len {
+                                        break;
+                                    }
+                                }
+                                Err(crate::fs::vfs::FsError::WouldBlock) => {
+                                    if total_written > 0 { return total_written as u64; }
+                                    return (-11i64) as u64;
+                                }
+                                Err(_) => {
+                                    if total_written > 0 { return total_written as u64; }
+                                    return u64::MAX;
+                                }
+                            }
+                        }
+                        total_written as u64
+                    } else {
+                        (-9i64) as u64
+                    }
+                } else {
+                    u64::MAX
+                }
+            }
+        }
+        SYS_EPOLL_CREATE => {
+            let size = a1 as i32;
+            if size <= 0 {
+                return (-22i64) as u64;
+            }
+            let epoll = alloc::sync::Arc::new(crate::task::event::EpollInstance::new());
+            let flags = crate::fs::vfs::OpenFlags {
+                read: true,
+                write: true,
+                create: false,
+                append: false,
+                truncate: false,
+                nonblock: false,
+            };
+            let desc = alloc::sync::Arc::new(crate::fs::fd::FileDescriptor::new(epoll, flags));
+            let cur_pid = current_pid();
+            let mut proc_table = super::process::PROCESS_TABLE.lock();
+            let proc = if proc_table.get_mut(cur_pid).is_some() {
+                proc_table.get_mut(cur_pid).unwrap()
+            } else if proc_table.get_mut(super::process::ProcessId::INIT).is_some() {
+                proc_table.get_mut(super::process::ProcessId::INIT).unwrap()
+            } else {
+                return (-24i64) as u64;
+            };
+
+            match proc.fd_table.alloc_fd(desc) {
+                Ok(fd) => fd as u64,
+                Err(_) => (-24i64) as u64,
+            }
+        }
+        SYS_EPOLL_CREATE1 => {
+            let epoll_flags = a1 as i32;
+            let epoll = alloc::sync::Arc::new(crate::task::event::EpollInstance::new());
+            let flags = crate::fs::vfs::OpenFlags {
+                read: true,
+                write: true,
+                create: false,
+                append: false,
+                truncate: false,
+                nonblock: (epoll_flags & 0o4000) != 0,
+            };
+            let desc = alloc::sync::Arc::new(crate::fs::fd::FileDescriptor::new(epoll, flags));
+            let cur_pid = current_pid();
+            let mut proc_table = super::process::PROCESS_TABLE.lock();
+            let proc = if proc_table.get_mut(cur_pid).is_some() {
+                proc_table.get_mut(cur_pid).unwrap()
+            } else if proc_table.get_mut(super::process::ProcessId::INIT).is_some() {
+                proc_table.get_mut(super::process::ProcessId::INIT).unwrap()
+            } else {
+                return (-24i64) as u64;
+            };
+
+            match proc.fd_table.alloc_fd(desc) {
+                Ok(fd) => fd as u64,
+                Err(_) => (-24i64) as u64,
+            }
+        }
+        SYS_EPOLL_CTL => {
+            let epfd = a1 as i32;
+            let op = a2 as i32;
+            let fd = a3 as i32;
+            let event_ptr = a4 as *const crate::task::event::EpollEvent;
+
+            let cur_pid = current_pid();
+            let proc_table = super::process::PROCESS_TABLE.lock();
+            let proc = proc_table.get(cur_pid).or_else(|| proc_table.get(super::process::ProcessId::INIT));
+            if let Some(proc) = proc {
+                if let Ok(handle) = proc.fd_table.get(epfd) {
+                    if let Some(epoll) = handle.inode.as_any().and_then(|a| a.downcast_ref::<crate::task::event::EpollInstance>()) {
+                        if proc.fd_table.get(fd).is_err() {
+                            return (-9i64) as u64;
+                        }
+
+                        let event = if op != crate::task::event::EPOLL_CTL_DEL {
+                            if event_ptr.is_null() || crate::security::validate_user_buffer(event_ptr as *const u8, core::mem::size_of::<crate::task::event::EpollEvent>()).is_err() {
+                                return (-14i64) as u64;
+                            }
+                            unsafe { *event_ptr }
+                        } else {
+                            crate::task::event::EpollEvent::default()
+                        };
+
+                        match epoll.ctl(op, fd, event) {
+                            Ok(()) => 0,
+                            Err(crate::fs::vfs::FsError::AlreadyExists) => (-17i64) as u64,
+                            Err(crate::fs::vfs::FsError::NotFound) => (-2i64) as u64,
+                            Err(crate::fs::vfs::FsError::InvalidInput) => (-22i64) as u64,
+                            Err(_) => (-22i64) as u64,
+                        }
+                    } else {
+                        (-9i64) as u64
+                    }
+                } else {
+                    (-9i64) as u64
+                }
+            } else {
+                (-14i64) as u64
+            }
+        }
+        SYS_EPOLL_WAIT => {
+            let epfd = a1 as i32;
+            let events_ptr = a2 as *mut crate::task::event::EpollEvent;
+            let maxevents = a3 as i32;
+            let timeout = a4 as i32;
+
+            if maxevents <= 0 || maxevents > 1024 {
+                return (-22i64) as u64;
+            }
+            if events_ptr.is_null() || crate::security::validate_user_buffer(events_ptr as *const u8, (maxevents as usize) * core::mem::size_of::<crate::task::event::EpollEvent>()).is_err() {
+                return (-14i64) as u64;
+            }
+
+            let start_ticks = crate::arch::x86_64::apic::get_ticks();
+            let timeout_ticks = if timeout < 0 {
+                u64::MAX
+            } else {
+                (timeout as u64) / 10
+            };
+
+            let cur_pid = current_pid();
+            loop {
+                let ready_events = {
+                    let proc_table = super::process::PROCESS_TABLE.lock();
+                    let proc = proc_table.get(cur_pid).or_else(|| proc_table.get(super::process::ProcessId::INIT));
+                    if let Some(proc) = proc {
+                        if let Ok(handle) = proc.fd_table.get(epfd) {
+                            if let Some(epoll) = handle.inode.as_any().and_then(|a| a.downcast_ref::<crate::task::event::EpollInstance>()) {
+                                epoll.poll_events(&proc.fd_table, maxevents as usize)
+                            } else {
+                                return (-9i64) as u64;
+                            }
+                        } else {
+                            return (-9i64) as u64;
+                        }
+                    } else {
+                        return (-14i64) as u64;
+                    }
+                };
+
+                if !ready_events.is_empty() || timeout_ticks == 0 {
+                    let count = ready_events.len();
+                    let out_slice = unsafe { core::slice::from_raw_parts_mut(events_ptr, count) };
+                    out_slice.copy_from_slice(&ready_events);
+                    return count as u64;
+                }
+
+                let elapsed = crate::arch::x86_64::apic::get_ticks().saturating_sub(start_ticks);
+                if timeout_ticks != u64::MAX && elapsed >= timeout_ticks {
+                    return 0;
+                }
+
+                super::yield_now();
+            }
+        }
+        SYS_EVENTFD | SYS_EVENTFD2 => {
+            let initval = a1 as u32;
+            let flags = if num == SYS_EVENTFD2 { a2 as i32 } else { 0 };
+
+            let evfd = alloc::sync::Arc::new(crate::task::event::EventFd::new(initval, flags));
+            let desc_flags = crate::fs::vfs::OpenFlags {
+                read: true,
+                write: true,
+                create: false,
+                append: false,
+                truncate: false,
+                nonblock: (flags & crate::task::event::EFD_NONBLOCK) != 0,
+            };
+            let desc = alloc::sync::Arc::new(crate::fs::fd::FileDescriptor::new(evfd, desc_flags));
+            let cur_pid = current_pid();
+            let mut proc_table = super::process::PROCESS_TABLE.lock();
+            let proc = if proc_table.get_mut(cur_pid).is_some() {
+                proc_table.get_mut(cur_pid).unwrap()
+            } else if proc_table.get_mut(super::process::ProcessId::INIT).is_some() {
+                proc_table.get_mut(super::process::ProcessId::INIT).unwrap()
+            } else {
+                return (-24i64) as u64;
+            };
+
+            match proc.fd_table.alloc_fd(desc) {
+                Ok(fd) => fd as u64,
+                Err(_) => (-24i64) as u64,
+            }
+        }
+        SYS_TIMERFD_CREATE => {
+            let clockid = a1 as i32;
+            let flags = a2 as i32;
+
+            if clockid != crate::task::event::CLOCK_REALTIME && clockid != crate::task::event::CLOCK_MONOTONIC {
+                return (-22i64) as u64;
+            }
+
+            let tfd = alloc::sync::Arc::new(crate::task::event::TimerFd::new(clockid, flags));
+            let desc_flags = crate::fs::vfs::OpenFlags {
+                read: true,
+                write: false,
+                create: false,
+                append: false,
+                truncate: false,
+                nonblock: (flags & crate::task::event::TFD_NONBLOCK) != 0,
+            };
+            let desc = alloc::sync::Arc::new(crate::fs::fd::FileDescriptor::new(tfd, desc_flags));
+            let cur_pid = current_pid();
+            let mut proc_table = super::process::PROCESS_TABLE.lock();
+            let proc = if proc_table.get_mut(cur_pid).is_some() {
+                proc_table.get_mut(cur_pid).unwrap()
+            } else if proc_table.get_mut(super::process::ProcessId::INIT).is_some() {
+                proc_table.get_mut(super::process::ProcessId::INIT).unwrap()
+            } else {
+                return (-24i64) as u64;
+            };
+
+            match proc.fd_table.alloc_fd(desc) {
+                Ok(fd) => fd as u64,
+                Err(_) => (-24i64) as u64,
+            }
+        }
+        SYS_TIMERFD_SETTIME => {
+            let fd = a1 as i32;
+            let _flags = a2 as i32;
+            let new_value_ptr = a3 as *const crate::task::event::ITimerSpec;
+            let old_value_ptr = a4 as *mut crate::task::event::ITimerSpec;
+
+            if new_value_ptr.is_null() || crate::security::validate_user_buffer(new_value_ptr as *const u8, core::mem::size_of::<crate::task::event::ITimerSpec>()).is_err() {
+                return (-14i64) as u64;
+            }
+
+            let new_val = unsafe { *new_value_ptr };
+
+            let cur_pid = current_pid();
+            let proc_table = super::process::PROCESS_TABLE.lock();
+            let proc = proc_table.get(cur_pid).or_else(|| proc_table.get(super::process::ProcessId::INIT));
+            if let Some(proc) = proc {
+                if let Ok(handle) = proc.fd_table.get(fd) {
+                    if let Some(timer) = handle.inode.as_any().and_then(|a| a.downcast_ref::<crate::task::event::TimerFd>()) {
+                        let old_val = timer.set_time(new_val);
+                        if !old_value_ptr.is_null() {
+                            if crate::security::validate_user_buffer(old_value_ptr as *const u8, core::mem::size_of::<crate::task::event::ITimerSpec>()).is_err() {
+                                return (-14i64) as u64;
+                            }
+                            unsafe { *old_value_ptr = old_val; }
+                        }
+                        0
+                    } else {
+                        (-9i64) as u64
+                    }
+                } else {
+                    (-9i64) as u64
+                }
+            } else {
+                (-14i64) as u64
+            }
+        }
+        SYS_TIMERFD_GETTIME => {
+            let fd = a1 as i32;
+            let curr_value_ptr = a2 as *mut crate::task::event::ITimerSpec;
+
+            if curr_value_ptr.is_null() || crate::security::validate_user_buffer(curr_value_ptr as *const u8, core::mem::size_of::<crate::task::event::ITimerSpec>()).is_err() {
+                return (-14i64) as u64;
+            }
+
+            let cur_pid = current_pid();
+            let proc_table = super::process::PROCESS_TABLE.lock();
+            let proc = proc_table.get(cur_pid).or_else(|| proc_table.get(super::process::ProcessId::INIT));
+            if let Some(proc) = proc {
+                if let Ok(handle) = proc.fd_table.get(fd) {
+                    if let Some(_timer) = handle.inode.as_any().and_then(|a| a.downcast_ref::<crate::task::event::TimerFd>()) {
+                        unsafe { *curr_value_ptr = crate::task::event::ITimerSpec::default(); }
+                        0
+                    } else {
+                        (-9i64) as u64
+                    }
+                } else {
+                    (-9i64) as u64
+                }
+            } else {
+                (-14i64) as u64
             }
         }
         unknown => {

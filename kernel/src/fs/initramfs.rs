@@ -234,6 +234,14 @@ impl Inode for ConsoleDevice {
     fn create(&self, _name: &str, _file_type: FileType) -> Result<Arc<dyn Inode>, FsError> {
         Err(FsError::NotADirectory)
     }
+
+    fn poll(&self) -> u32 {
+        let mut revents = crate::fs::vfs::POLLOUT;
+        if crate::drivers::keyboard::has_data() || crate::drivers::serial::has_byte() {
+            revents |= crate::fs::vfs::POLLIN;
+        }
+        revents
+    }
 }
 
 /// Character device node representing `/dev/zero`.
@@ -279,6 +287,10 @@ impl Inode for ZeroDevice {
     fn create(&self, _name: &str, _file_type: FileType) -> Result<Arc<dyn Inode>, FsError> {
         Err(FsError::NotADirectory)
     }
+
+    fn poll(&self) -> u32 {
+        crate::fs::vfs::POLLIN | crate::fs::vfs::POLLOUT
+    }
 }
 
 /// Character device node representing `/dev/null`.
@@ -322,6 +334,10 @@ impl Inode for NullDevice {
 
     fn create(&self, _name: &str, _file_type: FileType) -> Result<Arc<dyn Inode>, FsError> {
         Err(FsError::NotADirectory)
+    }
+
+    fn poll(&self) -> u32 {
+        crate::fs::vfs::POLLIN | crate::fs::vfs::POLLOUT
     }
 }
 

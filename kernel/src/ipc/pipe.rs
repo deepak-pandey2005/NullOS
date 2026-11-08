@@ -151,6 +151,18 @@ impl Inode for PipeReadInode {
     fn create(&self, _name: &str, _file_type: FileType) -> Result<Arc<dyn Inode>, FsError> {
         Err(FsError::NotADirectory)
     }
+
+    fn poll(&self) -> u32 {
+        let guard = self.pipe.lock();
+        let mut revents = 0;
+        if guard.available() > 0 {
+            revents |= crate::fs::vfs::POLLIN;
+        }
+        if guard.is_eof() || guard.is_broken() {
+            revents |= crate::fs::vfs::POLLHUP | crate::fs::vfs::POLLIN;
+        }
+        revents
+    }
 }
 
 impl Drop for PipeReadInode {
@@ -205,6 +217,18 @@ impl Inode for PipeWriteInode {
 
     fn create(&self, _name: &str, _file_type: FileType) -> Result<Arc<dyn Inode>, FsError> {
         Err(FsError::NotADirectory)
+    }
+
+    fn poll(&self) -> u32 {
+        let guard = self.pipe.lock();
+        let mut revents = 0;
+        if guard.available() < guard.capacity() {
+            revents |= crate::fs::vfs::POLLOUT;
+        }
+        if guard.is_broken() {
+            revents |= crate::fs::vfs::POLLERR | crate::fs::vfs::POLLHUP;
+        }
+        revents
     }
 }
 

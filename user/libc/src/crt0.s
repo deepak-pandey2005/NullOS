@@ -16,7 +16,6 @@ _start:
 
     # 3. Align the stack to 16 bytes before calling main per System V AMD64 ABI
     andq $-16, %rsp
-    subq $8, %rsp             # 8-byte padding so after 'call' %rsp is 16-byte aligned
 
     # 4. Invoke user entry point: int main(int argc, char **argv)
     call main

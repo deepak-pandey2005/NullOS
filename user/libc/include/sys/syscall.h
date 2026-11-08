@@ -9,8 +9,11 @@
 #define SYS_OPEN        2
 #define SYS_CLOSE       3
 #define SYS_STAT        4
+#define SYS_POLL        7
 #define SYS_LSEEK       8
 #define SYS_MMAP        9
+#define SYS_READV       19
+#define SYS_WRITEV      20
 #define SYS_PIPE        22
 #define SYS_YIELD       24
 #define SYS_GETPID      39
@@ -24,6 +27,15 @@
 #define SYS_ARCH_PRCTL  158
 #define SYS_GETTID      186
 #define SYS_FUTEX       202
+#define SYS_EPOLL_CREATE 213
+#define SYS_EPOLL_WAIT  232
+#define SYS_EPOLL_CTL   233
+#define SYS_TIMERFD_CREATE 283
+#define SYS_EVENTFD     284
+#define SYS_TIMERFD_SETTIME 286
+#define SYS_TIMERFD_GETTIME 287
+#define SYS_EVENTFD2    290
+#define SYS_EPOLL_CREATE1 291
 
 #define ARCH_SET_GS     0x1001
 #define ARCH_SET_FS     0x1002

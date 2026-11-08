@@ -24,6 +24,9 @@ syscall_entry:
     push %r12
     push %rbp
     push %rbx
+    push %r10
+    push %r9
+    push %r8
     push %rdx
     push %rsi
     push %rdi
@@ -37,13 +40,18 @@ syscall_entry:
     mov %rdi, %rsi     # arg 1 -> %rsi
     mov %rax, %rdi     # num   -> %rdi
 
+    sub $8, %rsp      # 16-byte stack alignment for SysV ABI (15 pushes + 8 = 128 bytes)
     call syscall_dispatcher
+    add $8, %rsp
     # Return value is in %rax
 
     # 5. Restore user registers
     pop %rdi
     pop %rsi
     pop %rdx
+    pop %r8
+    pop %r9
+    pop %r10
     pop %rbx
     pop %rbp
     pop %r12
