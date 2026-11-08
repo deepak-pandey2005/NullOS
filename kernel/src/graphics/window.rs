@@ -83,19 +83,18 @@ impl Window {
         let lines_to_show = max_lines.saturating_sub(1);
         let start_idx = logs.len().saturating_sub(lines_to_show);
 
+        let max_width = self.width.saturating_sub(16);
         for line in logs.iter().skip(start_idx) {
-            let max_chars = (self.width.saturating_sub(16)) / CHAR_WIDTH;
-            let display: String = line.chars().take(max_chars).collect();
-            let color = if display.contains("ERROR") || display.contains("PANIC") {
+            let color = if line.contains("ERROR") || line.contains("PANIC") {
                 Color::RED
-            } else if display.contains("verified") || display.contains("passed") || display.contains("success") {
+            } else if line.contains("verified") || line.contains("passed") || line.contains("success") {
                 Color::GREEN
-            } else if display.starts_with('[') {
+            } else if line.starts_with('[') {
                 Color::CYAN
             } else {
                 Color::LIGHT_SLATE
             };
-            self.surface.draw_string(8, y, &display, color, None);
+            self.surface.draw_string_bounded(8, y, line, max_width, color, None);
             y += CHAR_HEIGHT;
         }
     }

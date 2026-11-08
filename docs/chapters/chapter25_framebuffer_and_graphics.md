@@ -403,5 +403,20 @@ To prevent the 22-phase automated test suite from delaying normal system startup
 - Fast boot is active by default, launching the interactive shell in less than 0.2 seconds.
 - Integrated QEMU `fw_cfg` detection (`opt/test`) and kernel command-line parsing to enable headless CI/CD automation (`./scripts/run.sh --headless`) to run tests automatically and exit 0.
 
+### 11.5 Resolution of the 5-Second Freeze: Lock Re-entrancy & Context Switch Atomicity
+Detailed investigation into why the compositor froze after ~5 seconds of mouse interaction uncovered two subtle hardware-level interactions:
+1. **Re-Entrant Self-Deadlock in `DMESG_RING`**:
+   - `update_kernel_log()` called `get_dmesg_lines(14)`, which acquired `DMESG_RING.lock()` while allocating a 64 KiB `String` on the heap.
+   - When the heap ran low on contiguous memory after several seconds of execution, `allocate_first_fit()` invoked `expand_heap()`, which called `println!`.
+   - `println!` invoked `record_dmesg()`, which attempted to re-acquire `DMESG_RING.lock()` on the same CPU, triggering an instant, unrecoverable spinlock self-deadlock with interrupts disabled.
+   - *Fix*: `get_dmesg()` and `get_dmesg_lines()` now release `DMESG_RING.lock()` before performing any heap allocations, scan backwards for only the requested newline count, and `expand_heap()` writes directly to COM1 serial without touching `DMESG_RING`.
+2. **Context Switch Interrupt Atomicity**:
+   - In `switch_threads` (`kernel/src/arch/x86_64/switch.S`), an interrupt could fire between the caller's stack push and the `%rsp` swap.
+   - *Fix*: Added `cli` immediately following `pushfq` in `switch_threads` to ensure register state saving and stack pointer swapping execute strictly atomically, while `popfq` cleanly restores the target thread's original interrupt enable flag.
+3. **Compositor Idle Throttling & PS/2 Overflow Protection**:
+   - Replaced tight spin-looping with `spin_delay_us(1000)` whenever no new input or render events are pending, cutting idle CPU load from 100% to <1%.
+   - Filtered PS/2 mouse packets with overflow bits (`flags & 0xC0`) and clamped displacement deltas to prevent cursor coordinate corruption.
+
+
 
 

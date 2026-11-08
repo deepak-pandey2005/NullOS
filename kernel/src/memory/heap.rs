@@ -120,12 +120,8 @@ impl LinkedListAllocator {
         self.heap_end += chunk_size;
         self.stats.total_bytes += chunk_size;
 
-        println!(
-            "[HEAP] Dynamic expansion: Added {} KiB ({} frames). New heap limit: {:#x}",
-            chunk_size / 1024,
-            pages,
-            self.heap_end
-        );
+        // Write directly to COM1 serial to avoid re-entrant locking of DMESG_RING while holding HEAP_ALLOCATOR
+        crate::drivers::serial::write_str("[HEAP] Dynamic expansion completed.\n");
 
         Ok(())
     }

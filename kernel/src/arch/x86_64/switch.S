@@ -21,6 +21,7 @@ switch_threads:
     push %rbx
     push %rbp
     pushfq
+    cli
 
     # 2. Save current %rsp into *prev_rsp_ptr
     mov %rsp, (%rdi)

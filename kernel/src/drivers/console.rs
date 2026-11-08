@@ -384,21 +384,60 @@ pub fn record_dmesg(s: &str) {
 
 /// Returns all recorded kernel messages joined as a formatted string with ANSI codes removed.
 pub fn get_dmesg() -> String {
-    let ring = DMESG_RING.lock();
-    let mut out = String::with_capacity(ring.count);
-    for i in 0..ring.count {
-        let b = ring.buf[(ring.head + i) % DMESG_CAPACITY];
-        out.push(b as char);
+    let (_head, count) = {
+        let ring = DMESG_RING.lock();
+        (ring.head, ring.count)
+    };
+    // Allocate buffer outside the DMESG_RING spinlock to prevent lock inversion/deadlocks with heap expansion
+    let mut out = String::with_capacity(count);
+    {
+        let ring = DMESG_RING.lock();
+        let valid_count = ring.count.min(count);
+        for i in 0..valid_count {
+            let b = ring.buf[(ring.head + i) % DMESG_CAPACITY];
+            out.push(b as char);
+        }
     }
     strip_ansi_codes(&out)
 }
 
-/// Returns the last `max` lines from the dmesg buffer.
+/// Returns the last `max` lines from the dmesg buffer without allocating full 64 KiB ring buffers.
 pub fn get_dmesg_lines(max: usize) -> Vec<String> {
-    let full = get_dmesg();
-    let lines: Vec<&str> = full.split('\n').filter(|l| !l.is_empty()).collect();
-    let skip = lines.len().saturating_sub(max);
-    lines.iter().skip(skip).map(|s| s.to_string()).collect()
+    let mut raw_bytes = alloc::vec::Vec::new();
+    {
+        let ring = DMESG_RING.lock();
+        if ring.count == 0 {
+            return Vec::new();
+        }
+
+        // Scan backwards from tail to find `max` newline characters
+        let mut newlines_found = 0;
+        let mut start_offset = 0;
+
+        for offset in (0..ring.count).rev() {
+            let b = ring.buf[(ring.head + offset) % DMESG_CAPACITY];
+            if b == b'\n' {
+                newlines_found += 1;
+                if newlines_found > max {
+                    start_offset = offset + 1;
+                    break;
+                }
+            }
+        }
+
+        let slice_len = ring.count - start_offset;
+        raw_bytes.reserve(slice_len);
+        for i in 0..slice_len {
+            raw_bytes.push(ring.buf[(ring.head + start_offset + i) % DMESG_CAPACITY]);
+        }
+    } // DMESG_RING lock released before String allocations!
+
+    let s = core::str::from_utf8(&raw_bytes).unwrap_or("");
+    let clean = strip_ansi_codes(s);
+    clean.split('\n')
+        .filter(|l| !l.is_empty())
+        .map(|l| l.to_string())
+        .collect()
 }
 
 pub fn write_str(s: &str) {

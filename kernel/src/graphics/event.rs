@@ -69,6 +69,14 @@ impl EventQueue {
         self.events.lock().pop_front()
     }
 
+    /// Drains all pending events, passing them to a handler closure under a single lock acquisition.
+    pub fn drain_into<F: FnMut(InputEvent)>(&self, mut handler: F) {
+        let mut queue = self.events.lock();
+        for event in queue.drain(..) {
+            handler(event);
+        }
+    }
+
     /// Clears all pending events in the queue.
     pub fn clear(&self) {
         self.events.lock().clear();

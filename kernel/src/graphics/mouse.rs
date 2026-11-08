@@ -106,6 +106,11 @@ impl MouseState {
 
     fn decode_packet(&mut self) {
         let flags = self.packet_buf[0];
+        // If X or Y overflow occurred, discard this packet to prevent corrupted coordinates
+        if (flags & 0xC0) != 0 {
+            return;
+        }
+
         let raw_dx = self.packet_buf[1] as isize;
         let raw_dy = self.packet_buf[2] as isize;
 
@@ -122,6 +127,9 @@ impl MouseState {
         } else {
             -raw_dy
         };
+
+        let dx = dx.clamp(-128, 128);
+        let dy = dy.clamp(-128, 128);
 
         // Update position
         self.move_relative(dx, dy);

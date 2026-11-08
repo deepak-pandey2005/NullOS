@@ -41,6 +41,30 @@ pub fn init(fb: &FramebufferInfo) {
     mouse.y = center_y;
 }
 
+/// Formats a string with a label, number, and suffix into a stack buffer without dynamic allocation.
+fn format_stat<'a>(buf: &'a mut [u8], label: &str, val: u64, suffix: &str) -> &'a str {
+    let l_bytes = label.as_bytes();
+    buf[..l_bytes.len()].copy_from_slice(l_bytes);
+    let mut pos = l_bytes.len();
+    let mut n = val;
+    if n == 0 {
+        buf[pos] = b'0';
+        pos += 1;
+    } else {
+        let start = pos;
+        while n > 0 {
+            buf[pos] = b'0' + (n % 10) as u8;
+            pos += 1;
+            n /= 10;
+        }
+        buf[start..pos].reverse();
+    }
+    let s_bytes = suffix.as_bytes();
+    buf[pos..pos + s_bytes.len()].copy_from_slice(s_bytes);
+    pos += s_bytes.len();
+    core::str::from_utf8(&buf[..pos]).unwrap_or("")
+}
+
 /// Spawns standard desktop demonstration windows.
 pub fn launch_demo() {
     let mut wm_lock = WINDOW_MANAGER.lock();
@@ -63,10 +87,14 @@ pub fn launch_demo() {
                 (0, 0)
             };
 
-            win.surface.draw_string(12, 44, &alloc::format!("CPU Cores:    {}", cpus), Color::LIGHT_SLATE, None);
-            win.surface.draw_string(12, 64, &alloc::format!("APIC Ticks:   {}", ticks), Color::LIGHT_SLATE, None);
-            win.surface.draw_string(12, 84, &alloc::format!("Free Memory:  {} MiB", free_mem / (1024 * 1024)), Color::GREEN, None);
-            win.surface.draw_string(12, 104, &alloc::format!("Total RAM:    {} MiB", total_mem / (1024 * 1024)), Color::LIGHT_SLATE, None);
+            let mut b1 = [0u8; 48];
+            win.surface.draw_string(12, 44, format_stat(&mut b1, "CPU Cores:    ", cpus as u64, ""), Color::LIGHT_SLATE, None);
+            let mut b2 = [0u8; 48];
+            win.surface.draw_string(12, 64, format_stat(&mut b2, "APIC Ticks:   ", ticks, ""), Color::LIGHT_SLATE, None);
+            let mut b3 = [0u8; 48];
+            win.surface.draw_string(12, 84, format_stat(&mut b3, "Free Memory:  ", free_mem / (1024 * 1024), " MiB"), Color::GREEN, None);
+            let mut b4 = [0u8; 48];
+            win.surface.draw_string(12, 104, format_stat(&mut b4, "Total RAM:    ", total_mem / (1024 * 1024), " MiB"), Color::LIGHT_SLATE, None);
             win.surface.draw_string(12, 128, "Compositor:   Exclusive GUI Mode", Color::YELLOW, None);
             win.surface.draw_string(12, 148, "Double-Buffer: Enabled (60 FPS)", Color::CYAN, None);
             win.surface.draw_string(12, 175, "Tip: Type 'exit' or click [Exit GUI]", Color::MUTED_TEXT, None);
@@ -133,10 +161,14 @@ pub fn update_system_monitor() {
             win.surface.clear(Color::PANEL_BG);
             win.surface.draw_string(12, 12, "NullOS 64-Bit Desktop", Color::TITLE_ACTIVE, None);
             win.surface.draw_line(12, 32, 328, 32, Color::BORDER);
-            win.surface.draw_string(12, 44, &alloc::format!("CPU Cores:    {}", cpus), Color::LIGHT_SLATE, None);
-            win.surface.draw_string(12, 64, &alloc::format!("APIC Ticks:   {}", ticks), Color::LIGHT_SLATE, None);
-            win.surface.draw_string(12, 84, &alloc::format!("Free Memory:  {} MiB", free_mem / (1024 * 1024)), Color::GREEN, None);
-            win.surface.draw_string(12, 104, &alloc::format!("Total RAM:    {} MiB", total_mem / (1024 * 1024)), Color::LIGHT_SLATE, None);
+            let mut b1 = [0u8; 48];
+            win.surface.draw_string(12, 44, format_stat(&mut b1, "CPU Cores:    ", cpus as u64, ""), Color::LIGHT_SLATE, None);
+            let mut b2 = [0u8; 48];
+            win.surface.draw_string(12, 64, format_stat(&mut b2, "APIC Ticks:   ", ticks, ""), Color::LIGHT_SLATE, None);
+            let mut b3 = [0u8; 48];
+            win.surface.draw_string(12, 84, format_stat(&mut b3, "Free Memory:  ", free_mem / (1024 * 1024), " MiB"), Color::GREEN, None);
+            let mut b4 = [0u8; 48];
+            win.surface.draw_string(12, 104, format_stat(&mut b4, "Total RAM:    ", total_mem / (1024 * 1024), " MiB"), Color::LIGHT_SLATE, None);
             win.surface.draw_string(12, 128, "Compositor:   Exclusive GUI Mode", Color::YELLOW, None);
             win.surface.draw_string(12, 148, "Double-Buffer: Enabled (60 FPS)", Color::CYAN, None);
             win.surface.draw_string(12, 175, "Tip: Type 'exit' or click [Exit GUI]", Color::MUTED_TEXT, None);
@@ -271,9 +303,9 @@ pub fn run_compositor() {
         {
             let mut wm_lock = WINDOW_MANAGER.lock();
             if let Some(ref mut wm) = *wm_lock {
-                while let Some(event) = event::INPUT_QUEUE.pop() {
+                event::INPUT_QUEUE.drain_into(|event| {
                     wm.handle_event(event);
-                }
+                });
             }
         }
 
@@ -307,8 +339,12 @@ pub fn run_compositor() {
             }
         }
 
-        // Cooperatively yield to other threads / background scheduler tasks
-        crate::task::yield_now();
+        // When idle with no pending render or input, sleep for ~1ms to avoid burning 100% CPU on tight spinlocks
+        if !should_render && incoming_char.is_none() {
+            crate::arch::x86_64::apic::spin_delay_us(1000);
+        } else {
+            crate::task::yield_now();
+        }
     }
 
     // Exiting GUI:
