@@ -42,6 +42,8 @@ const CURSOR_SPRITE: [&str; CURSOR_HEIGHT] = [
 pub struct MouseState {
     pub x: isize,
     pub y: isize,
+    pub screen_width: usize,
+    pub screen_height: usize,
     pub left_pressed: bool,
     pub right_pressed: bool,
     pub middle_pressed: bool,
@@ -54,6 +56,8 @@ impl MouseState {
         Self {
             x: init_x,
             y: init_y,
+            screen_width: 1280,
+            screen_height: 800,
             left_pressed: false,
             right_pressed: false,
             middle_pressed: false,
@@ -62,10 +66,16 @@ impl MouseState {
         }
     }
 
+    /// Sets the boundaries of the screen for cursor clamping.
+    pub fn set_screen_size(&mut self, width: usize, height: usize) {
+        self.screen_width = width;
+        self.screen_height = height;
+    }
+
     /// Moves the mouse by relative deltas and clamps within (0..width, 0..height).
-    pub fn move_relative(&mut self, dx: isize, dy: isize, screen_width: usize, screen_height: usize) {
-        let max_x = (screen_width.saturating_sub(1)) as isize;
-        let max_y = (screen_height.saturating_sub(1)) as isize;
+    pub fn move_relative(&mut self, dx: isize, dy: isize) {
+        let max_x = (self.screen_width.saturating_sub(1)) as isize;
+        let max_y = (self.screen_height.saturating_sub(1)) as isize;
 
         self.x = (self.x + dx).clamp(0, max_x);
         self.y = (self.y + dy).clamp(0, max_y);
@@ -79,7 +89,7 @@ impl MouseState {
     }
 
     /// Feeds a raw byte from the PS/2 mouse interface (Port 0x60).
-    pub fn process_byte(&mut self, byte: u8, screen_width: usize, screen_height: usize) {
+    pub fn process_byte(&mut self, byte: u8) {
         // Byte 0 must have bit 3 set to 1 in standard PS/2 packet framing
         if self.packet_idx == 0 && (byte & 0x08) == 0 {
             return;
@@ -90,11 +100,11 @@ impl MouseState {
 
         if self.packet_idx == 3 {
             self.packet_idx = 0;
-            self.decode_packet(screen_width, screen_height);
+            self.decode_packet();
         }
     }
 
-    fn decode_packet(&mut self, screen_width: usize, screen_height: usize) {
+    fn decode_packet(&mut self) {
         let flags = self.packet_buf[0];
         let raw_dx = self.packet_buf[1] as isize;
         let raw_dy = self.packet_buf[2] as isize;
@@ -114,7 +124,7 @@ impl MouseState {
         };
 
         // Update position
-        self.move_relative(dx, dy, screen_width, screen_height);
+        self.move_relative(dx, dy);
 
         // Update button states
         let left = (flags & 0x01) != 0;

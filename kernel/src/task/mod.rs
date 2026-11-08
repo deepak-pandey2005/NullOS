@@ -23,10 +23,12 @@ pub use syscall::run_user_mode_self_test;
 pub use thread::{Thread, ThreadId, ThreadState};
 
 use crate::println;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 static TEST_COUNTER_A: AtomicUsize = AtomicUsize::new(0);
 static TEST_COUNTER_B: AtomicUsize = AtomicUsize::new(0);
+static WORKER_A_DONE: AtomicBool = AtomicBool::new(false);
+static WORKER_B_DONE: AtomicBool = AtomicBool::new(false);
 
 fn test_worker_a() {
     for i in 1..=3 {
@@ -34,6 +36,7 @@ fn test_worker_a() {
         println!("[TASK] Worker A running iteration {}/3 - yielding CPU...", i);
         yield_now();
     }
+    WORKER_A_DONE.store(true, Ordering::SeqCst);
     println!("[TASK] Worker A completed.");
 }
 
@@ -43,6 +46,7 @@ fn test_worker_b() {
         println!("[TASK] Worker B running iteration {}/3 - yielding CPU...", i);
         yield_now();
     }
+    WORKER_B_DONE.store(true, Ordering::SeqCst);
     println!("[TASK] Worker B completed.");
 }
 
@@ -52,6 +56,8 @@ pub fn run_self_tests() {
 
     TEST_COUNTER_A.store(0, Ordering::SeqCst);
     TEST_COUNTER_B.store(0, Ordering::SeqCst);
+    WORKER_A_DONE.store(false, Ordering::SeqCst);
+    WORKER_B_DONE.store(false, Ordering::SeqCst);
 
     let id_a = spawn("worker_a", test_worker_a, 1);
     let id_b = spawn("worker_b", test_worker_b, 1);
@@ -60,7 +66,7 @@ pub fn run_self_tests() {
 
     // Yield main thread repeatedly until both workers finish
     for _ in 0..10 {
-        if TEST_COUNTER_A.load(Ordering::SeqCst) >= 3 && TEST_COUNTER_B.load(Ordering::SeqCst) >= 3 {
+        if WORKER_A_DONE.load(Ordering::SeqCst) && WORKER_B_DONE.load(Ordering::SeqCst) {
             break;
         }
         yield_now();

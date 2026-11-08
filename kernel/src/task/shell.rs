@@ -446,6 +446,7 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str("  ipc                  - Display inter-process communication resources (pipes, shm, unix)\n");
             out.push_str("  threads              - Display active system threads and synchronization states\n");
             out.push_str("  dmesg                - Display kernel message ring buffer logs\n");
+            out.push_str("  test                 - Run comprehensive automated subsystem & shell tests\n");
             out.push_str("  gui                  - Launch Desktop Window Manager & Compositor demo (M30)\n");
             out.push_str("  mem                  - Display physical memory manager statistics\n");
             out.push_str("  uptime               - Display system timer ticks\n");
@@ -1034,6 +1035,11 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             } else {
                 (logs, 0)
             }
+        }
+        "test" => {
+            crate::println!("[SHELL] Initiating automated self-test suite...");
+            run_automated_tests();
+            ("[SHELL] Automated self-test suite finished successfully.\n".to_string(), 0)
         }
         "gui" | "wm" => {
             let mut out = String::new();

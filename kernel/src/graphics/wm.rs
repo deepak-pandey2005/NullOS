@@ -27,6 +27,7 @@ pub struct WindowManager {
     pub focused_window: Option<u32>,
     pub dragging: Option<(u32, isize, isize)>,
     pub is_running: bool,
+    pub is_dirty: bool,
     next_window_id: u32,
 }
 
@@ -42,6 +43,7 @@ impl WindowManager {
             focused_window: None,
             dragging: None,
             is_running: true,
+            is_dirty: true,
             next_window_id: 1,
         }
     }
@@ -49,6 +51,7 @@ impl WindowManager {
     /// Signals the window manager event loop to terminate and return to text console.
     pub fn request_exit(&mut self) {
         self.is_running = false;
+        self.is_dirty = true;
     }
 
     /// Allocates and creates a new managed Window.
@@ -65,6 +68,7 @@ impl WindowManager {
 
         self.windows.push(win);
         self.focused_window = Some(id);
+        self.is_dirty = true;
         id
     }
 
@@ -78,6 +82,7 @@ impl WindowManager {
                     top.is_focused = true;
                 }
             }
+            self.is_dirty = true;
         }
     }
 
@@ -91,11 +96,13 @@ impl WindowManager {
             win.is_focused = true;
             self.windows.push(win);
             self.focused_window = Some(id);
+            self.is_dirty = true;
         }
     }
 
     /// Dispatches an input event to the window manager.
     pub fn handle_event(&mut self, event: InputEvent) {
+        self.is_dirty = true;
         match event {
             InputEvent::MouseDown { button: MouseButton::Left, x, y } => {
                 let tb_y = (self.screen_height.saturating_sub(TASKBAR_HEIGHT)) as isize;
@@ -176,6 +183,7 @@ impl WindowManager {
     /// Renders the wallpaper, desktop elements, windows, taskbar, and mouse cursor,
     /// then flushes the backbuffer to hardware.
     pub fn render_desktop(&mut self) {
+        self.is_dirty = false;
         // 1. Draw Wallpaper: Modern deep slate gradient with grid
         self.render_wallpaper();
 
@@ -264,9 +272,7 @@ impl WindowManager {
             self.backbuffer.fill_rect(tab_x, tb_y + 4, tab_w, TASKBAR_HEIGHT - 8, tab_color);
             self.backbuffer.draw_rect(tab_x, tb_y + 4, tab_w, TASKBAR_HEIGHT - 8, Color::BORDER);
 
-            let max_chars = (tab_w - 12) / CHAR_WIDTH;
-            let display_title: alloc::string::String = win.title.chars().take(max_chars).collect();
-            self.backbuffer.draw_string(tab_x + 6, tb_y + 8, &display_title, Color::LIGHT_SLATE, None);
+            self.backbuffer.draw_string_bounded(tab_x + 6, tb_y + 8, &win.title, tab_w.saturating_sub(12), Color::LIGHT_SLATE, None);
 
             tab_x += tab_w + 6;
         }
@@ -275,12 +281,32 @@ impl WindowManager {
         self.backbuffer.fill_rect(exit_btn_x, tb_y + 4, exit_btn_w, TASKBAR_HEIGHT - 8, Color::CLOSE_BUTTON);
         self.backbuffer.draw_string(exit_btn_x + 10, tb_y + 8, "Exit GUI", Color::WHITE, None);
 
-        // Right-aligned status stats (clock / uptime ticks)
+        // Right-aligned status stats (clock / uptime ticks) without dynamic allocations
         let ticks = crate::arch::x86_64::apic::get_ticks();
         let uptime_secs = ticks / 100;
-        let clock_str = alloc::format!("Up: {}s", uptime_secs);
-        let clock_x = exit_btn_x.saturating_sub(clock_str.len() * CHAR_WIDTH + 16);
-        self.backbuffer.draw_string(clock_x, tb_y + 8, &clock_str, Color::LIGHT_SLATE, None);
+        let mut buf = [0u8; 32];
+        buf[0..4].copy_from_slice(b"Up: ");
+        let mut pos = 4;
+        let mut n = uptime_secs;
+        if n == 0 {
+            buf[pos] = b'0';
+            pos += 1;
+        } else {
+            let start = pos;
+            while n > 0 {
+                buf[pos] = b'0' + (n % 10) as u8;
+                pos += 1;
+                n /= 10;
+            }
+            buf[start..pos].reverse();
+        }
+        buf[pos] = b's';
+        pos += 1;
+
+        if let Ok(clock_str) = core::str::from_utf8(&buf[..pos]) {
+            let clock_x = exit_btn_x.saturating_sub(clock_str.len() * CHAR_WIDTH + 16);
+            self.backbuffer.draw_string(clock_x, tb_y + 8, clock_str, Color::LIGHT_SLATE, None);
+        }
     }
 }
 

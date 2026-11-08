@@ -161,7 +161,25 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
 
 
     // Verify Interactive Shell & CLI commands (Phase 7 - Userspace Shell)
-    task::shell::run_automated_tests();
+    let cmdline_str = if boot_info.cmdline_addr != 0 && boot_info.cmdline_len > 0 {
+        let slice = unsafe {
+            core::slice::from_raw_parts(
+                boot_info.cmdline_addr as *const u8,
+                boot_info.cmdline_len,
+            )
+        };
+        core::str::from_utf8(slice).unwrap_or("")
+    } else {
+        ""
+    };
+
+    let is_test_mode = cmdline_str.contains("test") || check_qemu_fw_cfg_test();
+    if is_test_mode {
+        println!("[KERNEL] Test mode detected. Running automated test suite...");
+        task::shell::run_automated_tests();
+    } else {
+        println!("[KERNEL] Fast boot active. Type 'test' in the shell to run all automated tests.");
+    }
 
     println!();
     println!("[KERNEL] Kernel initialization complete. Shell active.");
@@ -174,6 +192,45 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
         unsafe {
             core::arch::asm!("hlt");
         }
+    }
+}
+
+/// Queries the QEMU fw_cfg port (0x510/0x511) to check if automated test mode was requested.
+fn check_qemu_fw_cfg_test() -> bool {
+    unsafe {
+        // Select signature (0x0000)
+        core::arch::asm!("out dx, ax", in("dx") 0x510u16, in("ax") 0x0000u16, options(nomem, nostack));
+        let mut sig = [0u8; 4];
+        for b in &mut sig {
+            core::arch::asm!("in al, dx", in("dx") 0x511u16, out("al") *b, options(nomem, nostack));
+        }
+        if &sig != b"QEMU" {
+            return false;
+        }
+
+        // Query file directory at selector 0x0019
+        core::arch::asm!("out dx, ax", in("dx") 0x510u16, in("ax") 0x0019u16, options(nomem, nostack));
+        let mut count_bytes = [0u8; 4];
+        for b in &mut count_bytes {
+            core::arch::asm!("in al, dx", in("dx") 0x511u16, out("al") *b, options(nomem, nostack));
+        }
+        let count = u32::from_be_bytes(count_bytes);
+        if count > 256 {
+            return false;
+        }
+        for _ in 0..count {
+            let mut file_entry = [0u8; 64];
+            for b in &mut file_entry {
+                core::arch::asm!("in al, dx", in("dx") 0x511u16, out("al") *b, options(nomem, nostack));
+            }
+            let name_bytes = &file_entry[8..64];
+            if let Ok(name) = core::str::from_utf8(name_bytes) {
+                if name.starts_with("opt/test") {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 

@@ -241,6 +241,18 @@ impl Canvas {
         }
     }
 
+    /// Draws a string bounded by a maximum pixel width with zero dynamic allocation.
+    pub fn draw_string_bounded(&mut self, mut x: usize, y: usize, s: &str, max_width: usize, fg: Color, bg: Option<Color>) {
+        let max_x = x.saturating_add(max_width);
+        for c in s.chars() {
+            if x + CHAR_WIDTH > self.width || x + CHAR_WIDTH > max_x {
+                break;
+            }
+            self.draw_char(x, y, c, fg, bg);
+            x += CHAR_WIDTH;
+        }
+    }
+
     /// Blits a source canvas into this canvas at (dest_x, dest_y).
     pub fn blit(&mut self, dest_x: usize, dest_y: usize, src: &Canvas) {
         if dest_x >= self.width || dest_y >= self.height {

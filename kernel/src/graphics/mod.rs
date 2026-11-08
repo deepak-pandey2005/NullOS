@@ -36,6 +36,7 @@ pub fn init(fb: &FramebufferInfo) {
     let center_x = (fb.width / 2) as isize;
     let center_y = (fb.height / 2) as isize;
     let mut mouse = mouse::MOUSE.lock();
+    mouse.set_screen_size(fb.width, fb.height);
     mouse.x = center_x;
     mouse.y = center_y;
 }
@@ -221,6 +222,7 @@ pub fn run_compositor() {
             // Dispatch keyboard character to focused window
             let mut wm_lock = WINDOW_MANAGER.lock();
             if let Some(ref mut wm) = *wm_lock {
+                wm.is_dirty = true;
                 if let Some(focused_id) = wm.focused_window {
                     if let Some(win) = wm.windows.iter_mut().find(|w| w.id == focused_id) {
                         if win.title.starts_with("Terminal") {
@@ -265,24 +267,39 @@ pub fn run_compositor() {
             }
         }
 
-        // 2. Drain any queued input events (Mouse movements and clicks)
-        while let Some(event) = event::INPUT_QUEUE.pop() {
+        // 2. Drain any queued input events (Mouse movements and clicks) under a single lock
+        {
             let mut wm_lock = WINDOW_MANAGER.lock();
             if let Some(ref mut wm) = *wm_lock {
-                wm.handle_event(event);
+                while let Some(event) = event::INPUT_QUEUE.pop() {
+                    wm.handle_event(event);
+                }
             }
         }
 
-        // 3. Periodically update dynamic statistics (System Monitor & Kernel Log)
+        // 3. Periodically update dynamic statistics (System Monitor & Kernel Log) every 1 second
         let current_tick = crate::arch::x86_64::apic::get_ticks();
-        if current_tick.saturating_sub(last_stats_tick) >= 20 {
+        if current_tick.saturating_sub(last_stats_tick) >= 100 {
             last_stats_tick = current_tick;
             update_system_monitor();
             update_kernel_log();
+            let mut wm_lock = WINDOW_MANAGER.lock();
+            if let Some(ref mut wm) = *wm_lock {
+                wm.is_dirty = true;
+            }
         }
 
-        // 4. Render desktop frame (~30 FPS or upon immediate input)
-        if current_tick.saturating_sub(last_render_tick) >= 3 || incoming_char.is_some() {
+        // 4. Render desktop frame (~30 FPS) only when the display state is dirty
+        let mut should_render = false;
+        {
+            let wm_lock = WINDOW_MANAGER.lock();
+            if let Some(ref wm) = *wm_lock {
+                if wm.is_dirty && (current_tick.saturating_sub(last_render_tick) >= 3 || incoming_char.is_some()) {
+                    should_render = true;
+                }
+            }
+        }
+        if should_render {
             last_render_tick = current_tick;
             let mut wm_lock = WINDOW_MANAGER.lock();
             if let Some(ref mut wm) = *wm_lock {
@@ -290,8 +307,8 @@ pub fn run_compositor() {
             }
         }
 
-        // Small spin loop hint to reduce memory bus contention
-        core::hint::spin_loop();
+        // Cooperatively yield to other threads / background scheduler tasks
+        crate::task::yield_now();
     }
 
     // Exiting GUI:

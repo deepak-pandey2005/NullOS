@@ -108,12 +108,13 @@ pub fn yield_now() {
         next.state = ThreadState::Running;
         sched.total_switches += 1;
 
-        let prev_rsp_ptr = &mut current.rsp as *mut u64;
         let next_rsp = next.rsp;
-
-        if current.state == ThreadState::Ready {
+        let prev_rsp_ptr = if current.state == ThreadState::Ready {
             sched.ready_queue.push_back(current);
-        }
+            &mut sched.ready_queue.back_mut().unwrap().rsp as *mut u64
+        } else {
+            core::ptr::null_mut()
+        };
 
         crate::arch::x86_64::gdt::set_tss_rsp0(next.stack.top());
         crate::arch::x86_64::syscall::set_kernel_rsp(next.stack.top());
@@ -181,12 +182,13 @@ pub fn timer_tick(current_tick: u64) {
         next.state = ThreadState::Running;
         sched.total_switches += 1;
 
-        let prev_rsp_ptr = &mut current.rsp as *mut u64;
         let next_rsp = next.rsp;
-
-        if current.state == ThreadState::Ready {
+        let prev_rsp_ptr = if current.state == ThreadState::Ready {
             sched.ready_queue.push_back(current);
-        }
+            &mut sched.ready_queue.back_mut().unwrap().rsp as *mut u64
+        } else {
+            core::ptr::null_mut()
+        };
 
         crate::arch::x86_64::gdt::set_tss_rsp0(next.stack.top());
         crate::arch::x86_64::syscall::set_kernel_rsp(next.stack.top());
@@ -235,10 +237,9 @@ pub fn sleep(ticks: u64) {
         next.state = ThreadState::Running;
         sched.total_switches += 1;
 
-        let prev_rsp_ptr = &mut current.rsp as *mut u64;
         let next_rsp = next.rsp;
-
         sched.sleeping_queue.push(current);
+        let prev_rsp_ptr = &mut sched.sleeping_queue.last_mut().unwrap().rsp as *mut u64;
         crate::arch::x86_64::gdt::set_tss_rsp0(next.stack.top());
         crate::arch::x86_64::syscall::set_kernel_rsp(next.stack.top());
         unsafe {
@@ -275,9 +276,9 @@ pub fn block_current_thread() {
         };
 
         current.state = ThreadState::Blocked;
-        let prev_rsp_ptr = &mut current.rsp as *mut u64;
         let tid = current.id;
         sched.blocked_threads.insert(tid, current);
+        let prev_rsp_ptr = &mut sched.blocked_threads.get_mut(&tid).unwrap().rsp as *mut u64;
 
         // Fetch next ready thread
         let mut next = match sched.ready_queue.pop_front() {

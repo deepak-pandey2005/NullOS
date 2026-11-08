@@ -76,6 +76,7 @@ if [[ "${1:-}" == "--headless" || "${1:-}" == "--test" ]]; then
         -serial stdio
         -no-reboot
         -display none
+        -fw_cfg name=opt/test,string=1
     )
     
     touch "${SERIAL_LOG}"

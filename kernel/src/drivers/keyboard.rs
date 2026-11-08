@@ -282,16 +282,7 @@ pub fn read_scancode() -> Option<u8> {
 pub fn read_char() -> Option<char> {
     while let Some((is_mouse, byte)) = read_port60() {
         if is_mouse {
-            let mut mouse = crate::graphics::mouse::MOUSE.lock();
-            let (w, h) = {
-                let wm_lock = crate::graphics::wm::WINDOW_MANAGER.lock();
-                if let Some(ref wm) = *wm_lock {
-                    (wm.screen_width, wm.screen_height)
-                } else {
-                    (1280, 800)
-                }
-            };
-            mouse.process_byte(byte, w, h);
+            crate::graphics::mouse::MOUSE.lock().process_byte(byte);
         } else if let Some(ch) = KEYBOARD.lock().process_scancode(byte) {
             return Some(ch);
         }
