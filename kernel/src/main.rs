@@ -6,6 +6,7 @@ extern crate alloc;
 mod arch;
 mod drivers;
 mod fs;
+mod graphics;
 mod ipc;
 mod memory;
 mod net;
@@ -126,6 +127,9 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
 
     // Initialize Async & Event Infrastructure (Phase 11 - M29 Async)
     task::event::init();
+
+    // Initialize 2D Graphics Canvas & Desktop Window Manager (Phase 12 - M30 Graphics)
+    graphics::init(&boot_info.framebuffer);
 
     // Initialize PCI Bus Enumeration & Hardware Device Discovery (Phase 6 - M17 PCI)
     drivers::pci::init();

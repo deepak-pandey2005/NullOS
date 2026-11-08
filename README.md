@@ -470,15 +470,15 @@ scripts\windows\run.bat --headless    # Run automated headless test suite
 # Phase 12 — Hardware
 
 ### M30 — Framebuffer & Graphics
-- [ ] Framebuffer console
-- [ ] Text renderer
-- [ ] Font rendering
-- [ ] Scrolling
-- [ ] Double buffering
-- [ ] Basic graphics API
-- [ ] Input events
-- [ ] Window abstraction
-- [ ] Basic window manager
+- [x] Framebuffer console
+- [x] Text renderer
+- [x] Font rendering
+- [x] Scrolling
+- [x] Double buffering
+- [x] Basic graphics API
+- [x] Input events
+- [x] Window abstraction
+- [x] Basic window manager
 
 ### M31 — USB
 - [ ] xHCI
@@ -713,7 +713,7 @@ sudo ./scripts/create_bootable_usb.sh --device /dev/sdX
 
 ## Checkpoint 7 — Advanced OS
 - [x] M29
-- [ ] M30
+- [x] M30
 - [ ] M31
 - [ ] M32
 - [ ] M33

@@ -433,6 +433,8 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str("  cpus                 - Display symmetric multiprocessing CPU core statuses\n");
             out.push_str("  sec                  - Display kernel security mitigations & hardening status\n");
             out.push_str("  ipc                  - Display inter-process communication resources (pipes, shm, unix)\n");
+            out.push_str("  threads              - Display active system threads and synchronization states\n");
+            out.push_str("  gui                  - Launch Desktop Window Manager & Compositor demo (M30)\n");
             out.push_str("  mem                  - Display physical memory manager statistics\n");
             out.push_str("  uptime               - Display system timer ticks\n");
             out.push_str("  reboot               - Reboot physical or virtual machine\n");
@@ -1013,6 +1015,26 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             }
             (out, 0)
         }
+        "gui" | "wm" => {
+            let mut out = String::new();
+            if args.first().map(|s| s.as_str()) == Some("--status") {
+                let wm_lock = crate::graphics::wm::WINDOW_MANAGER.lock();
+                if let Some(ref wm) = *wm_lock {
+                    out.push_str("NullOS Desktop Window Manager & Compositor (M30):\n");
+                    out.push_str(&alloc::format!("  Resolution:     {}x{} (stride: {})\n", wm.screen_width, wm.screen_height, wm.hw_stride));
+                    out.push_str(&alloc::format!("  Framebuffer:    {:#018x}\n", wm.hw_address));
+                    out.push_str(&alloc::format!("  Active Windows: {}\n", wm.windows.len()));
+                    out.push_str("  Compositing:    Double-Buffered Backbuffer\n");
+                    out.push_str("  Status:         Operational\n");
+                } else {
+                    out.push_str("Window Manager is not initialized (no GOP framebuffer).\n");
+                }
+            } else {
+                crate::graphics::launch_demo();
+                out.push_str("[GUI] Launched NullOS Desktop Window Manager & Compositor with 3 demo windows!\n");
+            }
+            (out, 0)
+        }
         "mem" => {
             let mut out = String::new();
             out.push_str("Physical Memory Manager (PMM):\n");
@@ -1399,20 +1421,79 @@ pub fn run_automated_tests() {
     };
     tfd.set_time(ts);
 
-    let ep = crate::task::event::EpollInstance::new();
-    let ev = crate::task::event::EpollEvent {
-        events: crate::task::event::EPOLLIN,
-        data: 0x1234,
-    };
-    assert!(ep.ctl(crate::task::event::EPOLL_CTL_ADD, 100, ev).is_ok());
-    assert!(ep.ctl(crate::task::event::EPOLL_CTL_ADD, 100, ev).is_err());
-    assert!(ep.ctl(crate::task::event::EPOLL_CTL_DEL, 100, ev).is_ok());
+    {
+        let ep = crate::task::event::EpollInstance::new();
+        let ev = crate::task::event::EpollEvent {
+            events: crate::task::event::EPOLLIN,
+            data: 0x1234,
+        };
+        assert!(ep.ctl(crate::task::event::EPOLL_CTL_ADD, 100, ev).is_ok());
+        assert!(ep.ctl(crate::task::event::EPOLL_CTL_ADD, 100, ev).is_err());
+        assert!(ep.ctl(crate::task::event::EPOLL_CTL_DEL, 100, ev).is_ok());
+    }
 
     if crate::fs::vfs::VFS.resolve_path("/disk/ASYNC.ELF").is_ok() {
         execute_command("exec /disk/ASYNC.ELF");
     }
 
-    println!("[SHELL] All Phase 7, 8, 9, 10 & 11 Shell, Network, SMP, Security, IPC, Threads and Async tests passed successfully!");
+    println!("[SHELL] 22. Testing 2D Graphics Canvas & Desktop Window Manager (M30)...");
+    {
+        use crate::graphics::canvas::Canvas;
+        use crate::graphics::color::Color;
+        let mut test_canvas = Canvas::new(100, 100, 100);
+        test_canvas.clear(Color::BLACK);
+        assert_eq!(test_canvas.get_pixel(0, 0), Color::BLACK);
+
+        test_canvas.set_pixel(10, 10, Color::RED);
+        assert_eq!(test_canvas.get_pixel(10, 10), Color::RED);
+
+        test_canvas.draw_line(0, 0, 99, 99, Color::WHITE);
+        assert_eq!(test_canvas.get_pixel(50, 50), Color::WHITE);
+
+        test_canvas.fill_rect(20, 20, 10, 10, Color::GREEN);
+        assert_eq!(test_canvas.get_pixel(25, 25), Color::GREEN);
+
+        test_canvas.draw_circle(50, 50, 20, Color::BLUE);
+        test_canvas.draw_string(5, 5, "Hi", Color::YELLOW, None);
+
+        let mut wm_lock = crate::graphics::wm::WINDOW_MANAGER.lock();
+        if let Some(ref mut wm) = *wm_lock {
+            let win_id = wm.create_window("Unit Test Window", 10, 10, 80, 60);
+            assert_eq!(wm.windows.len(), 1);
+            assert_eq!(wm.focused_window, Some(win_id));
+
+            // Test mouse drag interaction via event handler
+            wm.handle_event(crate::graphics::event::InputEvent::MouseDown {
+                button: crate::graphics::event::MouseButton::Left,
+                x: 20,
+                y: 15,
+            });
+            assert!(wm.dragging.is_some());
+
+            wm.handle_event(crate::graphics::event::InputEvent::MouseMove {
+                x: 30,
+                y: 25,
+                dx: 10,
+                dy: 10,
+            });
+            assert_eq!(wm.windows[0].x, 20);
+
+            wm.handle_event(crate::graphics::event::InputEvent::MouseUp {
+                button: crate::graphics::event::MouseButton::Left,
+                x: 30,
+                y: 25,
+            });
+            assert!(wm.dragging.is_none());
+
+            wm.render_desktop();
+            wm.close_window(win_id);
+            assert_eq!(wm.windows.len(), 0);
+        }
+    }
+    // Launch interactive demo showcase on screen
+    crate::graphics::launch_demo();
+
+    println!("[SHELL] All Phase 7, 8, 9, 10, 11 & 12 Shell, Network, SMP, Security, IPC, Threads, Async and Graphics tests passed successfully!");
 }
 
 /// Interactive Shell Loop that listens on both PS/2 Keyboard and COM1 serial input

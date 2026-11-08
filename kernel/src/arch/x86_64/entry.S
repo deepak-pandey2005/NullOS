@@ -19,6 +19,6 @@ _start:
 .align 16
 
 stack_bottom:
-    .skip 16384
+    .skip 262144
 
 stack_top:

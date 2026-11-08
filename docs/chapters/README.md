@@ -1,5 +1,5 @@
 # NullOS: The Complete Operating Systems Course
-### *A 24-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
+### *A 25-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
 
 Welcome to the comprehensive textbook documentation for **NullOS**. This curriculum teaches operating system engineering from absolute first principles: starting from raw motherboard electricity and transistors, all the way to multitasking, 4-level paging, and Ring 3 user mode with fast hardware system calls.
 
@@ -226,3 +226,14 @@ Welcome to the comprehensive textbook documentation for **NullOS**. This curricu
 - Deep-dive into System V AMD64 ABI stack alignment: Enforcing 16-byte boundary (`%rsp % 16 == 0`), register preservation, and resolving `#DB` context switch exceptions.
 - Userspace POSIX C standard library headers (`<sys/poll.h>`, `<sys/epoll.h>`, `<sys/eventfd.h>`, `<sys/timerfd.h>`, `<sys/uio.h>`).
 - Automated kernel self-tests and user verification with `ASYNC.ELF`.
+
+### [Chapter 25: Framebuffer, 2D Graphics Canvas & Window Manager](chapter25_framebuffer_and_graphics.md)
+- UEFI GOP linear framebuffer: MMIO video RAM mapping, resolution, and scanline pitch/stride alignment.
+- Tear-free double buffering: Offscreen canvas backbuffers, screen tearing prevention, and fast memory block flushing.
+- 2D rasterization algorithms: Integer Bresenham line drawing, outlined and filled rectangles, and midpoint circle drawing.
+- Alpha compositing: Porter-Duff source-over blending formula and transparent sprite rendering.
+- Typography: High-contrast monospaced bitmap fonts with alpha antialiasing via `noto-sans-mono-bitmap`.
+- PS/2 mouse tracking: 3-byte packet decoding, 9-bit relative coordinate sign extension, Y-axis inversion, and screen clamping.
+- Window abstraction: Movable window surfaces, decorated gradient title bars, close button hitboxes, and client blitting.
+- Desktop Window Manager: Wallpaper rendering, bottom taskbar with start badge, open window buttons, system stats, and Z-ordered click-to-focus window dragging.
+- Shell diagnostics and automated verification with the `gui` command and Test 22.
