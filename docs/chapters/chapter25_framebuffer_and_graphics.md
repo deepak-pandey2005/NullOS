@@ -341,3 +341,4 @@ Milestone 30 elevates NullOS from a headless command-line kernel into a full gra
 | **Window Abstraction**| ✅ Done | Decorated frames, title bars, close buttons, client surfaces |
 | **Window Manager** | ✅ Done | Wallpaper, bottom taskbar, Z-order stack, title dragging |
 | **Shell Command** | ✅ Done | `gui` command and automated test 22 |
+
