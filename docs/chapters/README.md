@@ -1,5 +1,5 @@
 # NullOS: The Complete Operating Systems Course
-### *A 23-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
+### *A 24-Chapter Masterclass in 64-Bit Operating System Engineering from Scratch*
 
 Welcome to the comprehensive textbook documentation for **NullOS**. This curriculum teaches operating system engineering from absolute first principles: starting from raw motherboard electricity and transistors, all the way to multitasking, 4-level paging, and Ring 3 user mode with fast hardware system calls.
 
@@ -214,3 +214,15 @@ Welcome to the comprehensive textbook documentation for **NullOS**. This curricu
 - High-level synchronization primitives: Mutex (`pthread_mutex_t`), counting Semaphore (`sem_t`), and Condition Variable (`pthread_cond_t`).
 - POSIX C standard runtime in libc (`pthread_create`, `pthread_join`, `pthread_exit`, `sem_init`, `sem_wait`, `sem_post`).
 - Shell thread diagnostics with the `threads` command.
+
+### [Chapter 24: Async & Event Infrastructure — Multiplexed Polling, Epoll, EventFd, TimerFd & Vectored I/O](chapter24_async_and_event_infrastructure.md)
+- Scalable I/O models: Overcoming the $C10K$ thread-per-connection scaling bottleneck.
+- Scatter-gather vectored I/O: Zero-copy multi-buffer transfers with `readv`/`writev` and `struct iovec`.
+- Multiplexed event polling (`poll(2)`): Bitmasks (`POLLIN`, `POLLOUT`, `POLLERR`), `struct pollfd`, and VFS `Inode::poll()`.
+- Scalable event notification (`epoll(7)`): In-kernel `EpollInstance` interest lists, $O(1)$ readiness, and `epoll_create1`/`ctl`/`wait`.
+- Lockless 64-bit event notification descriptors (`eventfd(2)`): Counter semantics and inter-thread/process signaling.
+- High-resolution timer descriptors (`timerfd(2)`): Integrating periodic and one-shot APIC timers into file descriptors.
+- Non-blocking I/O semantics (`O_NONBLOCK` = `0o4000`) and the `-EAGAIN` (`-11`) / `WouldBlock` protocol.
+- Deep-dive into System V AMD64 ABI stack alignment: Enforcing 16-byte boundary (`%rsp % 16 == 0`), register preservation, and resolving `#DB` context switch exceptions.
+- Userspace POSIX C standard library headers (`<sys/poll.h>`, `<sys/epoll.h>`, `<sys/eventfd.h>`, `<sys/timerfd.h>`, `<sys/uio.h>`).
+- Automated kernel self-tests and user verification with `ASYNC.ELF`.

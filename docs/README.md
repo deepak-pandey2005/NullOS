@@ -9,7 +9,7 @@ This documentation serves as an architectural blueprint, implementation guide, a
 ## Table of Contents
 
 ### 🎓 Educational Guides
-- [**The 10-Chapter Masterclass Course (`docs/chapters/`)**](chapters/README.md) — 10 deep-dive chapters covering everything from silicon gates and UEFI boot, GDT/TSS, ISRs/APIC, 4-level paging, and heap, to preemptive threads, Ring 3 SYSCALL, and bare-metal USB deployment!
+- [**The 24-Chapter Masterclass Course (`docs/chapters/`)**](chapters/README.md) — 24 deep-dive chapters covering everything from silicon gates and UEFI boot, GDT/TSS, ISRs/APIC, 4-level paging, and heap, to preemptive threads, Ring 3 SYSCALL, SMP, IPC, Pthreads, and Async/Event infrastructure!
 - [**The Absolute Beginner's Guide to Operating Systems & NullOS**](BEGINNERS_GUIDE.md) — Unified first-principles overview guide.
 
 ### 1. Architecture & Execution Flow

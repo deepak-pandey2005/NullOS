@@ -1,5 +1,23 @@
 /*
  * x86_64 Fast System Call (SYSCALL / SYSRET) & User Mode Transition Stubs.
+ *
+ * System Call Protocol:
+ * - Userspace executes `syscall` instruction.
+ * - Hardware loads RIP from IA32_LSTAR MSR (pointing to syscall_entry).
+ * - Hardware saves User RIP into %rcx and User RFLAGS into %r11.
+ * - Hardware masks RFLAGS with IA32_FMASK MSR (clearing IF, DF, TF, etc.).
+ * - Hardware loads CS from STAR MSR (Kernel Code Segment 0x08).
+ *
+ * Calling Convention & Stack Alignment:
+ * - User %rsp is saved to `user_rsp_scratch` and CPU switches to `current_kernel_rsp`.
+ * - 15 64-bit registers (120 bytes) are saved onto the kernel stack:
+ *     user_rsp_scratch, %r11, %rcx, %r15, %r14, %r13, %r12, %rbp, %rbx, %r10, %r9, %r8, %rdx, %rsi, %rdi
+ * - System V AMD64 ABI requires the stack pointer (%rsp) to be aligned on a 16-byte boundary
+ *   before any `call` instruction (such that (%rsp + 8) % 16 == 0 at the called function's entry).
+ * - Because 120 bytes % 16 == 8, we perform `sub $8, %rsp` before `call syscall_dispatcher`
+ *   to ensure total stack allocation is 128 bytes (128 % 16 == 0).
+ * - Preserving %r8, %r9, and %r10 ensures that caller-saved user registers holding local variables
+ *   across syscalls (such as file descriptors) are not clobbered by the kernel C/Rust calling convention.
  */
 
 .section .text
@@ -40,12 +58,14 @@ syscall_entry:
     mov %rdi, %rsi     # arg 1 -> %rsi
     mov %rax, %rdi     # num   -> %rdi
 
-    sub $8, %rsp      # 16-byte stack alignment for SysV ABI (15 pushes + 8 = 128 bytes)
+    # Maintain 16-byte stack alignment for SysV ABI:
+    # (15 pushed words * 8 bytes = 120 bytes; 120 + 8 = 128 bytes, which is 0 mod 16)
+    sub $8, %rsp
     call syscall_dispatcher
     add $8, %rsp
     # Return value is in %rax
 
-    # 5. Restore user registers
+    # 5. Restore user registers (in exact reverse order of pushes)
     pop %rdi
     pop %rsi
     pop %rdx
@@ -62,7 +82,7 @@ syscall_entry:
     pop %r11          # User RFLAGS restored to %r11 for sysretq
     pop %rsp          # User %rsp restored directly
 
-    # 6. Return to Ring 3 user mode!
+    # 6. Return to Ring 3 user mode via fast hardware sysretq
     sysretq
 
 /*

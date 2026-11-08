@@ -564,6 +564,10 @@ pub extern "C" fn syscall_dispatcher(
                 _ => u64::MAX,
             }
         }
+        // SYS_POLL (7): Multiplexed I/O event polling across an array of file descriptors.
+        // a1 = struct pollfd *fds
+        // a2 = nfds_t nfds
+        // a3 = int timeout_ms
         SYS_POLL => {
             let fds_ptr = a1 as *mut crate::task::event::PollFd;
             let nfds = a2 as usize;
@@ -631,6 +635,10 @@ pub extern "C" fn syscall_dispatcher(
                 super::yield_now();
             }
         }
+        // SYS_READV (19): Scatter-gather vectored read from a file descriptor into multiple buffers.
+        // a1 = int fd
+        // a2 = const struct iovec *iov
+        // a3 = int iovcnt
         SYS_READV => {
             let fd = a1 as i32;
             let iov_ptr = a2 as *const crate::task::event::IoVec;
@@ -689,6 +697,10 @@ pub extern "C" fn syscall_dispatcher(
                 u64::MAX
             }
         }
+        // SYS_WRITEV (20): Scatter-gather vectored write from multiple buffers to a file descriptor.
+        // a1 = int fd
+        // a2 = const struct iovec *iov
+        // a3 = int iovcnt
         SYS_WRITEV => {
             let fd = a1 as i32;
             let iov_ptr = a2 as *const crate::task::event::IoVec;
@@ -772,6 +784,8 @@ pub extern "C" fn syscall_dispatcher(
                 }
             }
         }
+        // SYS_EPOLL_CREATE (213): Creates a new epoll file descriptor.
+        // a1 = int size (ignored, must be > 0 for POSIX compatibility)
         SYS_EPOLL_CREATE => {
             let size = a1 as i32;
             if size <= 0 {
@@ -802,6 +816,8 @@ pub extern "C" fn syscall_dispatcher(
                 Err(_) => (-24i64) as u64,
             }
         }
+        // SYS_EPOLL_CREATE1 (291): Creates an epoll file descriptor with flags (e.g. EPOLL_CLOEXEC).
+        // a1 = int flags
         SYS_EPOLL_CREATE1 => {
             let epoll_flags = a1 as i32;
             let epoll = alloc::sync::Arc::new(crate::task::event::EpollInstance::new());
@@ -829,6 +845,11 @@ pub extern "C" fn syscall_dispatcher(
                 Err(_) => (-24i64) as u64,
             }
         }
+        // SYS_EPOLL_CTL (233): Control interface for an epoll file descriptor (ADD, DEL, MOD).
+        // a1 = int epfd
+        // a2 = int op
+        // a3 = int fd
+        // a4 = struct epoll_event *event
         SYS_EPOLL_CTL => {
             let epfd = a1 as i32;
             let op = a2 as i32;
@@ -871,6 +892,11 @@ pub extern "C" fn syscall_dispatcher(
                 (-14i64) as u64
             }
         }
+        // SYS_EPOLL_WAIT (232): Waits for I/O events on an epoll file descriptor with timeout.
+        // a1 = int epfd
+        // a2 = struct epoll_event *events
+        // a3 = int maxevents
+        // a4 = int timeout
         SYS_EPOLL_WAIT => {
             let epfd = a1 as i32;
             let events_ptr = a2 as *mut crate::task::event::EpollEvent;
@@ -926,6 +952,9 @@ pub extern "C" fn syscall_dispatcher(
                 super::yield_now();
             }
         }
+        // SYS_EVENTFD (284) / SYS_EVENTFD2 (290): Creates a 64-bit event notification descriptor.
+        // a1 = unsigned int initval
+        // a2 = int flags (EFD_NONBLOCK, EFD_SEMAPHORE, EFD_CLOEXEC)
         SYS_EVENTFD | SYS_EVENTFD2 => {
             let initval = a1 as u32;
             let flags = if num == SYS_EVENTFD2 { a2 as i32 } else { 0 };
@@ -955,6 +984,9 @@ pub extern "C" fn syscall_dispatcher(
                 Err(_) => (-24i64) as u64,
             }
         }
+        // SYS_TIMERFD_CREATE (283): Creates a high-resolution timer descriptor.
+        // a1 = int clockid (CLOCK_REALTIME, CLOCK_MONOTONIC)
+        // a2 = int flags (TFD_NONBLOCK, TFD_CLOEXEC)
         SYS_TIMERFD_CREATE => {
             let clockid = a1 as i32;
             let flags = a2 as i32;
@@ -988,6 +1020,11 @@ pub extern "C" fn syscall_dispatcher(
                 Err(_) => (-24i64) as u64,
             }
         }
+        // SYS_TIMERFD_SETTIME (286): Arms or disarms the timer referred to by timerfd.
+        // a1 = int fd
+        // a2 = int flags (TFD_TIMER_ABSTIME)
+        // a3 = const struct itimerspec *new_value
+        // a4 = struct itimerspec *old_value
         SYS_TIMERFD_SETTIME => {
             let fd = a1 as i32;
             let _flags = a2 as i32;
@@ -1024,6 +1061,9 @@ pub extern "C" fn syscall_dispatcher(
                 (-14i64) as u64
             }
         }
+        // SYS_TIMERFD_GETTIME (287): Queries current setting/remaining time of timerfd.
+        // a1 = int fd
+        // a2 = struct itimerspec *curr_value
         SYS_TIMERFD_GETTIME => {
             let fd = a1 as i32;
             let curr_value_ptr = a2 as *mut crate::task::event::ITimerSpec;

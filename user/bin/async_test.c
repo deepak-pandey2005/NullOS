@@ -1,3 +1,13 @@
+/*
+ * NullOS Async & Event Infrastructure Test Program (Milestone 29).
+ *
+ * This userspace program tests and validates:
+ * 1. Scatter-gather vectored I/O via writev(2) across discrete user memory buffers.
+ * 2. 64-bit event notification descriptors via eventfd(2) and multiplexed poll(2).
+ * 3. Scalable event notification multiplexing via epoll_create1(2), epoll_ctl(2), and epoll_wait(2).
+ * 4. High-resolution interval and single-shot timers via timerfd_create(2), timerfd_settime(2), and read(2).
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
