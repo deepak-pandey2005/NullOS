@@ -640,6 +640,15 @@ pub fn map_page(page: Page, frame: PhysFrame, flags: PageTableFlags) -> Result<(
         .map_page(page, frame, flags)
 }
 
+/// Identity-maps a physical memory range 1:1 using the active kernel page table.
+pub fn identity_map_range(start: PhysAddr, size: u64, flags: PageTableFlags) -> Result<(), &'static str> {
+    KERNEL_PAGE_TABLE
+        .lock()
+        .as_mut()
+        .ok_or("Kernel page table not initialized")?
+        .identity_map_range(start, size, flags)
+}
+
 /// Unmaps a page using the active kernel page table.
 pub fn unmap_page(page: Page) -> Result<PhysFrame, &'static str> {
     KERNEL_PAGE_TABLE

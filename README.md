@@ -481,14 +481,14 @@ scripts\windows\run.bat --headless    # Run automated headless test suite
 - [x] Basic window manager
 
 ### M31 — USB
-- [ ] xHCI
-- [ ] USB controller
-- [ ] USB device enumeration
-- [ ] USB descriptors
-- [ ] HID
-- [ ] Keyboard
-- [ ] Mouse
-- [ ] Input subsystem
+- [x] xHCI
+- [x] USB controller
+- [x] USB device enumeration
+- [x] USB descriptors
+- [x] HID
+- [x] Keyboard
+- [x] Mouse
+- [x] Input subsystem
 
 ### M32 — Audio
 - [ ] HDA controller

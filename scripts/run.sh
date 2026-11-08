@@ -49,6 +49,9 @@ QEMU_ARGS=(
     -m 512M
     -netdev user,id=net0
     -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56
+    -device qemu-xhci,id=xhci
+    -device usb-kbd,bus=xhci.0
+    -device usb-mouse,bus=xhci.0
     -bios "${OVMF_PATH}"
     -drive "format=raw,file=${DISK_IMG}"
     -drive "format=raw,file=${DATA_DISK_IMG},if=virtio"
@@ -70,6 +73,9 @@ if [[ "${1:-}" == "--headless" || "${1:-}" == "--test" ]]; then
         -m 512M
         -netdev user,id=net0
         -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56
+        -device qemu-xhci,id=xhci
+        -device usb-kbd,bus=xhci.0
+        -device usb-mouse,bus=xhci.0
         -bios "${OVMF_PATH}"
         -drive "format=raw,file=${TEST_DISK}"
         -drive "format=raw,file=${TEST_DATA},if=virtio"

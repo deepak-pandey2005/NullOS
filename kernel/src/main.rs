@@ -135,6 +135,10 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     drivers::pci::init();
     drivers::pci::run_self_tests();
 
+    // Initialize USB 3.0 xHCI Controller & Devices (Phase 12 - M31)
+    drivers::usb::init();
+    drivers::usb::run_self_tests();
+
     // Initialize VirtIO Block Storage Subsystem (Phase 6 - M18 Block Devices)
     // NOTE: VirtIO block devices operate in virtualized environments (QEMU/KVM).
     // On physical bare-metal hardware, storage requires AHCI/SATA or NVMe drivers.

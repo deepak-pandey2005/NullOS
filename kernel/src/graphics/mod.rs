@@ -230,8 +230,12 @@ pub fn run_compositor() {
             }
         }
 
-        // 1. Check for incoming keyboard input from PS/2 or COM1 serial
-        let incoming_char = if let Some(ch) = crate::drivers::keyboard::read_char() {
+        // 1. Poll USB inputs (HID keyboards and mice) and check incoming characters
+        crate::drivers::usb::poll_inputs();
+
+        let incoming_char = if let Some(ch) = crate::drivers::usb::read_char() {
+            Some(ch)
+        } else if let Some(ch) = crate::drivers::keyboard::read_char() {
             Some(ch)
         } else if let Some(byte) = crate::drivers::serial::read_byte() {
             match byte {

@@ -446,6 +446,7 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str("  ipc                  - Display inter-process communication resources (pipes, shm, unix)\n");
             out.push_str("  threads              - Display active system threads and synchronization states\n");
             out.push_str("  dmesg                - Display kernel message ring buffer logs\n");
+            out.push_str("  usb / lsusb          - List enumerated USB controllers and devices (M31)\n");
             out.push_str("  test                 - Run comprehensive automated subsystem & shell tests\n");
             out.push_str("  gui                  - Launch Desktop Window Manager & Compositor demo (M30)\n");
             out.push_str("  mem                  - Display physical memory manager statistics\n");
@@ -876,6 +877,43 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
                     "{:<8} {:04x}:{:04x}  {:<32} {}\n",
                     dev.address, dev.vendor_id, dev.device_id, dev.class_name(), dev.vendor_name()
                 ));
+            }
+            (out, 0)
+        }
+        "usb" | "lsusb" => {
+            let devices = crate::drivers::usb::list_devices();
+            let mut out = alloc::format!("{:<6} {:<6} {:<10} {:<6} {:<32} {}\n", "SLOT", "PORT", "ID", "SPEED", "CLASS", "TYPE");
+            out.push_str("--------------------------------------------------------------------------------\n");
+            if devices.is_empty() {
+                out.push_str("No USB devices enumerated on xHCI controller.\n");
+            } else {
+                for dev in devices.iter() {
+                    let speed_str = match dev.speed {
+                        1 => "Full",
+                        2 => "Low",
+                        3 => "High",
+                        4 => "Super",
+                        _ => "Unknown",
+                    };
+                    let type_str = if dev.is_keyboard {
+                        "HID Keyboard"
+                    } else if dev.is_mouse {
+                        "HID Mouse"
+                    } else {
+                        "Standard Device"
+                    };
+                    let class_name = match dev.class_code {
+                        0x00 => "Per-Interface",
+                        0x03 => "Human Interface Device",
+                        0x08 => "Mass Storage",
+                        0x09 => "Hub",
+                        _ => "Other USB Class",
+                    };
+                    out.push_str(&alloc::format!(
+                        "{:<6} {:<6} {:04x}:{:04x}  {:<6} {:<32} {}\n",
+                        dev.slot_id, dev.port_num, dev.vendor_id, dev.product_id, speed_str, class_name, type_str
+                    ));
+                }
             }
             (out, 0)
         }
@@ -1577,10 +1615,14 @@ pub fn run_automated_tests() {
     // Launch interactive demo showcase on screen
     crate::graphics::launch_demo();
 
+    println!("[SHELL] 23. Testing USB 3.0 xHCI Controller & HID Input Subsystems (M31)...");
+    execute_command("usb");
+    crate::drivers::usb::run_self_tests();
+
     println!("[SHELL] All Phase 7, 8, 9, 10, 11 & 12 Shell, Network, SMP, Security, IPC, Threads, Async and Graphics tests passed successfully!");
 }
 
-/// Interactive Shell Loop that listens on both PS/2 Keyboard and COM1 serial input
+/// Interactive Shell Loop that listens on USB Keyboard, PS/2 Keyboard, and COM1 serial input
 /// and executes commands in real-time.
 pub fn interactive_loop() {
     println!();
@@ -1593,8 +1635,13 @@ pub fn interactive_loop() {
     let mut line_buf = String::new();
 
     loop {
-        // Read input from either PS/2 keyboard (display window/hardware) or COM1 serial
-        let incoming_char = if let Some(ch) = crate::drivers::keyboard::read_char() {
+        // Poll USB inputs (HID keyboards and mice)
+        crate::drivers::usb::poll_inputs();
+
+        // Read input from USB keyboard, PS/2 keyboard, or COM1 serial
+        let incoming_char = if let Some(ch) = crate::drivers::usb::read_char() {
+            Some(ch)
+        } else if let Some(ch) = crate::drivers::keyboard::read_char() {
             Some(ch)
         } else if let Some(byte) = serial::read_byte() {
             match byte {

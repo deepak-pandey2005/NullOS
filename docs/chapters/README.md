@@ -237,3 +237,14 @@ Welcome to the comprehensive textbook documentation for **NullOS**. This curricu
 - Window abstraction: Movable window surfaces, decorated gradient title bars, close button hitboxes, and client blitting.
 - Desktop Window Manager: Wallpaper rendering, bottom taskbar with start badge, open window buttons, system stats, and Z-ordered click-to-focus window dragging.
 - Shell diagnostics and automated verification with the `gui` command and Test 22.
+
+### [Chapter 26: USB 3.0 xHCI Controller & HID Input Subsystems](chapter26_usb_xhci_and_input_subsystems.md)
+- Universal Serial Bus evolution: From legacy UHCI/OHCI/EHCI companion controllers to modern, unified xHCI 3.0+ architecture.
+- xHCI register geometry: Capability registers (`CAPLENGTH`, `HCIVERSION`, `HCSPARAMS1/2`), Operational registers (`USBCMD`, `USBSTS`, `CRCR`, `DCBAAP`, `PORTSC`), Runtime registers (`ERSTSZ`, `ERSTBA`, `ERDP`), and Doorbell arrays.
+- Transfer Request Blocks (TRBs): 16-byte descriptors, Producer Cycle State (PCS) bit-toggle mechanics, Link TRBs, Command TRBs, and Event TRBs.
+- Circular DMA ring engines: Command Ring, Event Ring Segment Table (ERST), and interrupter status management.
+- Root Hub port management: Port Status & Control (`PORTSC`), USB bus reset signaling, and hardware speed negotiation (Low, Full, High, SuperSpeed).
+- Device Context Base Address Array (DCBAA): Device context allocation, Input Contexts, and Slot & Endpoint 0 Context population.
+- USB Standard Descriptors: Binary parsing of Device (18B), Configuration (9B), Interface (9B), Endpoint (7B), and HID (9B) descriptors over Control transfer pipes.
+- USB HID Class Subsystem: Boot Protocol report decoders for 8-byte Keyboard reports (modifiers + 6-key rollover) and 3/4-byte Mouse reports (buttons + relative coordinate deltas).
+- Integration with Desktop Window Manager (`INPUT_QUEUE`) and interactive shell (`usb` / `lsusb` commands and Test 23).

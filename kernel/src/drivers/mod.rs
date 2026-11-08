@@ -3,6 +3,7 @@ pub mod console;
 pub mod keyboard;
 pub mod pci;
 pub mod serial;
+pub mod usb;
 pub mod virtio_blk;
 pub mod virtio_net;
 
