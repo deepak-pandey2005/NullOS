@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-pub const DEFAULT_STACK_SIZE: usize = 16 * 1024; // 16 KiB
+pub const DEFAULT_STACK_SIZE: usize = 64 * 1024; // 64 KiB
 
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
 

@@ -12,6 +12,9 @@
 //! // 3. Implement overlapping Window abstraction with title bars, draggable headers, and dirty region redraws.
 //! // 4. Hardware Mouse Cursor: Render transparent mouse arrow sprite updated on PS/2 / USB mouse input events.
 
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::sync::atomic::{AtomicBool, Ordering};
 use crate::sync::Spinlock;
 use bootinfo::{FramebufferInfo, PixelFormat};
 use core::fmt;
@@ -47,6 +50,44 @@ pub struct FramebufferConsole {
 }
 
 static CONSOLE: Spinlock<Option<FramebufferConsole>> = Spinlock::new(None);
+static CONSOLE_SUSPENDED: AtomicBool = AtomicBool::new(false);
+
+const DMESG_CAPACITY: usize = 65536; // 64 KiB circular byte buffer
+
+struct DmesgRing {
+    buf: [u8; DMESG_CAPACITY],
+    head: usize,
+    count: usize,
+}
+
+impl DmesgRing {
+    const fn new() -> Self {
+        Self {
+            buf: [0; DMESG_CAPACITY],
+            head: 0,
+            count: 0,
+        }
+    }
+
+    #[inline]
+    fn push_byte(&mut self, b: u8) {
+        let idx = (self.head + self.count) % DMESG_CAPACITY;
+        self.buf[idx] = b;
+        if self.count < DMESG_CAPACITY {
+            self.count += 1;
+        } else {
+            self.head = (self.head + 1) % DMESG_CAPACITY;
+        }
+    }
+
+    fn push_str(&mut self, s: &str) {
+        for &b in s.as_bytes() {
+            self.push_byte(b);
+        }
+    }
+}
+
+static DMESG_RING: Spinlock<DmesgRing> = Spinlock::new(DmesgRing::new());
 
 impl FramebufferConsole {
     pub fn new(fb: &FramebufferInfo) -> Self {
@@ -297,8 +338,74 @@ pub fn init(fb: &FramebufferInfo) {
     *CONSOLE.lock() = Some(console);
 }
 
-pub fn write_str(s: &str) {
+/// Suspends or resumes direct rendering to the GOP framebuffer console.
+/// When suspended (e.g. while Desktop Compositor is active), logs are recorded in dmesg
+/// but not written directly to video RAM.
+pub fn set_suspended(suspended: bool) {
+    CONSOLE_SUSPENDED.store(suspended, Ordering::SeqCst);
+}
+
+/// Checks if console direct video output is currently suspended.
+pub fn is_suspended() -> bool {
+    CONSOLE_SUSPENDED.load(Ordering::SeqCst)
+}
+
+/// Clears the physical text console display.
+pub fn clear_screen() {
     if let Some(ref mut console) = *CONSOLE.lock() {
-        let _ = <FramebufferConsole as fmt::Write>::write_str(console, s);
+        console.clear();
+    }
+}
+
+/// Helper to remove ANSI escape sequences like \x1b[32m for readable dmesg logs.
+fn strip_ansi_codes(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut in_escape = false;
+    for c in input.chars() {
+        if c == '\x1b' {
+            in_escape = true;
+        } else if in_escape {
+            if c.is_ascii_alphabetic() {
+                in_escape = false;
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Stores a raw string into the zero-allocation in-memory dmesg ring buffer.
+/// Completely safe across interrupts, early boot, and re-entrant allocator calls.
+#[inline]
+pub fn record_dmesg(s: &str) {
+    DMESG_RING.lock().push_str(s);
+}
+
+/// Returns all recorded kernel messages joined as a formatted string with ANSI codes removed.
+pub fn get_dmesg() -> String {
+    let ring = DMESG_RING.lock();
+    let mut out = String::with_capacity(ring.count);
+    for i in 0..ring.count {
+        let b = ring.buf[(ring.head + i) % DMESG_CAPACITY];
+        out.push(b as char);
+    }
+    strip_ansi_codes(&out)
+}
+
+/// Returns the last `max` lines from the dmesg buffer.
+pub fn get_dmesg_lines(max: usize) -> Vec<String> {
+    let full = get_dmesg();
+    let lines: Vec<&str> = full.split('\n').filter(|l| !l.is_empty()).collect();
+    let skip = lines.len().saturating_sub(max);
+    lines.iter().skip(skip).map(|s| s.to_string()).collect()
+}
+
+pub fn write_str(s: &str) {
+    record_dmesg(s);
+    if !is_suspended() {
+        if let Some(ref mut console) = *CONSOLE.lock() {
+            let _ = <FramebufferConsole as fmt::Write>::write_str(console, s);
+        }
     }
 }

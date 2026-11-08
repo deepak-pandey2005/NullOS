@@ -26,6 +26,7 @@ pub struct WindowManager {
     pub windows: Vec<Window>,
     pub focused_window: Option<u32>,
     pub dragging: Option<(u32, isize, isize)>,
+    pub is_running: bool,
     next_window_id: u32,
 }
 
@@ -40,8 +41,14 @@ impl WindowManager {
             windows: Vec::new(),
             focused_window: None,
             dragging: None,
+            is_running: true,
             next_window_id: 1,
         }
+    }
+
+    /// Signals the window manager event loop to terminate and return to text console.
+    pub fn request_exit(&mut self) {
+        self.is_running = false;
     }
 
     /// Allocates and creates a new managed Window.
@@ -91,7 +98,38 @@ impl WindowManager {
     pub fn handle_event(&mut self, event: InputEvent) {
         match event {
             InputEvent::MouseDown { button: MouseButton::Left, x, y } => {
-                // Check windows from top to bottom (reverse order)
+                let tb_y = (self.screen_height.saturating_sub(TASKBAR_HEIGHT)) as isize;
+
+                // 1. Check clicks on Taskbar
+                if y >= tb_y {
+                    let exit_btn_w = 90isize;
+                    let exit_btn_x = (self.screen_width.saturating_sub(exit_btn_w as usize + 12)) as isize;
+
+                    // Check "Exit GUI" button click
+                    if x >= exit_btn_x && x < exit_btn_x + exit_btn_w {
+                        self.is_running = false;
+                        return;
+                    }
+
+                    // Check window tabs clicks
+                    let mut tab_x = 100isize;
+                    let max_tabs_x = exit_btn_x.saturating_sub(100);
+                    for win in self.windows.iter() {
+                        let tab_w = 140isize;
+                        if tab_x + tab_w > max_tabs_x {
+                            break;
+                        }
+                        if x >= tab_x && x < tab_x + tab_w {
+                            let win_id = win.id;
+                            self.bring_to_front(win_id);
+                            return;
+                        }
+                        tab_x += tab_w + 6;
+                    }
+                    return;
+                }
+
+                // 2. Check windows from top to bottom (reverse order)
                 let mut clicked_win = None;
                 let mut close_clicked = None;
                 let mut drag_started = None;
@@ -207,9 +245,13 @@ impl WindowManager {
 
         // Active window buttons in taskbar
         let mut tab_x = 100;
+        let exit_btn_w = 90;
+        let exit_btn_x = w.saturating_sub(exit_btn_w + 12);
+        let max_tab_x = exit_btn_x.saturating_sub(110);
+
         for win in self.windows.iter() {
             let tab_w = 140;
-            if tab_x + tab_w > w.saturating_sub(180) {
+            if tab_x + tab_w > max_tab_x {
                 break;
             }
 
@@ -229,11 +271,15 @@ impl WindowManager {
             tab_x += tab_w + 6;
         }
 
+        // Right-aligned "[Exit GUI]" button
+        self.backbuffer.fill_rect(exit_btn_x, tb_y + 4, exit_btn_w, TASKBAR_HEIGHT - 8, Color::CLOSE_BUTTON);
+        self.backbuffer.draw_string(exit_btn_x + 10, tb_y + 8, "Exit GUI", Color::WHITE, None);
+
         // Right-aligned status stats (clock / uptime ticks)
         let ticks = crate::arch::x86_64::apic::get_ticks();
         let uptime_secs = ticks / 100;
         let clock_str = alloc::format!("Up: {}s", uptime_secs);
-        let clock_x = w.saturating_sub(clock_str.len() * CHAR_WIDTH + 16);
+        let clock_x = exit_btn_x.saturating_sub(clock_str.len() * CHAR_WIDTH + 16);
         self.backbuffer.draw_string(clock_x, tb_y + 8, &clock_str, Color::LIGHT_SLATE, None);
     }
 }

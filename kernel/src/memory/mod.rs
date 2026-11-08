@@ -16,7 +16,7 @@ pub mod uefi_mmap;
 pub use address::{Page, PhysAddr, PhysFrame, VirtAddr, PAGE_SIZE_4K};
 pub use address_space::AddressSpace;
 pub use frame_allocator::{BitmapFrameAllocator, MemoryStats};
-pub use heap::HeapStats;
+pub use heap::{is_heap_initialized, HeapStats};
 pub use paging::{KernelPageTable, PageTable, PageTableEntry, PageTableFlags};
 pub use uefi_mmap::{MemoryDescriptor, MemoryMapIterator, UefiMemoryType};
 

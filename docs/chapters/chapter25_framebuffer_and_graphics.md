@@ -341,4 +341,29 @@ Milestone 30 elevates NullOS from a headless command-line kernel into a full gra
 | **Window Abstraction**| ✅ Done | Decorated frames, title bars, close buttons, client surfaces |
 | **Window Manager** | ✅ Done | Wallpaper, bottom taskbar, Z-order stack, title dragging |
 | **Shell Command** | ✅ Done | `gui` command and automated test 22 |
+| **Exclusive GUI Mode**| ✅ Done | Console suspension during compositor loop with `[Exit GUI]` |
+| **dmesg Ring Buffer** | ✅ Done | 64 KiB zero-allocation circular buffer and `dmesg` command |
+| **Desktop Log Viewer**| ✅ Done | Dedicated GUI Kernel Log window with live dmesg stream |
+| **Desktop Terminal**  | ✅ Done | Interactive in-GUI command console with live execution |
+
+---
+
+## 10. Exclusive GUI Compositor Mode & Kernel Message Ring Buffer (`dmesg`)
+
+When launching the graphical desktop environment (`gui`), the system switches from the text-mode console to **Exclusive GUI Compositor Mode**. To prevent visual corruption from kernel log messages writing directly over window surfaces and backbuffers, NullOS decouples logging from direct screen output:
+
+### 10.1 Console Suspension (`console::set_suspended`)
+- Direct rendering to the physical GOP framebuffer is suspended via `console::set_suspended(true)` upon entering `run_compositor()`.
+- All `println!` and serial writes continue writing to serial COM1 and are recorded into an in-memory ring buffer, but skip writing to video RAM while the compositor is active.
+- Upon exiting the compositor (via `[ESC]` or the `[Exit GUI]` taskbar button), `console::set_suspended(false)` is restored, returning smoothly to the interactive CLI shell.
+
+### 10.2 Zero-Allocation Circular `dmesg` Ring Buffer
+- A dedicated 64 KiB circular byte buffer (`DMESG_RING`) captures all kernel messages without any dynamic heap allocations.
+- Because it operates without heap allocations or locks that could cause re-entrant deadlock with the memory manager, it is completely safe across early boot, interrupts, and allocator expansion.
+- The `dmesg` CLI command outputs all captured kernel logs on demand, stripping ANSI escape sequences for clean terminal output.
+
+### 10.3 In-Desktop Terminal & Kernel Log Window
+- **Kernel Log (dmesg)** window: A dedicated desktop application window that displays a live, formatted view of the most recent kernel messages directly within the GUI.
+- **Terminal Console**: An interactive terminal window embedded in the GUI allowing operators to run shell commands (`help`, `dmesg`, `mem`, `uptime`, `clear`, `exit`) directly from the desktop environment.
+
 

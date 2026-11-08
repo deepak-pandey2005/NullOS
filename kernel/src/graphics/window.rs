@@ -4,6 +4,7 @@
 //! close buttons, dragging boundaries, and dedicated client canvases.
 
 use alloc::string::String;
+use alloc::vec::Vec;
 use crate::graphics::canvas::{Canvas, CHAR_HEIGHT, CHAR_WIDTH};
 use crate::graphics::color::Color;
 
@@ -23,6 +24,8 @@ pub struct Window {
     pub is_focused: bool,
     pub closable: bool,
     pub draggable: bool,
+    pub term_lines: Vec<String>,
+    pub input_line: String,
 }
 
 impl Window {
@@ -39,6 +42,61 @@ impl Window {
             is_focused: false,
             closable: true,
             draggable: true,
+            term_lines: Vec::new(),
+            input_line: String::new(),
+        }
+    }
+
+    /// Redraws terminal lines and current input line onto client surface.
+    pub fn render_terminal_surface(&mut self) {
+        self.surface.clear(Color::BLACK);
+        let max_lines = self.height / CHAR_HEIGHT;
+        let mut y = 6;
+        let lines_to_show = max_lines.saturating_sub(2);
+        let start_idx = self.term_lines.len().saturating_sub(lines_to_show);
+
+        for line in self.term_lines.iter().skip(start_idx) {
+            let max_chars = (self.width.saturating_sub(16)) / CHAR_WIDTH;
+            let display: String = line.chars().take(max_chars).collect();
+            let color = if display.starts_with("nullos$") {
+                Color::YELLOW
+            } else if display.starts_with('[') {
+                Color::CYAN
+            } else {
+                Color::LIGHT_SLATE
+            };
+            self.surface.draw_string(8, y, &display, color, None);
+            y += CHAR_HEIGHT;
+        }
+
+        let prompt = alloc::format!("nullos$ {}{}", self.input_line, "_");
+        let max_chars = (self.width.saturating_sub(16)) / CHAR_WIDTH;
+        let display_prompt: String = prompt.chars().take(max_chars).collect();
+        self.surface.draw_string(8, y, &display_prompt, Color::GREEN, None);
+    }
+
+    /// Redraws log lines onto client surface (for Kernel Log viewer window).
+    pub fn render_log_surface(&mut self, logs: &[String]) {
+        self.surface.clear(Color::DARK_SLATE);
+        let max_lines = self.height / CHAR_HEIGHT;
+        let mut y = 6;
+        let lines_to_show = max_lines.saturating_sub(1);
+        let start_idx = logs.len().saturating_sub(lines_to_show);
+
+        for line in logs.iter().skip(start_idx) {
+            let max_chars = (self.width.saturating_sub(16)) / CHAR_WIDTH;
+            let display: String = line.chars().take(max_chars).collect();
+            let color = if display.contains("ERROR") || display.contains("PANIC") {
+                Color::RED
+            } else if display.contains("verified") || display.contains("passed") || display.contains("success") {
+                Color::GREEN
+            } else if display.starts_with('[') {
+                Color::CYAN
+            } else {
+                Color::LIGHT_SLATE
+            };
+            self.surface.draw_string(8, y, &display, color, None);
+            y += CHAR_HEIGHT;
         }
     }
 

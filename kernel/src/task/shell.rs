@@ -69,8 +69,8 @@ static NEXT_JOB_ID: AtomicUsize = AtomicUsize::new(1);
 static JOBS: Spinlock<[Option<Job>; 16]> = Spinlock::new([None; 16]);
 static BG_QUEUE: Spinlock<[Option<BgQueueEntry>; 16]> = Spinlock::new([None; 16]);
 
-/// Global shell environment variables map.
-static ENV_VARS: Spinlock<BTreeMap<String, String>> = Spinlock::new(BTreeMap::new());
+/// Global shell environment variables list.
+static ENV_VARS: Spinlock<Vec<(String, String)>> = Spinlock::new(Vec::new());
 
 /// Exit code of the most recently executed foreground command (for `$?` expansion).
 static LAST_EXIT_CODE: AtomicI32 = AtomicI32::new(0);
@@ -79,13 +79,13 @@ static LAST_EXIT_CODE: AtomicI32 = AtomicI32::new(0);
 pub fn init_env_vars() {
     let mut vars = ENV_VARS.lock();
     if vars.is_empty() {
-        vars.insert("PATH".to_string(), "/bin:/disk".to_string());
-        vars.insert("USER".to_string(), "root".to_string());
-        vars.insert("HOME".to_string(), "/".to_string());
-        vars.insert("SHELL".to_string(), "/bin/nsh".to_string());
-        vars.insert("OS".to_string(), "NullOS".to_string());
-        vars.insert("ARCH".to_string(), "x86_64".to_string());
-        vars.insert("PWD".to_string(), "/".to_string());
+        vars.push(("PATH".to_string(), "/bin:/disk".to_string()));
+        vars.push(("USER".to_string(), "root".to_string()));
+        vars.push(("HOME".to_string(), "/".to_string()));
+        vars.push(("SHELL".to_string(), "/bin/nsh".to_string()));
+        vars.push(("OS".to_string(), "NullOS".to_string()));
+        vars.push(("ARCH".to_string(), "x86_64".to_string()));
+        vars.push(("PWD".to_string(), "/".to_string()));
     }
 }
 
@@ -93,21 +93,32 @@ pub fn init_env_vars() {
 pub fn get_env(key: &str) -> String {
     init_env_vars();
     let vars = ENV_VARS.lock();
-    vars.get(key).cloned().unwrap_or_default()
+    for (k, v) in vars.iter() {
+        if k == key {
+            return v.clone();
+        }
+    }
+    String::new()
 }
 
 /// Sets or updates an environment variable.
 pub fn set_env(key: &str, val: &str) {
     init_env_vars();
     let mut vars = ENV_VARS.lock();
-    vars.insert(key.to_string(), val.to_string());
+    for (k, v) in vars.iter_mut() {
+        if k == key {
+            *v = val.to_string();
+            return;
+        }
+    }
+    vars.push((key.to_string(), val.to_string()));
 }
 
 /// Unsets (removes) an environment variable.
 pub fn unset_env(key: &str) {
     init_env_vars();
     let mut vars = ENV_VARS.lock();
-    vars.remove(key);
+    vars.retain(|(k, _)| k != key);
 }
 
 /// Normalizes a path string against the given working directory (`cwd`), resolving `.` and `..`.
@@ -434,6 +445,7 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str("  sec                  - Display kernel security mitigations & hardening status\n");
             out.push_str("  ipc                  - Display inter-process communication resources (pipes, shm, unix)\n");
             out.push_str("  threads              - Display active system threads and synchronization states\n");
+            out.push_str("  dmesg                - Display kernel message ring buffer logs\n");
             out.push_str("  gui                  - Launch Desktop Window Manager & Compositor demo (M30)\n");
             out.push_str("  mem                  - Display physical memory manager statistics\n");
             out.push_str("  uptime               - Display system timer ticks\n");
@@ -1015,6 +1027,14 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             }
             (out, 0)
         }
+        "dmesg" => {
+            let logs = crate::drivers::console::get_dmesg();
+            if logs.is_empty() {
+                ("dmesg: no kernel messages logged\n".to_string(), 0)
+            } else {
+                (logs, 0)
+            }
+        }
         "gui" | "wm" => {
             let mut out = String::new();
             if args.first().map(|s| s.as_str()) == Some("--status") {
@@ -1029,9 +1049,12 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
                 } else {
                     out.push_str("Window Manager is not initialized (no GOP framebuffer).\n");
                 }
-            } else {
+            } else if args.first().map(|s| s.as_str()) == Some("--test") {
                 crate::graphics::launch_demo();
-                out.push_str("[GUI] Launched NullOS Desktop Window Manager & Compositor with 3 demo windows!\n");
+                out.push_str("[GUI] Launched demo windows (test mode).\n");
+            } else {
+                crate::graphics::run_compositor();
+                out.push_str("[GUI] Exited Desktop Compositor. Returned to text shell.\n");
             }
             (out, 0)
         }
@@ -1241,6 +1264,61 @@ fn bg_worker_entry() {
             }
         }
     }
+}
+
+/// Executes a command string and captures its output into a String without direct printing.
+pub fn execute_command_capture(line: &str) -> (String, i32) {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return (String::new(), 0);
+    }
+    let expanded = expand_variables(trimmed, LAST_EXIT_CODE.load(Ordering::Relaxed));
+    let raw_stages = split_pipeline(&expanded);
+    if raw_stages.is_empty() {
+        return (String::new(), 0);
+    }
+    let (first_cmd, input_file) = extract_input_redirection(&raw_stages[0]);
+    let initial_input = if let Some(infile) = input_file {
+        let resolved = resolve_path_with_pwd(&infile);
+        match read_file_to_string(&resolved) {
+            Ok(content) => content,
+            Err(e) => return (alloc::format!("nsh: {}: {:?}\n", infile, e), 1),
+        }
+    } else {
+        String::new()
+    };
+    let last_idx = raw_stages.len() - 1;
+    let last_raw = if last_idx == 0 { &first_cmd } else { &raw_stages[last_idx] };
+    let (last_cmd, _output_redir) = extract_output_redirection(last_raw);
+
+    let mut stages = Vec::new();
+    if raw_stages.len() == 1 {
+        stages.push(last_cmd);
+    } else {
+        stages.push(first_cmd);
+        for stage in &raw_stages[1..last_idx] {
+            stages.push(stage.clone());
+        }
+        stages.push(last_cmd);
+    }
+
+    let mut pipe_data = initial_input;
+    let mut last_status = 0;
+    for stage_cmd in stages {
+        let tokens = tokenize(&stage_cmd);
+        if tokens.is_empty() {
+            continue;
+        }
+        let cmd = &tokens[0];
+        let args = &tokens[1..];
+        let (output, status) = execute_stage(cmd, args, &pipe_data);
+        pipe_data = output;
+        last_status = status;
+        if status != 0 {
+            break;
+        }
+    }
+    (pipe_data, last_status)
 }
 
 /// Executes a single command line string, handling background execution (`&`) and pipelines.

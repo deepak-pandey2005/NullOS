@@ -249,15 +249,30 @@ pub fn has_data() -> bool {
     }
 }
 
+/// Reads a byte from port 0x60 and indicates whether it originated from the mouse (true) or keyboard (false).
+pub fn read_port60() -> Option<(bool, u8)> {
+    unsafe {
+        let status = inb(STATUS_PORT);
+        if (status & STATUS_OUTPUT_BUFFER_FULL) != 0 {
+            let is_mouse = (status & 0x20) != 0;
+            let data = inb(DATA_PORT);
+            Some((is_mouse, data))
+        } else {
+            None
+        }
+    }
+}
+
 /// Reads a raw scan code from the PS/2 controller data port, or returns `None`
 /// if no key event is currently waiting.
+#[allow(dead_code)]
 pub fn read_scancode() -> Option<u8> {
-    if has_data() {
-        let code = unsafe { inb(DATA_PORT) };
-        Some(code)
-    } else {
-        None
+    if let Some((is_mouse, byte)) = read_port60() {
+        if !is_mouse {
+            return Some(byte);
+        }
     }
+    None
 }
 
 /// Polls for an available scan code and decodes it into an ASCII character,
@@ -265,12 +280,44 @@ pub fn read_scancode() -> Option<u8> {
 ///
 /// Returns `Some(char)` if a valid ASCII key or control character was pressed.
 pub fn read_char() -> Option<char> {
-    while let Some(scancode) = read_scancode() {
-        if let Some(ch) = KEYBOARD.lock().process_scancode(scancode) {
+    while let Some((is_mouse, byte)) = read_port60() {
+        if is_mouse {
+            let mut mouse = crate::graphics::mouse::MOUSE.lock();
+            let (w, h) = {
+                let wm_lock = crate::graphics::wm::WINDOW_MANAGER.lock();
+                if let Some(ref wm) = *wm_lock {
+                    (wm.screen_width, wm.screen_height)
+                } else {
+                    (1280, 800)
+                }
+            };
+            mouse.process_byte(byte, w, h);
+        } else if let Some(ch) = KEYBOARD.lock().process_scancode(byte) {
             return Some(ch);
         }
     }
     None
+}
+
+/// Enables the PS/2 2nd port (auxiliary mouse device) on the 8042 controller.
+pub fn enable_mouse() {
+    unsafe {
+        wait_for_input_buffer();
+        outb(COMMAND_PORT, 0xA8); // Enable 2nd PS/2 port
+
+        wait_for_input_buffer();
+        outb(COMMAND_PORT, 0xD4); // Route next byte to mouse
+
+        wait_for_input_buffer();
+        outb(DATA_PORT, 0xF4);    // Enable data reporting
+
+        for _ in 0..10_000 {
+            if has_data() {
+                let _ = inb(DATA_PORT);
+                break;
+            }
+        }
+    }
 }
 
 /// Waits until the PS/2 controller input buffer is empty and ready to receive a command.

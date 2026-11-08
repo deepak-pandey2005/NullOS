@@ -70,7 +70,7 @@ pub fn spawn(name: &str, entry: fn(), priority: u8) -> ThreadId {
     let id = thread.id;
 
     if let Some(ref mut sched) = *SCHEDULER.lock() {
-        println!("[TASK] Spawned thread #{} \"{}\" (stack: 16 KiB)", id.0, thread.name);
+        println!("[TASK] Spawned thread #{} \"{}\" (stack: 64 KiB)", id.0, thread.name);
         sched.ready_queue.push_back(thread);
     }
 

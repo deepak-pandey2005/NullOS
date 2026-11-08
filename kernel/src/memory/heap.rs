@@ -10,6 +10,14 @@ use super::paging::PageTableFlags;
 use crate::println;
 use crate::sync::Spinlock;
 use core::alloc::{GlobalAlloc, Layout};
+use core::sync::atomic::{AtomicBool, Ordering};
+
+static HEAP_INITIALIZED: AtomicBool = AtomicBool::new(false);
+
+/// Checks if the kernel heap allocator has completed initialization.
+pub fn is_heap_initialized() -> bool {
+    HEAP_INITIALIZED.load(Ordering::SeqCst)
+}
 
 /// Starting virtual address for the kernel heap.
 pub const HEAP_START: u64 = 0x0000_4444_4444_0000;
@@ -322,6 +330,7 @@ pub fn init() {
     unsafe {
         HEAP_ALLOCATOR.init(HEAP_START as usize, HEAP_SIZE);
     }
+    HEAP_INITIALIZED.store(true, Ordering::SeqCst);
 
     println!(
         "[HEAP] Kernel Heap active at {:#014x} - {:#014x} ({} MiB)",
