@@ -453,6 +453,8 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str("  acpi                 - Display ACPI tables, FADT, DSDT, and power configurations (M33)\n");
             out.push_str("  poweroff / shutdown  - Power off computer via ACPI S5 sleep transition (M33)\n");
             out.push_str("  reboot               - Reboot machine via ACPI RESET_REG, 8042, or PCI (M33)\n");
+            out.push_str("  ldd <path>           - Inspect ELF dynamic library dependencies & relocations (M34)\n");
+            out.push_str("  libs                 - Display loaded dynamic shared libraries & base addresses (M34)\n");
             out.push_str("  test                 - Run comprehensive automated subsystem & shell tests\n");
             out.push_str("  gui                  - Launch Desktop Window Manager & Compositor demo (M30)\n");
             out.push_str("  mem                  - Display physical memory manager statistics\n");
@@ -1235,6 +1237,31 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
         "reboot" => {
             crate::arch::x86_64::acpi::reboot();
         }
+        "ldd" => {
+            if args.is_empty() {
+                return ("Usage: ldd <path>\n".to_string(), 1);
+            }
+            let resolved = resolve_path_with_pwd(&args[0]);
+            match VFS.open(&resolved, OpenFlags::READ_ONLY) {
+                Ok(file) => {
+                    let size = file.stat().size;
+                    let mut elf_bytes = vec![0u8; size];
+                    match file.read_at(0, &mut elf_bytes) {
+                        Ok(n) if n == size => {
+                            let ldd_out = crate::task::dynlink::format_ldd_output(&resolved, &elf_bytes);
+                            (ldd_out, 0)
+                        }
+                        Ok(_) => (alloc::format!("ldd: short read on '{}'\n", resolved), 1),
+                        Err(e) => (alloc::format!("ldd: error reading '{}': {:?}\n", resolved, e), 1),
+                    }
+                }
+                Err(e) => (alloc::format!("ldd: cannot open '{}': {:?}\n", resolved, e), 1),
+            }
+        }
+        "libs" => {
+            let out = crate::task::dynlink::format_loaded_libraries();
+            (out, 0)
+        }
         "exec" => {
             if args.is_empty() {
                 return ("Usage: exec <path>\n".to_string(), 1);
@@ -1735,7 +1762,20 @@ pub fn run_automated_tests() {
     execute_command("acpi");
     crate::arch::x86_64::acpi::run_self_tests();
 
-    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12 & 13 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio and ACPI/Power tests passed successfully!");
+    println!("[SHELL] 26. Testing Dynamic Linking, Shared Libraries (.so) & Runtime Relocations (M34)...");
+    execute_command("libs");
+    crate::task::dynlink::run_self_tests();
+    execute_command("ldd /bin/hello.elf");
+    if VFS.resolve_path("/disk/DYN_HELLO.ELF").is_ok() {
+        execute_command("ldd /disk/DYN_HELLO.ELF");
+    }
+    if VFS.resolve_path("/disk/DYN_TEST.ELF").is_ok() {
+        execute_command("ldd /disk/DYN_TEST.ELF");
+        execute_command("exec /disk/DYN_TEST.ELF");
+    }
+    execute_command("libs");
+
+    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12, 13 & 14 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio, ACPI/Power and Dynamic Linking tests passed successfully!");
 }
 
 /// Interactive Shell Loop that listens on USB Keyboard, PS/2 Keyboard, and COM1 serial input

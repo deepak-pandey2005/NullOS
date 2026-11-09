@@ -42,3 +42,4 @@ pub fn parse_hpet(hpet_phys: u64) -> Result<HpetInfo, &'static str> {
         min_tick: hpet.main_counter_min_clock_tick,
     })
 }
+

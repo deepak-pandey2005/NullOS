@@ -147,3 +147,4 @@ fn parse_aml_integer(bytes: &[u8]) -> (u8, usize) {
         val => (val, 1), // Direct small integer byte
     }
 }
+

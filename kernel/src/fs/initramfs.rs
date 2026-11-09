@@ -385,6 +385,14 @@ impl RamFs {
         );
         self.root.insert_dir("bin", bin);
 
+        // Create /lib directory with libc.so shared library (M34)
+        let lib = Arc::new(RamDirectory::new(0o755));
+        lib.insert_child(
+            "libc.so",
+            Arc::new(RamFile::new(include_bytes!("../../../user/libc/build/libc.so"), 0o755)),
+        );
+        self.root.insert_dir("lib", lib);
+
         // Create /disk and /mnt mountpoint directories for persistent storage
         let disk = Arc::new(RamDirectory::new(0o755));
         self.root.insert_dir("disk", disk);

@@ -38,6 +38,9 @@ pub const SYS_TIMERFD_SETTIME: u64 = 286;
 pub const SYS_TIMERFD_GETTIME: u64 = 287;
 pub const SYS_EVENTFD2: u64 = 290;
 pub const SYS_EPOLL_CREATE1: u64 = 291;
+pub const SYS_DLOPEN: u64 = 300;
+pub const SYS_DLSYM: u64 = 301;
+pub const SYS_DLCLOSE: u64 = 302;
 
 pub const ARCH_SET_GS: u64 = 0x1001;
 pub const ARCH_SET_FS: u64 = 0x1002;
@@ -1088,6 +1091,49 @@ pub extern "C" fn syscall_dispatcher(
                 }
             } else {
                 (-14i64) as u64
+            }
+        }
+        // SYS_DLOPEN (300): Dynamically loads a shared object library (M34).
+        // a1 = const char *path
+        // a2 = int flags
+        SYS_DLOPEN => {
+            let path_ptr = a1 as *const u8;
+            let path = match crate::security::copy_str_from_user(path_ptr, 256) {
+                Ok(p) => p,
+                Err(_) => return 0,
+            };
+
+            match crate::task::dynlink::dlopen(&path) {
+                Ok(handle) => handle,
+                Err(e) => {
+                    println!("[SYSCALL] dlopen(\"{}\") failed: {}", path, e);
+                    0
+                }
+            }
+        }
+        // SYS_DLSYM (301): Resolves symbol address from loaded shared object (M34).
+        // a1 = void *handle
+        // a2 = const char *symbol
+        SYS_DLSYM => {
+            let handle = a1;
+            let sym_ptr = a2 as *const u8;
+            let symbol = match crate::security::copy_str_from_user(sym_ptr, 128) {
+                Ok(s) => s,
+                Err(_) => return 0,
+            };
+
+            match crate::task::dynlink::dlsym(handle, &symbol) {
+                Some(addr) => addr,
+                None => 0,
+            }
+        }
+        // SYS_DLCLOSE (302): Unloads a dynamically loaded library (M34).
+        // a1 = void *handle
+        SYS_DLCLOSE => {
+            let handle = a1;
+            match crate::task::dynlink::dlclose(handle) {
+                Ok(()) => 0,
+                Err(_) => (-1i64) as u64,
             }
         }
         unknown => {

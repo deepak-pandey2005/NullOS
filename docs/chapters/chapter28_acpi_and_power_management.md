@@ -217,3 +217,4 @@ The ACPI subsystem is located in `kernel/src/arch/x86_64/acpi/`:
 - `madt.rs`: Multiple APIC Description Table parser (CPUs and I/O APICs).
 - `power.rs`: System shutdown, reboot, and emulator power controls.
 - `mod.rs`: Centralized ACPI API, system diagnostics, and automated Test Phase 25.
+

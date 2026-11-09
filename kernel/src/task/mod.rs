@@ -5,6 +5,7 @@
 //! - M11: Preemptive Multitasking Round-Robin Scheduler & Sleep Primitives
 #![allow(unused_imports, dead_code)]
 
+pub mod dynlink;
 pub mod elf;
 pub mod event;
 pub mod process;

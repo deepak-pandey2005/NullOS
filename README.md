@@ -520,16 +520,16 @@ scripts\windows\run.bat --headless    # Run automated headless test suite
 # Phase 14 — Dynamic Linking
 
 ### M34 — Dynamic Loader
-- [ ] ELF shared objects
-- [ ] ELF relocations
-- [ ] Symbol resolution
-- [ ] GOT
-- [ ] PLT
-- [ ] Shared libraries
-- [ ] `ld.so`
-- [ ] `dlopen`
-- [ ] `dlsym`
-- [ ] Dynamic libc
+- [x] ELF shared objects
+- [x] ELF relocations
+- [x] Symbol resolution
+- [x] GOT
+- [x] PLT
+- [x] Shared libraries
+- [x] `ld.so`
+- [x] `dlopen`
+- [x] `dlsym`
+- [x] Dynamic libc
 
 ---
 
@@ -714,10 +714,10 @@ sudo ./scripts/create_bootable_usb.sh --device /dev/sdX
 ## Checkpoint 7 — Advanced OS
 - [x] M29
 - [x] M30
-- [ ] M31
-- [ ] M32
-- [ ] M33
-- [ ] M34
+- [x] M31
+- [x] M32
+- [x] M33
+- [x] M34
 
 ## Checkpoint 8 — High-Performance OS
 - [ ] M35

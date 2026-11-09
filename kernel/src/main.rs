@@ -153,6 +153,9 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // Mount Persistent Block Storage Filesystems (Phase 6 - M19 Filesystems)
     fs::mount_block_devices();
 
+    // Initialize Dynamic Linker & Shared Library Subsystem (Phase 14 - M34)
+    task::dynlink::init();
+
     // Initialize VirtIO Network Subsystem (Phase 8 - M23 Network Driver)
     // NOTE: VirtIO network operates in hypervisors. Physical bare metal requires
     // native PCI Ethernet drivers (Intel e1000e / Realtek RTL8168) and DHCP.

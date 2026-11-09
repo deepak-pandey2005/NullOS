@@ -269,3 +269,13 @@ Welcome to the comprehensive textbook documentation for **NullOS**. This curricu
 - System power primitives: Full software-directed shutdown via ACPI S5 sleep transitions with emulator fallbacks (ports `0x604` and `0xB004`).
 - Cascading reboot sequence: ACPI `RESET_REG`, 8042 keyboard controller pulse line (`0xFE`), PCI reset (`0xCF9`), and CPU Triple Fault fallback.
 - Interactive shell diagnostics: `acpi`, `poweroff` / `shutdown`, and `reboot` commands, with automated Test Phase 25.
+
+### [Chapter 29: Dynamic Linking, Shared Libraries & Runtime Relocations](chapter29_dynamic_linking_and_shared_libraries.md)
+- Static vs. dynamic linking: Code duplication, physical memory conservation, runtime security patching, and plugin extensibility.
+- ELF64 shared object geometry: `ET_DYN` object type, Position-Independent Code (`-fPIC`), and `PT_DYNAMIC` program headers.
+- Dynamic segment tags: `DT_NEEDED` library dependencies, string tables (`DT_STRTAB`), symbol tables (`DT_SYMTAB`), and relocation arrays (`DT_RELA`).
+- Position-Independent Code mechanisms: Global Offset Table (GOT) data indirection and Procedure Linkage Table (PLT) function call stubs.
+- AMD64 relocations: `R_X86_64_RELATIVE` base adjustments, `R_X86_64_GLOB_DAT` global offsets, `R_X86_64_JUMP_SLOT` PLT targets, and `R_X86_64_64` absolute addressing.
+- Dynamic symbol lookup & runtime linking: POSIX C runtime `<dlfcn.h>` interface (`dlopen`, `dlsym`, `dlclose`, `dlerror`).
+- In-kernel dynamic binary loader: Dependency graph resolution, memory mapping, symbol binding, and executing dynamically linked binaries.
+- Shell diagnostics: `ldd <path>` dependency tree inspector, `libs` shared library manager, and automated Test Phase 26.

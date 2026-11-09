@@ -83,5 +83,17 @@ if [ -f "${ROOT_DIR}/user/build/bin/async_test.elf" ]; then
     mcopy -o -i "${DATA_DISK_IMG}" "${ROOT_DIR}/user/build/bin/async_test.elf" ::ASYNC.ELF
     echo "==> Copied ASYNC.ELF to FAT32 data disk."
 fi
+if [ -f "${ROOT_DIR}/user/libc/build/libc.so" ]; then
+    mcopy -o -i "${DATA_DISK_IMG}" "${ROOT_DIR}/user/libc/build/libc.so" ::LIBC.SO
+    echo "==> Copied LIBC.SO to FAT32 data disk."
+fi
+if [ -f "${ROOT_DIR}/user/build/bin/dyn_test.elf" ]; then
+    mcopy -o -i "${DATA_DISK_IMG}" "${ROOT_DIR}/user/build/bin/dyn_test.elf" ::DYN_TEST.ELF
+    echo "==> Copied DYN_TEST.ELF to FAT32 data disk."
+fi
+if [ -f "${ROOT_DIR}/user/build/bin/dyn_hello.elf" ]; then
+    mcopy -o -i "${DATA_DISK_IMG}" "${ROOT_DIR}/user/build/bin/dyn_hello.elf" ::DYN_HELLO.ELF
+    echo "==> Copied DYN_HELLO.ELF to FAT32 data disk."
+fi
 
 
