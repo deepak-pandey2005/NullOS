@@ -248,3 +248,14 @@ Welcome to the comprehensive textbook documentation for **NullOS**. This curricu
 - USB Standard Descriptors: Binary parsing of Device (18B), Configuration (9B), Interface (9B), Endpoint (7B), and HID (9B) descriptors over Control transfer pipes.
 - USB HID Class Subsystem: Boot Protocol report decoders for 8-byte Keyboard reports (modifiers + 6-key rollover) and 3/4-byte Mouse reports (buttons + relative coordinate deltas).
 - Integration with Desktop Window Manager (`INPUT_QUEUE`) and interactive shell (`usb` / `lsusb` commands and Test 23).
+
+### [Chapter 27: Intel High Definition Audio (HDA) & Sound Subsystems](chapter27_intel_hda_and_sound_subsystems.md)
+- Audio evolution: Legacy PC speaker, AC'97 limitations, and modern Intel High Definition Audio (Azalia) architecture.
+- PCI discovery: Multimedia Audio Controller Class `0x04`, Subclass `0x03`, 64-bit BAR0 MMIO mapping (No-Cache, NX), and Bus Mastering.
+- Hardware state machines: Global Controller Reset (`GCTL.CRST`) sequence, link clock synchronization, and codec state detection (`STATESTS`).
+- Command & control protocols: Immediate Command Interface (ICW/IRR/ICS) and circular DMA rings (Command Outbound Ring Buffer - CORB, Response Inbound Ring Buffer - RIRB).
+- 32-bit HDA Verbs: Verb encoding (`cad`, `nid`, 12-bit verb, 8-bit parameter), parameter discovery (`0xF00`), and widget tree traversal (Audio Function Groups, DACs, Pin Complexes).
+- Pin Widget and Converter configuration: Audio Output DAC format programming (44.1 kHz 16-bit Stereo), Stream/Channel binding, Pin Control (Headphone / Line-out enable), and Amplifier gain/unmute (`0x300`).
+- Stream Descriptor DMA engines: Buffer Descriptor List (BDL) cyclic ping-pong double buffers (Buffer A / Buffer B), cyclic buffer length (`CBL`), and Last Valid Index (`LVI`).
+- Linear PCM Synthesizer: 256-point fixed-point sine lookup table, procedural pure sine tone generation, and dual-frequency startup chime chords ($C_5 \rightarrow G_5$).
+- Shell audio diagnostics: `audio` / `sndstat`, `beep`, and `play <freq> [duration]` interactive commands and Test 24 automated verification suite.

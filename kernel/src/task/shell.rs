@@ -447,6 +447,9 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str("  threads              - Display active system threads and synchronization states\n");
             out.push_str("  dmesg                - Display kernel message ring buffer logs\n");
             out.push_str("  usb / lsusb          - List enumerated USB controllers and devices (M31)\n");
+            out.push_str("  audio / sndstat      - Display Intel HD Audio controller status and codecs (M32)\n");
+            out.push_str("  beep                 - Play musical startup chime (M32)\n");
+            out.push_str("  play <freq> [ms]     - Play a procedural sine wave tone at frequency (M32)\n");
             out.push_str("  test                 - Run comprehensive automated subsystem & shell tests\n");
             out.push_str("  gui                  - Launch Desktop Window Manager & Compositor demo (M30)\n");
             out.push_str("  mem                  - Display physical memory manager statistics\n");
@@ -916,6 +919,46 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
                 }
             }
             (out, 0)
+        }
+        "audio" | "sndstat" => {
+            let mut out = String::new();
+            match crate::drivers::audio::get_status() {
+                Some(status) => {
+                    out.push_str("Intel High Definition Audio (HDA) Subsystem Status:\n");
+                    out.push_str(&alloc::format!("  Specification:   HDA {}.{}\n", status.spec_version_major, status.spec_version_minor));
+                    out.push_str(&alloc::format!("  Streams:         {} Output, {} Input\n", status.output_streams, status.input_streams));
+                    out.push_str(&alloc::format!("  Codecs:          {} detected\n", status.codec_count));
+                    out.push_str(&alloc::format!("  Active Routing:  DAC Node {}, Pin Node {}\n", status.active_dac_nid, status.active_pin_nid));
+                    out.push_str(&alloc::format!("  PCM Format:      {} Hz, 16-bit Stereo\n", status.sample_rate));
+                    out.push_str(&alloc::format!("  DMA State:       {}\n", if status.is_playing { "PLAYING" } else { "IDLE" }));
+                }
+                None => {
+                    out.push_str("No Intel HD Audio controller detected.\n");
+                }
+            }
+            (out, 0)
+        }
+        "beep" => {
+            match crate::drivers::audio::beep() {
+                Ok(_) => ("Playing startup chime...\n".to_string(), 0),
+                Err(e) => (alloc::format!("beep error: {}\n", e), 1),
+            }
+        }
+        "play" => {
+            let freq: u32 = if !args.is_empty() {
+                args[0].parse().unwrap_or(440)
+            } else {
+                440
+            };
+            let duration: u32 = if args.len() > 1 {
+                args[1].parse().unwrap_or(300)
+            } else {
+                300
+            };
+            match crate::drivers::audio::play_tone(freq, duration) {
+                Ok(_) => (alloc::format!("Playing {} Hz tone for {} ms...\n", freq, duration), 0),
+                Err(e) => (alloc::format!("play error: {}\n", e), 1),
+            }
         }
         "disks" => {
             let devices = crate::drivers::block::BLOCK_DEVICES.lock();
@@ -1619,7 +1662,12 @@ pub fn run_automated_tests() {
     execute_command("usb");
     crate::drivers::usb::run_self_tests();
 
-    println!("[SHELL] All Phase 7, 8, 9, 10, 11 & 12 Shell, Network, SMP, Security, IPC, Threads, Async and Graphics tests passed successfully!");
+    println!("[SHELL] 24. Testing Intel HD Audio (HDA) Subsystem & PCM Synthesizer (M32)...");
+    execute_command("audio");
+    execute_command("beep");
+    crate::drivers::audio::run_self_tests();
+
+    println!("[SHELL] All Phase 7, 8, 9, 10, 11 & 12 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics and Audio tests passed successfully!");
 }
 
 /// Interactive Shell Loop that listens on USB Keyboard, PS/2 Keyboard, and COM1 serial input

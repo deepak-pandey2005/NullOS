@@ -1,3 +1,4 @@
+pub mod audio;
 pub mod block;
 pub mod console;
 pub mod keyboard;

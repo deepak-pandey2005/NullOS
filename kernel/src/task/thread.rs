@@ -136,19 +136,19 @@ impl Thread {
                 *ptr = val;
             };
 
-            // 1. Thread entry point (popped 8th by `ret` in switch_threads)
+            // 1. Thread entry point (popped by `ret` in switch_threads)
             push(&mut sp, thread_entry_wrapper as *const () as usize as u64);
 
-            // 2. Callee-saved registers
+            // 2. Initial RFLAGS (popped by `popfq` in switch_threads)
+            push(&mut sp, 0x202); // RFLAGS with IF enabled
+
+            // 3. Callee-saved registers (popped in order %rbp..%r15)
             push(&mut sp, 0); // %r15
             push(&mut sp, 0); // %r14
             push(&mut sp, 0); // %r13
             push(&mut sp, entry as *const () as usize as u64); // %r12
             push(&mut sp, 0); // %rbx
             push(&mut sp, 0); // %rbp
-
-            // 3. Initial RFLAGS
-            push(&mut sp, 0x202); // RFLAGS with IF enabled
         }
 
         Self {
@@ -191,16 +191,16 @@ impl Thread {
             // 1. Thread entry point
             push(&mut sp, user_thread_wrapper as *const () as usize as u64);
 
-            // 2. Callee-saved registers
+            // 2. Initial RFLAGS
+            push(&mut sp, 0x202);
+
+            // 3. Callee-saved registers
             push(&mut sp, tls_base);   // %r15
             push(&mut sp, arg);        // %r14
             push(&mut sp, user_stack); // %r13
             push(&mut sp, entry);      // %r12
             push(&mut sp, 0);          // %rbx
             push(&mut sp, 0);          // %rbp
-
-            // 3. Initial RFLAGS
-            push(&mut sp, 0x202);
         }
 
         Self {

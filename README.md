@@ -491,12 +491,12 @@ scripts\windows\run.bat --headless    # Run automated headless test suite
 - [x] Input subsystem
 
 ### M32 — Audio
-- [ ] HDA controller
-- [ ] Codec discovery
-- [ ] PCM
-- [ ] Audio buffers
-- [ ] Basic playback
-- [ ] Audio API
+- [x] HDA controller
+- [x] Codec discovery
+- [x] PCM
+- [x] Audio buffers
+- [x] Basic playback
+- [x] Audio API
 
 ---
 

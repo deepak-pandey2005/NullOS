@@ -13,24 +13,25 @@
 .type switch_threads, @function
 
 switch_threads:
-    # 1. Save callee-preserved registers and CPU flags on the old stack
+    # 1. Save CPU flags and immediately disable interrupts to ensure atomic saving
+    pushfq
+    cli
+
+    # 2. Save callee-preserved registers on the old stack
     push %r15
     push %r14
     push %r13
     push %r12
     push %rbx
     push %rbp
-    pushfq
-    cli
 
-    # 2. Save current %rsp into *prev_rsp_ptr
+    # 3. Save current %rsp into *prev_rsp_ptr
     mov %rsp, (%rdi)
 
-    # 3. Switch CPU stack pointer to next thread's %rsp
+    # 4. Switch CPU stack pointer to next thread's %rsp
     mov %rsi, %rsp
 
-    # 4. Restore CPU flags and registers from the new thread's stack
-    popfq
+    # 5. Restore callee-preserved registers from the new thread's stack
     pop %rbp
     pop %rbx
     pop %r12
@@ -38,5 +39,9 @@ switch_threads:
     pop %r14
     pop %r15
 
-    # 5. Return into the new thread (pops %rip from stack)
+    # 6. Sanitize and restore CPU flags (clear Trap Flag 0x100 and Nested Task 0x4000)
+    andq $~0x4100, (%rsp)
+    popfq
+
+    # 7. Return into the new thread (pops %rip from stack)
     ret
