@@ -1,8 +1,29 @@
-//! Kernel Dynamic Heap Allocator (Phase 3 - M9).
+//! # Kernel Dynamic Heap Allocator
 //!
-//! Provides `GlobalAlloc` implementation for `#![no_std]` Rust, enabling
-//! standard collection types (`Box`, `Vec`, `String`) via `extern crate alloc;`.
-//! Includes Bump Allocator, Coalescing Linked-List Allocator, and Heap Statistics.
+//! ## Architecture Overview
+//! The NullOS dynamic heap implements the standard Rust [`core::alloc::GlobalAlloc`] interface,
+//! unlocking the entire Rust standard allocation library (`extern crate alloc;`) in a `#![no_std]`
+//! environment. This enables dynamic data structures across all kernel subsystems:
+//! - [`alloc::boxed::Box`] for heap-allocated trait objects and isolated structures.
+//! - [`alloc::vec::Vec`] for dynamic arrays (e.g. process lists, file descriptors, packet queues).
+//! - [`alloc::string::String`] and [`alloc::format!`] for dynamic string manipulation.
+//! - [`alloc::sync::Arc`] for atomically reference-counted shared structures.
+//!
+//! ## Implementation Design: Intrusive Linked-List Allocator
+//! The heap is managed by [`LinkedListAllocator`] wrapped in a thread-safe [`LockedHeap`] spinlock:
+//! 1. **Intrusive Free List**: Unallocated blocks store a [`ListNode`] header directly within
+//!    their own memory bounds, consuming zero external heap tracking metadata.
+//! 2. **First-Fit Allocation**: Traverses the free list to find the first node capable of
+//!    satisfying both size and alignment constraints. If excess memory remains after alignment
+//!    and allocation, the remainder is carved into a new smaller free node.
+//! 3. **Dynamic On-Demand Expansion**:
+//!    When an allocation request cannot be satisfied by the current free list, the allocator
+//!    automatically invokes [`LinkedListAllocator::expand_heap`], which:
+//!    - Allocates new physical frames from the Physical Memory Manager (PMM).
+//!    - Maps them to virtual pages starting immediately at `heap_end`.
+//!    - Adds the newly mapped range to the intrusive free list.
+//!    - Retries the allocation seamlessly.
+
 #![allow(dead_code)]
 
 use super::address::{Page, PhysAddr, PhysFrame, VirtAddr, PAGE_SIZE_4K};
@@ -19,7 +40,7 @@ pub fn is_heap_initialized() -> bool {
     HEAP_INITIALIZED.load(Ordering::SeqCst)
 }
 
-/// Starting virtual address for the kernel heap.
+/// Starting virtual address for the kernel heap (0x0000_4444_4444_0000).
 pub const HEAP_START: u64 = 0x0000_4444_4444_0000;
 /// Initial size of the kernel heap (1 MiB = 256 pages).
 pub const HEAP_SIZE: usize = 1024 * 1024;
@@ -27,13 +48,18 @@ pub const HEAP_SIZE: usize = 1024 * 1024;
 /// Heap usage and allocation statistics.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct HeapStats {
+    /// Total virtual heap capacity in bytes (initial capacity + all dynamic expansions).
     pub total_bytes: usize,
+    /// Cumulative bytes allocated since boot.
     pub allocated_bytes: usize,
+    /// Cumulative bytes freed since boot.
     pub freed_bytes: usize,
+    /// Current count of active, un-freed heap allocations.
     pub active_allocations: usize,
 }
 
 impl HeapStats {
+    /// Returns current active heap memory usage in bytes (`allocated_bytes - freed_bytes`).
     #[inline]
     pub fn current_usage(&self) -> usize {
         self.allocated_bytes.saturating_sub(self.freed_bytes)
@@ -44,6 +70,7 @@ impl HeapStats {
 // 1. Linked-List Block Node
 // ---------------------------------------------------------------------------
 
+/// Intrusive header embedded directly inside every unallocated free memory block.
 struct ListNode {
     size: usize,
     next: Option<&'static mut ListNode>,
@@ -67,6 +94,7 @@ impl ListNode {
 // 2. Coalescing Linked-List Allocator
 // ---------------------------------------------------------------------------
 
+/// A First-Fit Intrusive Linked-List Allocator supporting dynamic heap expansion.
 pub struct LinkedListAllocator {
     head: ListNode,
     stats: HeapStats,
@@ -74,6 +102,7 @@ pub struct LinkedListAllocator {
 }
 
 impl LinkedListAllocator {
+    /// Constructs an uninitialized linked list allocator.
     pub const fn new() -> Self {
         Self {
             head: ListNode::new(0),
@@ -87,7 +116,11 @@ impl LinkedListAllocator {
         }
     }
 
-    /// Initializes the allocator with a memory region.
+    /// Initializes the allocator with an initial virtual memory region.
+    ///
+    /// # Safety
+    /// The memory region `[heap_start, heap_start + heap_size)` must be mapped
+    /// and reserved exclusively for heap usage.
     pub unsafe fn init(&mut self, heap_start: usize, heap_size: usize) {
         self.stats.total_bytes = heap_size;
         self.heap_end = heap_start + heap_size;
@@ -97,6 +130,9 @@ impl LinkedListAllocator {
     }
 
     /// Dynamically expands the heap by allocating more physical frames and mapping new virtual pages.
+    ///
+    /// # Parameters
+    /// - `required_size`: Minimum byte capacity needed to fulfill the pending allocation.
     pub fn expand_heap(&mut self, required_size: usize) -> Result<(), ()> {
         let chunk_size = align_up(required_size.max(128 * 1024), PAGE_SIZE_4K as usize);
         let pages = chunk_size / (PAGE_SIZE_4K as usize);
@@ -126,7 +162,7 @@ impl LinkedListAllocator {
         Ok(())
     }
 
-    /// Adds a freed region back into the list, merging with adjacent regions.
+    /// Adds a freed region back into the intrusive free list.
     unsafe fn add_free_region(&mut self, addr: usize, size: usize) {
         // Alignment verification
         assert_eq!(
@@ -160,6 +196,7 @@ impl LinkedListAllocator {
         None
     }
 
+    /// Computes whether `region` can house `size` bytes with `align` alignment.
     fn alloc_from_region(region: &ListNode, size: usize, align: usize) -> Result<usize, ()> {
         let alloc_start = align_up(region.start_address(), align);
         let alloc_end = alloc_start.checked_add(size).ok_or(())?;
@@ -176,6 +213,7 @@ impl LinkedListAllocator {
         Ok(alloc_start)
     }
 
+    /// Allocates memory for the given `Layout` using first-fit search, expanding the heap if needed.
     pub fn allocate_first_fit(&mut self, layout: Layout) -> Result<*mut u8, ()> {
         let (size, align) = Self::size_align(layout);
 
@@ -214,6 +252,7 @@ impl LinkedListAllocator {
         }
     }
 
+    /// Deallocates an active heap allocation, returning its bytes to the free list.
     pub fn deallocate_first_fit(&mut self, ptr: *mut u8, layout: Layout) {
         let (size, _) = Self::size_align(layout);
         unsafe {
@@ -223,6 +262,7 @@ impl LinkedListAllocator {
         self.stats.active_allocations = self.stats.active_allocations.saturating_sub(1);
     }
 
+    /// Normalizes layout size and alignment to ensure free node headers can always fit.
     fn size_align(layout: Layout) -> (usize, usize) {
         let layout = layout
             .align_to(core::mem::align_of::<ListNode>())
@@ -232,6 +272,7 @@ impl LinkedListAllocator {
         (size, layout.align())
     }
 
+    /// Returns a copy of current heap statistics.
     pub fn stats(&self) -> HeapStats {
         self.stats
     }
@@ -241,23 +282,27 @@ impl LinkedListAllocator {
 // 3. Global Heap Wrapper & GlobalAlloc Implementation
 // ---------------------------------------------------------------------------
 
+/// Thread-safe wrapper around [`LinkedListAllocator`] protected by a Spinlock.
 pub struct LockedHeap {
     inner: Spinlock<LinkedListAllocator>,
 }
 
 impl LockedHeap {
+    /// Creates a new locked heap wrapper.
     pub const fn new() -> Self {
         Self {
             inner: Spinlock::new(LinkedListAllocator::new()),
         }
     }
 
+    /// Initializes the underlying allocator with the given memory range.
     pub unsafe fn init(&self, heap_start: usize, heap_size: usize) {
         unsafe {
             self.inner.lock().init(heap_start, heap_size);
         }
     }
 
+    /// Retrieves current heap statistics.
     pub fn stats(&self) -> HeapStats {
         self.inner.lock().stats()
     }

@@ -1,28 +1,66 @@
-//! UEFI Memory Map parser, descriptors, and iterator.
+//! # UEFI Memory Map Parser, Descriptors, and Iterator
+//!
+//! ## Overview
+//! When the bootloader invokes `ExitBootServices()`, UEFI firmware generates a contiguous
+//! snapshot of the system's physical memory layout: the **UEFI Memory Map**.
+//!
+//! The buffer contains an array of variable-stride [`MemoryDescriptor`] records.
+//! Because firmware implementations may add OEM-specific fields to descriptors beyond the
+//! standard 40 or 48 bytes, the kernel must iterate using the firmware-specified `descriptor_size`
+//! rather than `core::mem::size_of::<MemoryDescriptor>()`.
+//!
+//! ## Key UEFI Memory Classifications
+//! - **`Conventional` (Type 7)**: Standard usable RAM available for operating system allocation.
+//! - **`BootServicesCode` / `BootServicesData` (Types 3, 4)**: Memory allocated for UEFI bootloader
+//!   execution. Once `ExitBootServices()` completes, these regions can be safely reclaimed.
+//! - **`RuntimeServicesCode` / `RuntimeServicesData` (Types 5, 6)**: Firmware code/data required
+//!   for UEFI runtime services calls (e.g. NVRAM variables, RTC time). Must be preserved.
+//! - **`AcpiReclaim` (Type 9)**: ACPI tables (RSDT, XSDT, MADT, FADT). Can be reclaimed after
+//!   the OS finishes copying or parsing all ACPI data.
+//! - **`AcpiNvs` (Type 10)**: Non-volatile storage reserved by firmware. Must never be touched.
+//! - **`Mmio` / `MmioPortSpace` (Types 11, 12)**: Memory-mapped hardware registers (Local APIC,
+//!   I/O APIC, PCIe ECAM, GPU framebuffers).
+
 #![allow(dead_code)]
 
 use bootinfo::MemoryMapInfo;
 use crate::println;
 
-/// Standard UEFI Memory Types per the UEFI Specification.
+/// Standard UEFI Memory Types per Section 7.2 of the UEFI Specification.
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UefiMemoryType {
+    /// Not usable by firmware or OS.
     Reserved = 0,
+    /// Loaded UEFI application code.
     LoaderCode = 1,
+    /// Data structures allocated by UEFI loaders.
     LoaderData = 2,
+    /// Code used by UEFI Boot Services (reclaimable after ExitBootServices).
     BootServicesCode = 3,
+    /// Data used by UEFI Boot Services (reclaimable after ExitBootServices).
     BootServicesData = 4,
+    /// Code used by UEFI Runtime Services (must be identity-mapped for runtime calls).
     RuntimeServicesCode = 5,
+    /// Data used by UEFI Runtime Services.
     RuntimeServicesData = 6,
+    /// Free, unallocated conventional system RAM.
     Conventional = 7,
+    /// Memory containing persistent hardware errors.
     Unusable = 8,
+    /// ACPI tables; reclaimable after ACPI parsing completes.
     AcpiReclaim = 9,
+    /// ACPI non-volatile firmware memory.
     AcpiNvs = 10,
+    /// Memory-mapped hardware I/O address space.
     Mmio = 11,
+    /// System I/O port address space mapped to physical memory.
     MmioPortSpace = 12,
+    /// Processor Auto-Configuration (Itanium/legacy).
     PalCode = 13,
+    /// Byte-addressable persistent non-volatile RAM.
     PersistentMemory = 14,
+    /// Unrecognized future or vendor-specific memory type.
     Unknown(u32),
 }
 
@@ -50,6 +88,7 @@ impl From<u32> for UefiMemoryType {
 }
 
 impl UefiMemoryType {
+    /// Returns human-readable name of the memory type.
     pub const fn name(&self) -> &'static str {
         match self {
             Self::Reserved => "Reserved",
@@ -88,31 +127,42 @@ impl UefiMemoryType {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct MemoryDescriptor {
+    /// Type of the memory region ([`UefiMemoryType`]).
     pub ty: u32,
+    /// Physical starting address of the memory range.
     pub phys_start: u64,
+    /// Virtual starting address assigned by UEFI firmware (if mapped).
     pub virt_start: u64,
+    /// Number of 4096-byte (4 KiB) pages in the region.
     pub page_count: u64,
+    /// Memory attributes (e.g. UC, WC, WT, WB, WP, RP, XP, NV).
     pub attribute: u64,
 }
 
 impl MemoryDescriptor {
+    /// Returns the parsed [`UefiMemoryType`] of this descriptor.
     #[inline]
     pub fn memory_type(&self) -> UefiMemoryType {
         UefiMemoryType::from(self.ty)
     }
 
+    /// Returns the total size of this memory region in bytes (`page_count * 4096`).
     #[inline]
     pub fn size_in_bytes(&self) -> u64 {
         self.page_count * 4096
     }
 
+    /// Returns the non-inclusive physical end address of this region.
     #[inline]
     pub fn phys_end(&self) -> u64 {
         self.phys_start + self.size_in_bytes()
     }
 }
 
-/// An iterator yielding each `MemoryDescriptor` from the raw `MemoryMapInfo` buffer.
+/// An iterator yielding each [`MemoryDescriptor`] from the raw `MemoryMapInfo` buffer.
+///
+/// Accounts for variable descriptor strides (`descriptor_size`) emitted by different
+/// UEFI firmware implementations.
 pub struct MemoryMapIterator<'a> {
     mmap: &'a MemoryMapInfo,
     index: usize,
@@ -120,6 +170,7 @@ pub struct MemoryMapIterator<'a> {
 }
 
 impl<'a> MemoryMapIterator<'a> {
+    /// Creates a new iterator over the given UEFI memory map metadata.
     pub fn new(mmap: &'a MemoryMapInfo) -> Self {
         let entry_count = if mmap.descriptor_size > 0 {
             mmap.size / mmap.descriptor_size
@@ -150,6 +201,9 @@ impl<'a> Iterator for MemoryMapIterator<'a> {
 }
 
 /// Print formatted memory map entries for debugging and architectural verification.
+///
+/// # Parameters
+/// - `mmap`: Reference to the bootloader memory map buffer metadata.
 pub fn print_memory_map(mmap: &MemoryMapInfo) {
     let entry_count = if mmap.descriptor_size > 0 {
         mmap.size / mmap.descriptor_size

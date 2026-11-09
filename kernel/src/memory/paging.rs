@@ -1,7 +1,31 @@
-//! Virtual Memory Management (VMM) and 4-Level x86_64 Paging.
+//! # Virtual Memory Management (VMM) and 4-Level x86_64 Paging
 //!
-//! Handles PML4, PDPT, PD, and PT structures, page table entry flags,
-//! address translation, page mapping/unmapping, recursive mapping, and CR3 management.
+//! ## 4-Level Translation Architecture
+//! Under standard x86_64 long mode, 48-bit canonical virtual addresses are translated
+//! into 52-bit physical addresses across 4 hierarchical table levels:
+//!
+//! ```text
+//! 63        48 47     39 38     30 29     21 20     12 11          0
+//! +-----------+---------+---------+---------+---------+------------+
+//! | Sign Ext  |  PML4   |  PDPT   |   PD    |   PT    | 4K Offset  |
+//! | (16 bits) | (9 bits)| (9 bits)| (9 bits)| (9 bits)| (12 bits)  |
+//! +-----------+---------+---------+---------+---------+------------+
+//!       |          |         |         |         |          |
+//!      CR3 -> PML4[idx] -> PDPT[idx] -> PD[idx] -> PT[idx] -> PhysFrame + Offset
+//! ```
+//! - **PML4 (Page Map Level 4)**: 512 entries, each governing a 512 GiB address window.
+//! - **PDPT (Page Directory Pointer Table)**: 512 entries, each governing a 1 GiB window.
+//! - **PD (Page Directory)**: 512 entries, each governing a 2 MiB window.
+//! - **PT (Page Table)**: 512 entries, each mapping a single 4096-byte (4 KiB) physical frame.
+//!
+//! ## Recursive Page Table Mapping
+//! To enable the kernel to read and modify arbitrary page table entries without mapping the entire
+//! physical RAM, NullOS maps the 511th entry of the PML4 back to the PML4 frame itself.
+//! This allows reaching any page table level through reserved high-memory virtual addresses:
+//! - PML4: `0xFFFF_FFFF_FFFF_F000`
+//! - PDPTs: `0xFFFF_FFFF_FFE0_0000`
+//! - PDs: `0xFFFF_FFFF_C000_0000`
+//! - PTs: `0xFFFF_FF80_0000_0000`
 //!
 //! TODO(memory): Implement Copy-on-Write (CoW) page fault handling:
 //! - Utilize software-available bits in PageTableEntry (e.g. bit 9 `COW_FLAG` or bit 10).
@@ -20,6 +44,7 @@
 //! TODO(memory): Implement Swap Backing Store:
 //! - Support paging cold anonymous memory to disk/swap partition when physical memory is exhausted.
 //! - Use non-present PTE bit patterns (present=0, swap_slot identifier) to restore swapped-out frames.
+
 #![allow(dead_code)]
 
 use super::address::{Page, PhysAddr, PhysFrame, VirtAddr, PAGE_SIZE_4K};
@@ -27,32 +52,45 @@ use crate::println;
 use bootinfo::BootInfo;
 use core::ops::{Index, IndexMut};
 
-/// Flags for x86_64 Page Table Entries.
+/// Architectural control and permission flags for x86_64 Page Table Entries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PageTableFlags(pub u64);
 
 impl PageTableFlags {
+    /// Bit 0: Page is present in physical memory.
     pub const PRESENT: Self = Self(1 << 0);
+    /// Bit 1: Page is writable (read/write if set, read-only if clear).
     pub const WRITABLE: Self = Self(1 << 1);
+    /// Bit 2: Page is accessible from Ring 3 (user mode).
     pub const USER_ACCESSIBLE: Self = Self(1 << 2);
+    /// Bit 3: Write-Through caching policy enabled.
     pub const WRITE_THROUGH: Self = Self(1 << 3);
+    /// Bit 4: Cache Disable (uncached MMIO access).
     pub const NO_CACHE: Self = Self(1 << 4);
+    /// Bit 5: Accessed bit set by CPU upon read/write access.
     pub const ACCESSED: Self = Self(1 << 5);
+    /// Bit 6: Dirty bit set by CPU upon write access.
     pub const DIRTY: Self = Self(1 << 6);
+    /// Bit 7: Huge Page (2 MiB in PD, 1 GiB in PDPT).
     pub const HUGE_PAGE: Self = Self(1 << 7);
+    /// Bit 8: Global page (not flushed from TLB across CR3 reloads if CR4.PGE=1).
     pub const GLOBAL: Self = Self(1 << 8);
+    /// Bit 63: No-Execute bit (instruction fetches trigger `#PF` if IA32_EFER.NXE=1).
     pub const NO_EXECUTE: Self = Self(1 << 63);
 
+    /// Creates an empty flags bitfield (value 0).
     #[inline]
     pub const fn empty() -> Self {
         Self(0)
     }
 
+    /// Checks if all bits in `other` are set in this bitfield.
     #[inline]
     pub const fn contains(&self, other: Self) -> bool {
         (self.0 & other.0) == other.0
     }
 
+    /// Returns the underlying raw 64-bit integer bitfield.
     #[inline]
     pub const fn bits(&self) -> u64 {
         self.0

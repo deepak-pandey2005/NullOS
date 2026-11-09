@@ -1,7 +1,26 @@
-/// COM1 serial port driver for kernel debug output.
-///
-/// Provides low-level byte-oriented serial I/O and `core::fmt::Write`-based
-/// `print!` / `println!` macros for formatted kernel output over COM1 (0x3F8).
+//! # 16550 UART COM1 Serial Port Driver
+//!
+//! ## Overview
+//! The 16550 Universal Asynchronous Receiver-Transmitter (UART) is the primary serial interface
+//! used by NullOS for low-level kernel diagnostics, automated headless CI test outputs, and panic traces.
+//!
+//! ## Register Layout (Standard Base Port 0x3F8):
+//! - `0x3F8` (DLAB=0): Receiver Buffer Register (RBR, read) / Transmitter Holding Register (THR, write).
+//! - `0x3F8` (DLAB=1): Divisor Latch Low Byte (DLL).
+//! - `0x3F9` (DLAB=1): Divisor Latch High Byte (DLH).
+//! - `0x3F9` (DLAB=0): Interrupt Enable Register (IER).
+//! - `0x3FA`: FIFO Control Register (FCR, write) / Interrupt Identification Register (IIR, read).
+//! - `0x3FB`: Line Control Register (LCR). Bit 7 enables Divisor Latch Access (DLAB).
+//! - `0x3FC`: Modem Control Register (MCR). Controls RTS, DTR, and OUT2 interrupt routing.
+//! - `0x3FD`: Line Status Register (LSR).
+//!   - Bit 0: Data Ready (`DR = 0x01`). Set when unread bytes exist in receive FIFO.
+//!   - Bit 5: Transmitter Holding Register Empty (`THRE = 0x20`). Set when ready to accept bytes.
+//!
+//! ## Configuration:
+//! - **Baud Rate**: 115,200 baud (Divisor = $\frac{115200}{115200} = 1$).
+//! - **Framing**: 8-N-1 (8 data bits, No parity, 1 stop bit; LCR = `0x03`).
+//! - **FIFO**: 14-byte interrupt trigger threshold, TX/RX FIFO reset (FCR = `0xC7`).
+//! - **Modem**: Asserts OUT2, RTS, and DTR lines (MCR = `0x0B`).
 
 use core::fmt;
 

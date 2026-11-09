@@ -1,22 +1,59 @@
-//! PCI (Peripheral Component Interconnect) Bus Subsystem (Phase 6 - M17 PCI).
+//! # PCI (Peripheral Component Interconnect) Bus Subsystem
 //!
-//! Subsystem features:
-//! - PCI Configuration Space access via 0xCF8 / 0xCFC I/O ports.
-//! - Complete PCI Bus scanning & enumeration across 256 buses, 32 devices, 8 functions.
-//! - Vendor ID, Device ID, and Class/Subclass decoding.
-//! - Base Address Register (BAR) probing: 32-bit MMIO, 64-bit MMIO, and Port I/O sizing.
-//! - Device Control: Bus Mastering, Memory Space, and I/O Space enabling.
-//! - Capabilities List discovery (MSI, MSI-X, PCIe, Power Management).
-//! - Global thread-safe PCI Device Registry.
+//! This module provides a complete, modern PCI bus driver adhering to the PCI Local Bus
+//! Specification Revision 3.0. It implements PCI Configuration Mechanism #1, full bus
+//! hierarchy scanning, Base Address Register (BAR) probing and decoding (32-bit MMIO,
+//! 64-bit MMIO, and Port I/O), PCI Capability List discovery (MSI, MSI-X, PCIe, Power Management),
+//! bus mastering and memory/IO space activation, and a thread-safe device registry.
+//!
+//! ### PCI Configuration Mechanism #1 Architecture
+//!
+//! PCI configuration space is accessed through two 32-bit I/O ports:
+//! - **0xCF8 (`PCI_CONFIG_ADDRESS`)**: Specifies the target bus, device, function, and register offset.
+//! - **0xCFC (`PCI_CONFIG_DATA`)**: Read/write window into the DWORD selected by `PCI_CONFIG_ADDRESS`.
+//!
+//! Format of the 32-bit `CONFIG_ADDRESS` register:
+//! ```text
+//!  31 30        24 23        16 15        11 10         8 7          2 1 0
+//! +--+------------+------------+------------+-------------+------------+---+
+//! |En|  Reserved  | Bus Number | Device/Slot| Function #  | Reg Offset | 0 |
+//! +--+------------+------------+------------+-------------+------------+---+
+//! ```
+//! - **Bit 31 (Enable Bit)**: Must be set to `1` to enable translation to configuration cycles.
+//! - **Bits 23-16 (Bus)**: Identifies 1 of 256 PCI buses (0 to 255).
+//! - **Bits 15-11 (Device)**: Identifies 1 of 32 devices per bus (0 to 31).
+//! - **Bits 10-8 (Function)**: Identifies 1 of 8 functions per multi-function device (0 to 7).
+//! - **Bits 7-2 (Register Offset)**: Selects a DWORD within the 256-byte config space (bits 1-0 always 0).
+//!
+//! ### Base Address Register (BAR) Probing Algorithm
+//!
+//! Devices advertise their physical MMIO ranges or I/O port windows using Base Address Registers (BARs):
+//! 1. Save original BAR value.
+//! 2. Write all 1s (`0xFFFF_FFFF`) to the BAR register.
+//! 3. Read back the register value: the unmaskable bits determine the size requested by hardware.
+//! 4. Restore the original value to the BAR register.
+//! 5. Size calculation: `size = !(read_back & MASK) + 1`.
+//! 6. Decoding:
+//!    - **Bit 0 == 1**: Port I/O BAR (`mask = 0xFFFF_FFFC`).
+//!    - **Bit 0 == 0**: Memory space BAR (`mask = 0xFFFF_FFF0`).
+//!      - **Bits 2:1 == 00**: 32-bit memory address space.
+//!      - **Bits 2:1 == 10**: 64-bit memory address space (occupies two consecutive BAR slots: `BAR[n]` low, `BAR[n+1]` high).
+//!      - **Bit 3**: Prefetchable memory attribute.
 
 use alloc::vec::Vec;
 use crate::println;
 use crate::sync::Spinlock;
 
+/// PCI Configuration Space Address Port (Mechanism #1).
 const PCI_CONFIG_ADDRESS: u16 = 0xCF8;
+
+/// PCI Configuration Space Data Port (Mechanism #1).
 const PCI_CONFIG_DATA: u16 = 0xCFC;
 
 /// Formats a 32-bit PCI configuration address for I/O port 0xCF8.
+///
+/// Encodes the target bus, device, function, and DWORD-aligned register offset
+/// along with the mandatory enable bit (bit 31).
 #[inline]
 fn config_address(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
     0x8000_0000u32
@@ -27,6 +64,15 @@ fn config_address(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
 }
 
 /// Reads a 32-bit DWORD from PCI configuration space.
+///
+/// # Arguments
+/// * `bus` - Bus index (0..=255)
+/// * `device` - Device slot index (0..=31)
+/// * `function` - Function index (0..=7)
+/// * `offset` - Byte offset within 256-byte configuration space (DWORD-aligned)
+///
+/// # Safety
+/// Performs raw x86 `out` and `in` instructions targeting PCI ports 0xCF8 and 0xCFC.
 pub fn pci_read_u32(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
     let address = config_address(bus, device, function, offset);
     unsafe {
@@ -48,18 +94,25 @@ pub fn pci_read_u32(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
 }
 
 /// Reads a 16-bit WORD from PCI configuration space.
+///
+/// Reads the enclosing DWORD and bit-shifts based on 16-bit offset alignment.
 pub fn pci_read_u16(bus: u8, device: u8, function: u8, offset: u8) -> u16 {
     let dword = pci_read_u32(bus, device, function, offset);
     ((dword >> ((offset & 2) * 8)) & 0xFFFF) as u16
 }
 
 /// Reads an 8-bit BYTE from PCI configuration space.
+///
+/// Reads the enclosing DWORD and bit-shifts based on 8-bit offset alignment.
 pub fn pci_read_u8(bus: u8, device: u8, function: u8, offset: u8) -> u8 {
     let dword = pci_read_u32(bus, device, function, offset);
     ((dword >> ((offset & 3) * 8)) & 0xFF) as u8
 }
 
 /// Writes a 32-bit DWORD to PCI configuration space.
+///
+/// # Safety
+/// Performs raw x86 `out` instructions targeting PCI ports 0xCF8 and 0xCFC.
 pub fn pci_write_u32(bus: u8, device: u8, function: u8, offset: u8, value: u32) {
     let address = config_address(bus, device, function, offset);
     unsafe {
@@ -78,7 +131,7 @@ pub fn pci_write_u32(bus: u8, device: u8, function: u8, offset: u8, value: u32) 
     }
 }
 
-/// Writes a 16-bit WORD to PCI configuration space.
+/// Writes a 16-bit WORD to PCI configuration space using read-modify-write.
 #[allow(dead_code)]
 pub fn pci_write_u16(bus: u8, device: u8, function: u8, offset: u8, value: u16) {
     let shift = (offset & 2) * 8;
@@ -88,7 +141,7 @@ pub fn pci_write_u16(bus: u8, device: u8, function: u8, offset: u8, value: u16) 
     pci_write_u32(bus, device, function, offset, new_val);
 }
 
-/// Writes an 8-bit BYTE to PCI configuration space.
+/// Writes an 8-bit BYTE to PCI configuration space using read-modify-write.
 #[allow(dead_code)]
 pub fn pci_write_u8(bus: u8, device: u8, function: u8, offset: u8, value: u8) {
     let shift = (offset & 3) * 8;
@@ -98,11 +151,14 @@ pub fn pci_write_u8(bus: u8, device: u8, function: u8, offset: u8, value: u8) {
     pci_write_u32(bus, device, function, offset, new_val);
 }
 
-/// The physical coordinates of a device on the PCI bus hierarchy.
+/// Physical coordinates of a device on the PCI bus hierarchy (Bus, Device, Function).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PciAddress {
+    /// Bus number (0..=255).
     pub bus: u8,
+    /// Device / slot number on the bus (0..=31).
     pub device: u8,
+    /// Function number within the device (0..=7).
     pub function: u8,
 }
 
@@ -115,37 +171,53 @@ impl core::fmt::Display for PciAddress {
 /// Type and physical address configuration of a Base Address Register (BAR).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BarType {
+    /// 32-bit Memory-Mapped I/O space.
     Memory32 {
+        /// Base 32-bit physical address.
         address: u32,
+        /// Size in bytes allocated to this BAR.
         size: usize,
+        /// True if memory reads have no side effects (prefetchable).
         prefetchable: bool,
     },
+    /// 64-bit Memory-Mapped I/O space (spans two adjacent BAR registers).
     Memory64 {
+        /// Base 64-bit physical address.
         address: u64,
+        /// Size in bytes allocated to this BAR.
         size: usize,
+        /// True if memory reads have no side effects (prefetchable).
         prefetchable: bool,
     },
+    /// Legacy x86 Port I/O address space.
     Io {
+        /// Base 16-bit port I/O address.
         port: u16,
+        /// Number of I/O ports allocated to this BAR.
         size: usize,
     },
 }
 
-/// A parsed Base Address Register.
+/// A parsed Base Address Register containing its index and decoded attributes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PciBar {
+    /// Zero-based BAR index (0..5 for standard type 0x00 devices).
     pub index: usize,
+    /// Decoded physical address type, base, and range size.
     pub bar_type: BarType,
 }
 
 /// A PCI Capability entry discovered in the capability pointer linked list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PciCapability {
+    /// Capability identifier code (e.g., 0x05 for MSI, 0x11 for MSI-X, 0x10 for PCIe).
     pub cap_id: u8,
+    /// Byte offset within the device's PCI configuration space.
     pub offset: u8,
 }
 
 impl PciCapability {
+    /// Returns the human-readable standard name of the PCI capability.
     pub fn name(&self) -> &'static str {
         match self.cap_id {
             0x01 => "Power Management",
@@ -164,44 +236,66 @@ impl PciCapability {
 }
 
 /// Representation of an enumerated hardware PCI device.
+///
+/// Contains vendor/device identification, class/subclass categorization,
+/// decoded BAR windows, interrupt routing details, and discovered capabilities.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct PciDevice {
+    /// Bus/Device/Function coordinates.
     pub address: PciAddress,
+    /// PCI Vendor ID (e.g., 0x8086 for Intel, 0x1AF4 for VirtIO).
     pub vendor_id: u16,
+    /// PCI Device ID assigned by the vendor.
     pub device_id: u16,
+    /// PCI Class code (e.g., 0x01 = Storage, 0x02 = Network, 0x03 = Display).
     pub class_code: u8,
+    /// PCI Subclass code refining the device class.
     pub subclass: u8,
+    /// Programming Interface (ProgIF) byte defining register-level interface.
     pub prog_if: u8,
+    /// Silicon revision identifier.
     pub revision: u8,
+    /// Header type: 0x00 = Standard Device, 0x01 = PCI-to-PCI Bridge, 0x02 = CardBus Bridge.
     pub header_type: u8,
+    /// List of successfully probed Base Address Registers.
     pub bars: Vec<PciBar>,
+    /// Linked list of supported PCI capabilities.
     pub capabilities: Vec<PciCapability>,
+    /// Interrupt line routed to the PIC/APIC (offset 0x3C).
     pub interrupt_line: u8,
+    /// Interrupt pin connected (1=INTA#, 2=INTB#, 3=INTC#, 4=INTD#).
     pub interrupt_pin: u8,
 }
 
 #[allow(dead_code)]
 impl PciDevice {
-    /// Enables Bus Mastering (allows device to initiate DMA memory transfers).
+    /// Enables Bus Mastering (Command Register bit 2).
+    ///
+    /// Required for DMA devices (e.g. VirtIO, xHCI, Intel HDA) to initiate
+    /// read/write memory transactions on the system bus.
     pub fn enable_bus_mastering(&self) {
         let cmd = pci_read_u16(self.address.bus, self.address.device, self.address.function, 0x04);
         pci_write_u16(self.address.bus, self.address.device, self.address.function, 0x04, cmd | (1 << 2));
     }
 
-    /// Enables Memory Space access (MMIO BARs).
+    /// Enables Memory Space access (Command Register bit 1).
+    ///
+    /// Required for the device to respond to MMIO accesses mapped in its BARs.
     pub fn enable_memory_space(&self) {
         let cmd = pci_read_u16(self.address.bus, self.address.device, self.address.function, 0x04);
         pci_write_u16(self.address.bus, self.address.device, self.address.function, 0x04, cmd | (1 << 1));
     }
 
-    /// Enables I/O Space access (Port I/O BARs).
+    /// Enables I/O Space access (Command Register bit 0).
+    ///
+    /// Required for the device to respond to Port I/O accesses mapped in its BARs.
     pub fn enable_io_space(&self) {
         let cmd = pci_read_u16(self.address.bus, self.address.device, self.address.function, 0x04);
         pci_write_u16(self.address.bus, self.address.device, self.address.function, 0x04, cmd | (1 << 0));
     }
 
-    /// Human-readable category of the PCI device class.
+    /// Returns the human-readable category of the PCI device class.
     pub fn class_name(&self) -> &'static str {
         match self.class_code {
             0x00 => "Unclassified Device",
@@ -243,7 +337,7 @@ impl PciDevice {
         }
     }
 
-    /// Decodes popular vendor names.
+    /// Decodes popular vendor names into descriptive brand strings.
     pub fn vendor_name(&self) -> &'static str {
         match self.vendor_id {
             0x8086 => "Intel Corporation",
@@ -260,10 +354,12 @@ impl PciDevice {
     }
 }
 
-/// Global registry of all enumerated PCI devices.
+/// Global thread-safe registry of all enumerated PCI devices.
 pub static PCI_DEVICES: Spinlock<Vec<PciDevice>> = Spinlock::new(Vec::new());
 
-/// Probes a specific BAR, calculating its physical base address, size, and type.
+/// Probes a specific Base Address Register (BAR), calculating physical base address, size, and type.
+///
+/// Returns a tuple of `(PciBar, registers_consumed)`. 64-bit BARs consume 2 consecutive BAR registers.
 fn probe_bar(bus: u8, dev: u8, func: u8, bar_idx: usize) -> Option<(PciBar, usize)> {
     if bar_idx >= 6 {
         return None;
@@ -347,7 +443,10 @@ fn probe_bar(bus: u8, dev: u8, func: u8, bar_idx: usize) -> Option<(PciBar, usiz
     }
 }
 
-/// Traverses the capability linked list starting at offset 0x34 if supported.
+/// Traverses the PCI Capability linked list starting at offset 0x34.
+///
+/// Follows pointers until a null pointer (0x00) is reached or the maximum capability
+/// limit (48) is hit, protecting against infinite loops in broken hardware models.
 fn probe_capabilities(bus: u8, dev: u8, func: u8, status: u16) -> Vec<PciCapability> {
     let mut caps = Vec::new();
     // Bit 4 in Status Register indicates capabilities list presence
@@ -374,7 +473,7 @@ fn probe_capabilities(bus: u8, dev: u8, func: u8, status: u16) -> Vec<PciCapabil
     caps
 }
 
-/// Scans a single PCI function.
+/// Scans a single PCI function at `(bus, device, function)` and appends to the device list.
 fn scan_function(bus: u8, device: u8, function: u8, list: &mut Vec<PciDevice>) {
     let vendor_id = pci_read_u16(bus, device, function, 0x00);
     if vendor_id == 0xFFFF {
@@ -450,6 +549,9 @@ fn scan_bus(bus: u8, list: &mut Vec<PciDevice>) {
 }
 
 /// Initializes the PCI subsystem and enumerates all connected hardware.
+///
+/// Scans bus 0 and subsequent buses if a multi-function host bridge is detected.
+/// Registers all discovered devices in the global `PCI_DEVICES` list.
 pub fn init() {
     println!();
     println!("----------------------------------------");
@@ -507,14 +609,14 @@ pub fn init() {
     *PCI_DEVICES.lock() = discovered;
 }
 
-/// Finds a device by Vendor ID and Device ID.
+/// Finds a device in the global registry matching the specified Vendor ID and Device ID.
 #[allow(dead_code)]
 pub fn find_device(vendor_id: u16, device_id: u16) -> Option<PciDevice> {
     let devices = PCI_DEVICES.lock();
     devices.iter().find(|d| d.vendor_id == vendor_id && d.device_id == device_id).cloned()
 }
 
-/// Finds all devices matching a class and subclass code.
+/// Finds all devices in the global registry matching the specified class and subclass code.
 #[allow(dead_code)]
 pub fn find_by_class(class: u8, subclass: u8) -> Vec<PciDevice> {
     let devices = PCI_DEVICES.lock();
@@ -522,6 +624,9 @@ pub fn find_by_class(class: u8, subclass: u8) -> Vec<PciDevice> {
 }
 
 /// Runs automated verification self-tests for M17 PCI Bus.
+///
+/// Asserts that at least one PCI device is found, validates the presence of the Host Bridge (00:00.0),
+/// and confirms BAR discovery statistics.
 pub fn run_self_tests() {
     println!("[PCI] Running PCI Subsystem verification self-tests...");
 

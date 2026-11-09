@@ -1,14 +1,28 @@
-/// Intel 8042 PS/2 Keyboard Controller Driver for x86_64.
-///
-/// Implements standard Scan Code Set 1 translation, modifier state tracking
-/// (Shift, CapsLock, Ctrl, Alt), non-blocking input polling, and integration
-/// with the interactive shell and graphical window.
-///
-/// // TODO(phase12-m31-mouse): Implement PS/2 Auxiliary Mouse Driver:
-/// // 1. Enable 2nd PS/2 port (auxiliary mouse device) via 8042 command 0xA8.
-/// // 2. Enable IRQ12 interrupt delivery via Local APIC / IOAPIC (IDT Vector 0x2C).
-/// // 3. Decode 3-byte mouse packets: byte 0 flags (buttons, sign bits), byte 1 (X delta), byte 2 (Y delta).
-/// // 4. Dispatch mouse position updates to the graphical window canvas and cursor overlay.
+//! # Intel 8042 PS/2 Keyboard and Mouse Controller Driver
+//!
+//! ## Overview
+//! The Intel 8042 Keyboard Controller (KBC) manages legacy PS/2 user input devices on x86_64 PCs.
+//! It interfaces via two primary I/O ports:
+//! - **Data Port (`0x60`)**: Reads incoming scan codes / mouse packets; writes device commands.
+//! - **Status & Command Port (`0x64`)**: Reads status register; writes controller commands.
+//!
+//! ## Hardware Status Flags (Port 0x64):
+//! - Bit 0 (`0x01`): Output Buffer Full (OBF) - Data is available to read from Port `0x60`.
+//! - Bit 1 (`0x02`): Input Buffer Full (IBF) - Controller is busy processing previous command.
+//! - Bit 5 (`0x20`): Auxiliary Device Output Buffer Full (AUX) - Data at Port `0x60` originated
+//!   from the 2nd PS/2 port (PS/2 Mouse) rather than the keyboard.
+//!
+//! ## Scan Code Set 1 Protocol:
+//! - **Make Codes (Key Down)**: Value in `0x01..0x7F` (bit 7 is 0).
+//! - **Break Codes (Key Up)**: Value has bit 7 set (`make_code | 0x80`).
+//! - **Extended Scancodes**: Prefixed with escape byte `0xE0` (e.g. right Alt, right Ctrl, multimedia keys).
+//! - **Modifier Logic**: Letters evaluate `shift ^ caps_lock`. Numbers and symbols evaluate `shift` only.
+//!
+//! // TODO(phase12-m31-mouse): Implement PS/2 Auxiliary Mouse Driver:
+//! // 1. Enable 2nd PS/2 port (auxiliary mouse device) via 8042 command 0xA8.
+//! // 2. Enable IRQ12 interrupt delivery via Local APIC / IOAPIC (IDT Vector 0x2C).
+//! // 3. Decode 3-byte mouse packets: byte 0 flags (buttons, sign bits), byte 1 (X delta), byte 2 (Y delta).
+//! // 4. Dispatch mouse position updates to the graphical window canvas and cursor overlay.
 
 use crate::println;
 use crate::sync::Spinlock;

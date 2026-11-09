@@ -1,17 +1,28 @@
-/// Legacy 8259 PIC and Local APIC / APIC Timer driver.
-///
-/// Disables legacy 8259 PIC (masks all IRQs and remaps to 0x20/0x28 to avoid spurious IRQs),
-/// initializes Local APIC, configures APIC Timer for periodic kernel ticks, and provides sleep primitives.
+//! Local APIC (Advanced Programmable Interrupt Controller) & Legacy 8259 PIC Driver.
+//!
+//! # Architecture & Silicon Overview
+//! Modern x86_64 multiprocessor systems replace the legacy IBM PC AT dual-8259 PIC
+//! with the Advanced Programmable Interrupt Controller (APIC) architecture:
+//! - **Legacy 8259 PIC Disabling**: On IBM PCs, the 8259 PIC vectors `0..7` collide
+//!   directly with CPU hardware exceptions (Vectors `8..15`). This driver remaps the PIC
+//!   to vectors `0x20..0x2F` and masks all lines (`0xFF`) to completely silence the legacy chip.
+//! - **Local APIC (LAPIC)**: An on-die interrupt controller present in each CPU core,
+//!   mapped to physical memory at `0xFEE0_0000` (or configured via `IA32_APIC_BASE_MSR`).
+//!   Manages local timer interrupts, inter-processor interrupts (IPIs), and device IRQs.
+//! - **Local APIC Timer**: High-resolution, on-core timer programmed in Periodic Mode
+//!   (Bit 17) to deliver scheduler preemption ticks on Interrupt Vector `32` (`0x20`).
+//! - **Interrupt Command Register (ICR)**: Enables the Bootstrap Processor (BSP) to send
+//!   INIT and Startup IPI (SIPI) packets to secondary Application Processors (APs) during SMP bootstrap.
 
 use core::sync::atomic::{AtomicU64, Ordering};
 
-// Legacy 8259 PIC I/O ports
+// Legacy 8259 PIC I/O port coordinates
 const PIC1_COMMAND: u16 = 0x20;
 const PIC1_DATA: u16 = 0x21;
 const PIC2_COMMAND: u16 = 0xA0;
 const PIC2_DATA: u16 = 0xA1;
 
-// Local APIC Registers (Base physical address 0xFEE00000)
+// Local APIC Memory-Mapped I/O Register Offsets (Base physical address 0xFEE0_0000)
 const IA32_APIC_BASE_MSR: u32 = 0x1B;
 #[allow(dead_code)]
 const LAPIC_ID: usize = 0x020;
@@ -25,55 +36,74 @@ pub const LAPIC_TIMER_INIT_CNT: usize = 0x380;
 pub const LAPIC_TIMER_CURR_CNT: usize = 0x390;
 pub const LAPIC_TIMER_DIV: usize = 0x3E0;
 
-pub const TIMER_INTERRUPT_VECTOR: u8 = 0x20; // IRQ 0 / Vector 32
+/// Target interrupt vector assigned to the Local APIC Periodic Timer (Vector 32).
+pub const TIMER_INTERRUPT_VECTOR: u8 = 0x20;
+
+/// Target interrupt vector assigned to Local APIC Spurious Interrupts (Vector 255).
 pub const SPURIOUS_INTERRUPT_VECTOR: u8 = 0xFF;
 
+/// Active physical base address of the Local APIC MMIO window.
 static mut LAPIC_BASE: u64 = 0xFEE00000;
+
+/// Monotonic system clock counter tracking timer ticks since kernel boot.
 static TICKS: AtomicU64 = AtomicU64::new(0);
 
+/// Writes an 8-bit value to a port-mapped I/O port.
 unsafe fn outb(port: u16, val: u8) {
     unsafe {
         core::arch::asm!("out dx, al", in("dx") port, in("al") val, options(nomem, nostack));
     }
 }
 
+/// Provides a tiny hardware delay between port I/O writes by writing to unused diagnostic port `0x80`.
 unsafe fn io_wait() {
     unsafe {
         outb(0x80, 0);
     }
 }
 
-/// Mask and disable 8259 legacy PIC
+/// Remaps and completely masks the legacy dual-8259 Programmable Interrupt Controllers.
+///
+/// # Hardware Steps
+/// 1. Sends Initialization Command Word 1 (ICW1 = `0x11`) to begin initialization sequence.
+/// 2. Remaps Master PIC vectors to `0x20..0x27` and Slave PIC to `0x28..0x2F` to move them
+///    out of the CPU exception vector collision range (`0..31`).
+/// 3. Configures cascading IRQ line 2 connection (ICW3).
+/// 4. Configures 8086/88 mode operation (ICW4 = `0x01`).
+/// 5. Writes `0xFF` to both PIC data ports to permanently mask all 16 legacy interrupt lines.
 pub fn disable_pic() {
     unsafe {
-        // Remap PIC to avoid conflicts with CPU exceptions (0..31)
+        // Step 1: Initialize both PICs
         outb(PIC1_COMMAND, 0x11);
         io_wait();
         outb(PIC2_COMMAND, 0x11);
         io_wait();
 
+        // Step 2: Set vector offsets
         outb(PIC1_DATA, 0x20); // Master PIC vector offset 32
         io_wait();
         outb(PIC2_DATA, 0x28); // Slave PIC vector offset 40
         io_wait();
 
+        // Step 3: Establish master/slave cascading wiring
         outb(PIC1_DATA, 0x04);
         io_wait();
         outb(PIC2_DATA, 0x02);
         io_wait();
 
+        // Step 4: 8086 mode
         outb(PIC1_DATA, 0x01);
         io_wait();
         outb(PIC2_DATA, 0x01);
         io_wait();
 
-        // Mask all interrupts on both PICs
+        // Step 5: Mask all interrupts on both PICs
         outb(PIC1_DATA, 0xFF);
         outb(PIC2_DATA, 0xFF);
     }
 }
 
-/// Read 32-bit register from Local APIC MMIO
+/// Reads a 32-bit register from the Local APIC MMIO space using volatile semantics.
 #[allow(dead_code)]
 unsafe fn read_lapic(offset: usize) -> u32 {
     unsafe {
@@ -83,7 +113,7 @@ unsafe fn read_lapic(offset: usize) -> u32 {
     }
 }
 
-/// Write 32-bit register to Local APIC MMIO
+/// Writes a 32-bit value to a Local APIC MMIO register using volatile semantics.
 unsafe fn write_lapic(offset: usize, value: u32) {
     unsafe {
         let base = core::ptr::addr_of!(LAPIC_BASE).read();
@@ -92,24 +122,35 @@ unsafe fn write_lapic(offset: usize, value: u32) {
     }
 }
 
-/// Signal End of Interrupt (EOI) to Local APIC
+/// Signals End of Interrupt (EOI) to the Local APIC.
+///
+/// Must be written at the conclusion of every hardware interrupt service routine
+/// to clear the in-service bit in the APIC and permit further interrupt delivery.
 pub fn end_of_interrupt() {
     unsafe {
         write_lapic(LAPIC_EOI, 0);
     }
 }
 
-/// Return current kernel tick count
+/// Returns the current monotonic kernel tick count.
 pub fn get_ticks() -> u64 {
     TICKS.load(Ordering::Relaxed)
 }
 
-/// Increment tick counter (called from timer ISR)
+/// Increments the monotonic tick counter. Invoked on every APIC Timer ISR tick.
 pub fn on_timer_tick() {
     TICKS.fetch_add(1, Ordering::Relaxed);
 }
 
-/// Calibrate and initialize Local APIC & APIC Timer
+/// Initializes the Local APIC and arms the APIC Timer in Periodic Mode on the BSP.
+///
+/// # Hardware Steps
+/// 1. Masks the legacy 8259 PIC.
+/// 2. Reads MSR `0x1B` (`IA32_APIC_BASE_MSR`) to verify and enable the Local APIC globally (Bit 11).
+/// 3. Configures the Spurious Interrupt Vector register (`0x0F0`), enabling the APIC software flag (Bit 8).
+/// 4. Configures the Timer Divide register (`0x3E0`) to divide core clock by 16 (`0x3`).
+/// 5. Configures LVT Timer Register (`0x320`) for Periodic Mode (Bit 17) on Vector 32 (`0x20`).
+/// 6. Loads the Initial Count Register (`0x380`) with the countdown reload value.
 pub fn init() {
     disable_pic();
 
@@ -148,14 +189,13 @@ pub fn init() {
         // Divide by 16 (0x3)
         write_lapic(LAPIC_TIMER_DIV, 0x3);
 
-        // Calibrate timer using PIT delay (approximate 10ms calibration)
-        // Set initial count to 10,000,000 for periodic timer (periodic mode = bit 17: 0x20000)
+        // Configure timer in Periodic mode (bit 17: 0x20000) on Vector 32
         write_lapic(LAPIC_TIMER, 0x20000 | (TIMER_INTERRUPT_VECTOR as u32));
         write_lapic(LAPIC_TIMER_INIT_CNT, 0x00080000); // Periodic counter
     }
 }
 
-/// Delay execution by approximately `ms` milliseconds using tick count or spin loop
+/// Delays execution by waiting for `ticks` APIC timer intervals.
 pub fn sleep(ticks: u64) {
     let start = get_ticks();
     while get_ticks() - start < ticks {
@@ -163,7 +203,7 @@ pub fn sleep(ticks: u64) {
     }
 }
 
-/// Delay execution by busy-spinning for approximately `us` microseconds without requiring interrupts.
+/// Delays execution by busy-spinning for approximately `us` microseconds without requiring interrupts.
 pub fn spin_delay_us(us: u64) {
     let iterations = us * 500;
     for _ in 0..iterations {
@@ -171,7 +211,7 @@ pub fn spin_delay_us(us: u64) {
     }
 }
 
-/// Waits until the ICR delivery status bit (bit 12) becomes idle with a bounded timeout.
+/// Polls the Interrupt Command Register (ICR) delivery status bit (bit 12) until idle.
 unsafe fn wait_icr_idle() {
     unsafe {
         for _ in 0..100_000 {
@@ -183,7 +223,9 @@ unsafe fn wait_icr_idle() {
     }
 }
 
-/// Sends an INIT IPI to the target Local APIC ID.
+/// Sends an INIT Inter-Processor Interrupt (IPI) to the specified Local APIC ID.
+///
+/// Signals an INIT reset to the target core as part of the SMP bootstrap sequence.
 pub fn send_init_ipi(apic_id: u8) {
     unsafe {
         wait_icr_idle();
@@ -206,7 +248,9 @@ pub fn send_init_deassert(apic_id: u8) {
     }
 }
 
-/// Sends a Startup IPI (SIPI) to the target Local APIC ID with the specified page vector.
+/// Sends a Startup IPI (SIPI) to the target Local APIC ID.
+///
+/// Instructs the target core to begin real-mode execution at physical address `vector * 4096`.
 pub fn send_sipi(apic_id: u8, vector: u8) {
     unsafe {
         wait_icr_idle();
@@ -217,7 +261,10 @@ pub fn send_sipi(apic_id: u8, vector: u8) {
     }
 }
 
-/// Initializes Local APIC on an Application Processor (AP) core.
+/// Initializes the Local APIC on an Application Processor (AP) core.
+///
+/// Enables APIC globally in MSR `0x1B`, activates the Spurious Interrupt Register,
+/// and masks the local APIC timer so secondary cores do not deliver competing ticks.
 pub fn init_ap() {
     unsafe {
         // Read APIC base from MSR 0x1B
@@ -252,3 +299,4 @@ pub fn init_ap() {
         write_lapic(LAPIC_TIMER, 0x10000); // Masked (bit 16 = 1)
     }
 }
+

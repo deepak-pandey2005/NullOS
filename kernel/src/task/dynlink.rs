@@ -1,15 +1,25 @@
-//! Dynamic Linking & Shared Object (.so) Runtime Subsystem (Phase 14 - M34).
+//! # Dynamic Linking & Shared Object (.so) Runtime Subsystem
 //!
-//! Subsystem features:
-//! - ELF64 Dynamic Segment parser (`PT_DYNAMIC`, `Elf64Dyn`).
-//! - Dynamic tags: `DT_NEEDED`, `DT_STRTAB`, `DT_SYMTAB`, `DT_RELA`, `DT_JMPREL`.
-//! - AMD64 relocation engine:
-//!   - `R_X86_64_RELATIVE`: Base address adjustment for position-independent code.
-//!   - `R_X86_64_GLOB_DAT`: Global Offset Table (GOT) variable binding.
-//!   - `R_X86_64_JUMP_SLOT`: Procedure Linkage Table (PLT) function binding.
-//!   - `R_X86_64_64`: Absolute 64-bit symbol resolution.
-//! - Shared library catalog & dependency resolution (`/lib`, `/disk`).
-//! - POSIX dynamic linker runtime interface (`dlopen`, `dlsym`, `dlclose`).
+//! ## Overview
+//! Modern operating systems allow programs to share library code across processes,
+//! reducing disk and RAM footprints and facilitating modular updates without recompilation.
+//!
+//! The NullOS dynamic linker is a full in-kernel runtime implementation providing:
+//! 1. **ELF64 Dynamic Segment Parser (`PT_DYNAMIC`, `Elf64Dyn`)**:
+//!    - Extracts dynamic tags: `DT_NEEDED` (shared dependencies), `DT_STRTAB` / `DT_SYMTAB`
+//!      (string and symbol tables), `DT_RELA` / `DT_JMPREL` (relocation arrays), `DT_INIT` / `DT_FINI`.
+//! 2. **x86_64 Relocation Engine**:
+//!    - `R_X86_64_RELATIVE`: Applies base address slide (`*target = base_address + r_addend`)
+//!      for Position-Independent Executables (PIE) and shared libraries.
+//!    - `R_X86_64_GLOB_DAT`: Resolves external global variables in the Global Offset Table (GOT).
+//!    - `R_X86_64_JUMP_SLOT`: Resolves dynamic function addresses in the Procedure Linkage Table (PLT).
+//!    - `R_X86_64_64`: Direct 64-bit absolute symbol addresses.
+//! 3. **Shared Library Discovery & Dependency Resolution**:
+//!    - Searches `/lib`, `/usr/lib`, `/disk` for missing `DT_NEEDED` dependencies recursively.
+//! 4. **POSIX Dynamic Linker API**:
+//!    - [`dlopen`]: Loads and relocates a shared library into memory.
+//!    - [`dlsym`]: Looks up exported symbol addresses.
+//!    - [`dlclose`]: Decrements reference count and unloads unused libraries.
 
 #![allow(dead_code)]
 
@@ -25,36 +35,63 @@ use crate::task::elf::{
     PT_LOAD,
 };
 
+/// Program header segment type identifying dynamic linking information.
 pub const PT_DYNAMIC: u32 = 2;
+/// Program header segment type identifying the path to the dynamic interpreter (`/lib/ld.so`).
 pub const PT_INTERP: u32 = 3;
 
 // Dynamic Array Tags (DT_*)
+/// Marks the end of the `_DYNAMIC` array.
 pub const DT_NULL: i64 = 0;
+/// String table offset of a needed shared library dependency.
 pub const DT_NEEDED: i64 = 1;
+/// Total size in bytes of PLT relocations.
 pub const DT_PLTRELSZ: i64 = 2;
+/// Address of the Global Offset Table (GOT) or Procedure Linkage Table (PLT).
 pub const DT_PLTGOT: i64 = 3;
+/// Address of the symbol hash table.
 pub const DT_HASH: i64 = 4;
+/// Address of the dynamic string table.
 pub const DT_STRTAB: i64 = 5;
+/// Address of the dynamic symbol table.
 pub const DT_SYMTAB: i64 = 6;
+/// Address of relocation table with explicit addends (`Elf64_Rela`).
 pub const DT_RELA: i64 = 7;
+/// Total size in bytes of the `DT_RELA` table.
 pub const DT_RELASZ: i64 = 8;
+/// Size in bytes of a single `DT_RELA` entry (24 bytes).
 pub const DT_RELAENT: i64 = 9;
+/// Total size in bytes of the dynamic string table.
 pub const DT_STRSZ: i64 = 10;
+/// Size in bytes of a single dynamic symbol table entry (24 bytes).
 pub const DT_SYMENT: i64 = 11;
+/// Address of the initialization function.
 pub const DT_INIT: i64 = 12;
+/// Address of the termination function.
 pub const DT_FINI: i64 = 13;
+/// String table offset of the shared object's canonical name.
 pub const DT_SONAME: i64 = 14;
+/// String table offset of library search path string.
 pub const DT_RPATH: i64 = 15;
+/// Type of relocation entries in PLT (DT_REL or DT_RELA).
 pub const DT_PLTREL: i64 = 20;
+/// Address of relocations associated solely with the PLT (`Elf64_Rela`).
 pub const DT_JMPREL: i64 = 23;
 
 // x86_64 Relocation Types (R_X86_64_*)
+/// No relocation operation performed.
 pub const R_X86_64_NONE: u32 = 0;
+/// Direct 64-bit symbol value calculation (`S + A`).
 pub const R_X86_64_64: u32 = 1;
+/// PC-relative 32-bit signed address (`S + A - P`).
 pub const R_X86_64_PC32: u32 = 2;
+/// Copy symbol data from shared object at link time.
 pub const R_X86_64_COPY: u32 = 5;
+/// Set GOT entry to data symbol address (`S`).
 pub const R_X86_64_GLOB_DAT: u32 = 6;
+/// Set PLT/GOT entry to function symbol address (`S`).
 pub const R_X86_64_JUMP_SLOT: u32 = 7;
+/// Adjust address by base slide (`B + A`) for position-independent code.
 pub const R_X86_64_RELATIVE: u32 = 8;
 
 /// ELF64 Dynamic Array Entry (16 bytes).

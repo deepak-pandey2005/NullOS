@@ -1,18 +1,30 @@
-//! Counting Semaphore Primitive (Phase 11 - M28).
+//! # Counting Semaphore Synchronization Primitive
 //!
-//! Provides thread-safe resource counting with blocking wait queues.
+//! ## Overview
+//! A counting semaphore maintains an integer token count regulating concurrent
+//! access to a finite set of shared resources.
+//!
+//! ### Operational Semantics:
+//! - [`wait`]: Decrements the token counter. If the counter is $\le 0$, the calling thread
+//!   is suspended and placed on the semaphore's FIFO `waiters` queue until another thread issues [`post`].
+//! - [`try_wait`]: Non-blocking attempt to acquire a token; returns `true` if acquired, `false` otherwise.
+//! - [`post`]: Increments the token counter by 1. If any threads are waiting in the queue,
+//!   pops the head thread and returns it to the scheduler's ready queue via [`crate::task::wake_thread`].
+//! - [`get_value`]: Inspects the current token counter.
 
 use crate::sync::Spinlock;
 use crate::task::thread::ThreadId;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicI64, Ordering};
 
+/// A thread-safe counting semaphore with sleep-blocking wait queues.
 pub struct Semaphore {
     count: AtomicI64,
     waiters: Spinlock<Vec<ThreadId>>,
 }
 
 impl Semaphore {
+    /// Constructs a new Counting Semaphore with the given `initial_count`.
     pub const fn new(initial_count: isize) -> Self {
         Self {
             count: AtomicI64::new(initial_count as i64),
@@ -20,8 +32,7 @@ impl Semaphore {
         }
     }
 
-    /// Decrements the semaphore counter. If count is <= 0, the current thread blocks
-    /// until a resource is released via `post()`.
+    /// Decrements the semaphore counter, blocking if no tokens are available.
     pub fn wait(&self) {
         loop {
             let mut current = self.count.load(Ordering::Acquire);

@@ -1,4 +1,42 @@
-//! Advanced Configuration and Power Interface (ACPI) Subsystem (Phase 13 - M33).
+//! # Advanced Configuration and Power Interface (ACPI) Subsystem
+//!
+//! ## Subsystem Architecture & Responsibilities
+//! ACPI forms the hardware abstraction contract between modern PC firmware (UEFI/BIOS)
+//! and operating system kernels. During early bootstrap, firmware passes a physical pointer
+//! to the Root System Description Pointer ([`RsdpDescriptor`]). From this pointer, the ACPI
+//! subsystem navigates the platform's System Description Tables:
+//!
+//! ```text
+//!                      +-------------------------+
+//!                      |   RSDP (Root Pointer)   |
+//!                      +-------------------------+
+//!                                   |
+//!                +------------------+------------------+
+//!                | (ACPI 1.0: 32-bit)                  | (ACPI 2.0+: 64-bit)
+//!                v                                     v
+//!     +--------------------+                +--------------------+
+//!     | RSDT (32-bit Ptrs) |                | XSDT (64-bit Ptrs) |
+//!     +--------------------+                +--------------------+
+//!                |                                     |
+//!                +------------------+------------------+
+//!                                   |
+//!           +-----------------------+-----------------------+
+//!           |                       |                       |
+//!           v                       v                       v
+//!     +-----------+           +-----------+           +-----------+
+//!     |   MADT    |           |   FADT    |           |   HPET    |
+//!     |  ("APIC") |           |  ("FACP") |           |  ("HPET") |
+//!     +-----------+           +-----------+           +-----------+
+//!           |                       |
+//!      SMP Cores &             Power Ports &
+//!       I/O APICs              DSDT Pointer
+//!                                   |
+//!                                   v
+//!                             +-----------+
+//!                             |   DSDT    |
+//!                             | (AML \_S5)|
+//!                             +-----------+
+//! ```
 //!
 //! Subsystem features:
 //! - Root System Description Pointer (RSDP) validation (ACPI 1.0 & 2.0+).
@@ -6,7 +44,7 @@
 //! - Multiple APIC Description Table (MADT / "APIC") parser: CPU cores & I/O APICs.
 //! - Fixed ACPI Description Table (FADT / "FACP") parser: PM1a/b blocks, SMI_CMD, and reset register.
 //! - Differentiated System Description Table (DSDT) & AML bytecode scanner for `\_S5` sleep states.
-//! - Power management primitives: clean software shutdown (`poweroff`) and 4-stage reboot (`reboot`).
+//! - Power management primitives: clean software shutdown ([`poweroff`]) and 4-stage reboot ([`reboot`]).
 
 #![allow(dead_code)]
 #![allow(unused_imports)]
@@ -30,30 +68,43 @@ use crate::println;
 use crate::sync::Spinlock;
 
 /// Centralized ACPI Configuration and Table Catalog.
+///
+/// Contains discovered table metadata, parsed FADT/DSDT/MADT/HPET parameters,
+/// and hardware capabilities.
 #[derive(Debug, Clone)]
 pub struct AcpiInfo {
+    /// Physical address of the RSDP structure.
     pub rsdp_addr: u64,
+    /// ACPI revision (0 for 1.0, 2 for 2.0+).
     pub revision: u8,
+    /// OEM identifier string bytes.
     pub oem_id: [u8; 6],
+    /// Catalog of all system description tables discovered via RSDT/XSDT.
     pub tables: Vec<DiscoveredTable>,
+    /// Parsed Fixed ACPI Description Table information, if discovered.
     pub fadt: Option<FadtInfo>,
+    /// Parsed Differentiated System Description Table information, if discovered.
     pub dsdt: Option<DsdtInfo>,
+    /// Parsed Multiple APIC Description Table information, if discovered.
     pub madt: Option<MadtInfo>,
+    /// Parsed High Precision Event Timer information, if discovered.
     pub hpet: Option<HpetInfo>,
 }
 
-/// Global ACPI configuration and hardware state.
+/// Global ACPI configuration and hardware state protected by a Spinlock.
 pub static ACPI_INFO: Spinlock<Option<AcpiInfo>> = Spinlock::new(None);
 
 /// Global discovered ACPI MADT information (preserved for backward compatibility).
 pub static MADT_INFO: Spinlock<Option<MadtInfo>> = Spinlock::new(None);
 
 /// Returns the total number of discovered CPU cores.
+///
+/// Queries the discovered MADT core count, defaulting to 1 (the BSP) if uninitialized.
 pub fn cpu_count() -> usize {
     MADT_INFO.lock().as_ref().map(|info| info.cpus.len()).unwrap_or(1)
 }
 
-/// Returns true if the system has multiple CPU cores discovered via ACPI.
+/// Returns `true` if the system has multiple CPU cores discovered via ACPI.
 pub fn is_smp_active() -> bool {
     cpu_count() > 1
 }
@@ -64,12 +115,33 @@ pub fn get_acpi_info() -> Option<AcpiInfo> {
 }
 
 /// Locates a discovered ACPI table by its 4-byte signature (e.g. `b"HPET"`).
+///
+/// Searches the table catalog collected during [`init`].
+///
+/// # Parameters
+/// - `signature`: 4-byte ASCII signature (e.g., `b"HPET"`, `b"MCFG"`).
+///
+/// # Returns
+/// `Some(u64)` physical address if located, or `None`.
 pub fn find_table(signature: &[u8; 4]) -> Option<u64> {
     let guard = ACPI_INFO.lock();
     guard.as_ref().and_then(|info| tables::find_table(&info.tables, signature))
 }
 
 /// Parses ACPI tables from the RSDP physical address passed by firmware.
+///
+/// Steps executed:
+/// 1. Verifies the `"RSD PTR "` signature and revision.
+/// 2. Traverses the 64-bit XSDT (if revision >= 2) or 32-bit RSDT to catalog all SDTs.
+/// 3. Parses MADT to discover CPU topology and I/O APICs.
+/// 4. Parses FADT for PM1a/PM1b control ports, SMI commands, and DSDT pointers.
+/// 5. Transitions hardware from legacy BIOS mode to ACPI mode via [`fadt::enable_acpi`].
+/// 6. Scans DSDT AML bytecode for `\_S5` sleep state arguments.
+/// 7. Parses HPET table if present.
+/// 8. Stores populated [`AcpiInfo`] in the global [`ACPI_INFO`] lock.
+///
+/// # Parameters
+/// - `rsdp_addr`: Physical address of the RSDP table.
 pub fn init(rsdp_addr: u64) {
     println!();
     println!("--------------------------------------------------");

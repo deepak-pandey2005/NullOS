@@ -1,23 +1,48 @@
-/// Interrupt Descriptor Table (IDT) and Exception Handling for x86_64.
-///
-/// Configures 256 interrupt gates with ISR stubs and register dump diagnostics.
+//! Interrupt Descriptor Table (IDT), Exception Dispatcher & CPU Diagnostics.
+//!
+//! # Architecture & Silicon Mechanics
+//! The x86_64 processor handles synchronous CPU exceptions (e.g. `#PF`, `#GP`, `#UD`)
+//! and asynchronous hardware device interrupts (e.g. APIC Timer, Keyboard) via the
+//! Interrupt Descriptor Table (IDT).
+//!
+//! ### Interrupt Execution Flow
+//! 1. Hardware detects an exception or interrupt condition.
+//! 2. If transitioning from Ring 3 to Ring 0, the CPU loads `%rsp` from `TSS.rsp0`.
+//!    If the IDT gate has an IST index (`1..7`), the CPU loads `%rsp` from `TSS.ist[index-1]`.
+//! 3. The CPU pushes the hardware stack frame: `SS`, `RSP`, `RFLAGS`, `CS`, `RIP`,
+//!    and an optional architectural `ErrorCode` (for vectors 8, 10..14, 17, 21).
+//! 4. For interrupt gates (type `0x8E`), the CPU automatically clears `RFLAGS.IF = 0`.
+//! 5. Execution jumps to the corresponding assembly stub in `interrupts.S`, which pushes
+//!    all general-purpose registers (`%r15..%rax`), passes a pointer to `ExceptionContext`
+//!    in `%rdi` (SysV AMD64 ABI), and invokes `exception_handler()`.
 
 use core::mem::size_of;
 
-/// IDT Gate Descriptor (16 bytes in x86_64 long mode)
+/// Standard 64-bit IDT Gate Descriptor (16 bytes).
+///
+/// In 64-bit mode, an IDT gate is 16 bytes (128 bits) to accommodate the full 64-bit
+/// linear handler target address (`offset_high:offset_mid:offset_low`).
 #[repr(C, packed)]
 #[derive(Clone, Copy)]
 pub struct IdtEntry {
+    /// Handler address bits 0..15.
     offset_low: u16,
+    /// Target Code Segment Selector (must be `KERNEL_CODE_SELECTOR` = `0x08`).
     selector: u16,
+    /// Interrupt Stack Table (IST) index: 3-bit value (`0` = current stack, `1..7` = TSS IST entry).
     ist: u8,
+    /// Gate type and attribute flags (Present bit, DPL privilege bits, Gate Type).
     type_attr: u8,
+    /// Handler address bits 16..31.
     offset_mid: u16,
+    /// Handler address bits 32..63.
     offset_high: u32,
+    /// Reserved by AMD64 / Intel 64 specification (must be 0).
     _reserved: u32,
 }
 
 impl IdtEntry {
+    /// Creates an unpopulated, non-present IDT gate descriptor.
     pub const fn missing() -> Self {
         Self {
             offset_low: 0,
@@ -30,7 +55,13 @@ impl IdtEntry {
         }
     }
 
-    /// Create an interrupt gate (type 0xE: 64-bit Interrupt Gate, interrupts disabled on entry)
+    /// Constructs an active 64-bit Interrupt Gate (`0x8E`).
+    ///
+    /// # Attributes (`0x8E`)
+    /// - Bit 7: Present (`1`)
+    /// - Bits 6..5: DPL (`00` = Ring 0 only can trigger via hardware or software)
+    /// - Bit 4: Storage Segment (`0` = System descriptor)
+    /// - Bits 3..0: Gate Type (`0xE` = 64-bit Interrupt Gate, disables interrupts on entry)
     pub fn new(handler: usize, selector: u16, ist: u8) -> Self {
         let handler_u64 = handler as u64;
         Self {
@@ -45,18 +76,22 @@ impl IdtEntry {
     }
 }
 
-/// IDTR structure loaded with `lidt`
+/// IDTR Register descriptor loaded into CPU silicon via the `lidt` instruction.
 #[repr(C, packed)]
 struct IdtDescriptor {
+    /// Size of the IDT in bytes minus 1.
     size: u16,
+    /// Linear 64-bit base address of the IDT array.
     offset: u64,
 }
 
-/// Saved CPU registers passed from common assembly stub
+/// Comprehensive Saved CPU Register State during an Interrupt or Exception.
+///
+/// Matches the exact memory layout constructed by `interrupts.S` on the stack.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct ExceptionContext {
-    // Pushed by common assembly stub
+    // General-purpose registers pushed in reverse order by common assembly stub
     pub r15: u64,
     pub r14: u64,
     pub r13: u64,
@@ -77,7 +112,7 @@ pub struct ExceptionContext {
     pub vector: u64,
     pub error_code: u64,
 
-    // Pushed automatically by CPU on interrupt
+    // Pushed automatically by CPU hardware on interrupt entry
     pub rip: u64,
     pub cs: u64,
     pub rflags: u64,
@@ -85,9 +120,10 @@ pub struct ExceptionContext {
     pub ss: u64,
 }
 
+/// Global 256-entry Interrupt Descriptor Table singleton.
 static mut IDT: [IdtEntry; 256] = [IdtEntry::missing(); 256];
 
-// Assembly ISR stub function prototypes
+// Assembly ISR stub function prototypes defined in `interrupts.S`
 unsafe extern "C" {
     fn isr0();  // #DE Divide-by-zero
     fn isr1();  // #DB Debug
@@ -97,7 +133,7 @@ unsafe extern "C" {
     fn isr5();  // #BR Bound Range Exceeded
     fn isr6();  // #UD Invalid Opcode
     fn isr7();  // #NM Device Not Available
-    fn isr8();  // #DF Double Fault
+    fn isr8();  // #DF Double Fault (routed to TSS IST1)
     fn isr10(); // #TS Invalid TSS
     fn isr11(); // #NP Segment Not Present
     fn isr12(); // #SS Stack-Segment Fault
@@ -109,11 +145,14 @@ unsafe extern "C" {
     fn isr19(); // #XM SIMD Floating-Point Exception
     fn isr20(); // #VE Virtualization Exception
     fn isr21(); // #CP Control Protection Exception
-    fn isr32(); // IRQ 0 / Vector 32 (Timer)
-    fn isr255(); // Spurious Interrupt
+    fn isr32(); // IRQ 0 / Vector 32 (APIC Timer)
+    fn isr255(); // Vector 255 (Spurious Interrupt)
 }
 
-/// Timer interrupt handler called by isr32
+/// High-resolution Local APIC periodic timer interrupt handler (Vector 32).
+///
+/// Increments APIC tick counters, dispatches preemption events to the thread scheduler,
+/// and sends an End-Of-Interrupt (EOI) acknowledgment to the local APIC.
 #[unsafe(no_mangle)]
 pub extern "C" fn timer_handler() {
     super::apic::on_timer_tick();
@@ -122,7 +161,11 @@ pub extern "C" fn timer_handler() {
     crate::task::timer_tick(ticks);
 }
 
-/// Common Rust exception dispatcher called by assembly stub
+/// Central Rust exception dispatcher invoked by common assembly stubs.
+///
+/// Decodes the architectural exception vector, analyzes fault conditions (especially `#PF` via `CR2`),
+/// displays diagnostic register crash dumps, and differentiates user-mode recoverable faults
+/// from fatal kernel panics.
 #[unsafe(no_mangle)]
 pub extern "C" fn exception_handler(ctx: &ExceptionContext) {
     let name = match ctx.vector {
@@ -163,6 +206,7 @@ pub extern "C" fn exception_handler(ctx: &ExceptionContext) {
     crate::println!("Exception: {} (Vector: {})", name, ctx.vector);
     crate::println!("Error Code: {:#018x}", ctx.error_code);
 
+    // Decode Page Fault details from CR2 linear fault address and architectural error code bits
     if ctx.vector == 14 {
         let cr2: u64;
         unsafe {
@@ -185,6 +229,7 @@ pub extern "C" fn exception_handler(ctx: &ExceptionContext) {
         );
     }
 
+    // Print full 64-bit general-purpose and segment register crash telemetry
     crate::println!("RIP: {:#018x}   CS:  {:#06x}   RFLAGS: {:#018x}", ctx.rip, ctx.cs, ctx.rflags);
     crate::println!("RSP: {:#018x}   SS:  {:#06x}", ctx.rsp, ctx.ss);
     crate::println!("RAX: {:#018x}   RBX: {:#018x}   RCX: {:#018x}", ctx.rax, ctx.rbx, ctx.rcx);
@@ -198,7 +243,8 @@ pub extern "C" fn exception_handler(ctx: &ExceptionContext) {
         crate::println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
     }
 
-    // Check if the fault occurred in Ring 3 User Mode (CPL == 3)
+    // User mode fault isolation: If fault occurred in Ring 3 (CPL == 3), kill the user thread
+    // cleanly and return control to kernel scheduler without triggering a fatal kernel panic.
     if is_user {
         crate::println!();
         crate::println!(
@@ -211,6 +257,7 @@ pub extern "C" fn exception_handler(ctx: &ExceptionContext) {
         crate::task::exit();
     }
 
+    // Kernel mode panic: Halt execution indefinitely
     loop {
         unsafe {
             core::arch::asm!("cli; hlt");
@@ -218,7 +265,10 @@ pub extern "C" fn exception_handler(ctx: &ExceptionContext) {
     }
 }
 
-/// Initialize the IDT and load it into the CPU
+/// Initializes the 256-gate Interrupt Descriptor Table (IDT) and loads it into the CPU.
+///
+/// Configures exception gates (`0..21`), assigns TSS IST1 for Double Fault `#DF` (vector 8),
+/// wires hardware IRQs (Vector 32 for APIC timer, Vector 255 for Spurious), and executes `lidt`.
 pub fn init() {
     unsafe {
         let cs = super::gdt::KERNEL_CODE_SELECTOR;
@@ -250,6 +300,24 @@ pub fn init() {
         IDT[32] = IdtEntry::new(isr32 as *const () as usize, cs, 0);
         IDT[255] = IdtEntry::new(isr255 as *const () as usize, cs, 0);
 
+        let idt_ptr = core::ptr::addr_of!(IDT) as *const IdtEntry;
+        let idt_desc = IdtDescriptor {
+            size: (size_of::<[IdtEntry; 256]>() - 1) as u16,
+            offset: idt_ptr as u64,
+        };
+
+        core::arch::asm!(
+            "lidt [{}]",
+            in(reg) &idt_desc,
+            options(nostack, readonly)
+        );
+    }
+}
+
+/// Loads the global Interrupt Descriptor Table into an Application Processor (AP).
+#[allow(dead_code)]
+pub fn load_ap() {
+    unsafe {
         let idt_ptr = core::ptr::addr_of!(IDT) as *const IdtEntry;
         let idt_desc = IdtDescriptor {
             size: (size_of::<[IdtEntry; 256]>() - 1) as u16,

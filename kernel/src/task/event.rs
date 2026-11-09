@@ -1,11 +1,26 @@
-//! Async I/O, Event Polling, Epoll, EventFd, and TimerFd (Phase 11 - M29).
+//! # Async I/O, Event Polling, Epoll, EventFd, and TimerFd
 //!
-//! Subsystem features:
-//! - Multiplexed event polling via `poll(2)` and `epoll(7)` (`epoll_create1`, `epoll_ctl`, `epoll_wait`).
-//! - Inter-process/thread 64-bit counter event notifications via `eventfd(2)`.
-//! - Monotonic/real-time timer descriptors via `timerfd_create(2)` and `timerfd_settime(2)`.
-//! - Zero-copy scatter/gather vectored I/O via `readv(2)` and `writev(2)`.
-//! - In-kernel asynchronous completion queues (Async I/O).
+//! ## Overview
+//! High-performance scalable server architectures and interactive GUI event loops
+//! require multiplexed, non-blocking I/O event notification without thread-per-connection overhead.
+//!
+//! This module provides full POSIX and Linux-compatible asynchronous event primitives:
+//! 1. **Multiplexed Polling ([`EpollInstance`])**:
+//!    - Standard `epoll(7)` control (`EPOLL_CTL_ADD`, `EPOLL_CTL_MOD`, `EPOLL_CTL_DEL`).
+//!    - Edge-triggered (`EPOLLET`) and level-triggered readiness inspection.
+//!    - Integrates directly with the VFS [`Inode::poll`] interface.
+//! 2. **Inter-Thread/Process Counter Notifications ([`EventFd`])**:
+//!    - Implements `eventfd(2)` 64-bit atomic counter synchronization.
+//!    - Supports standard notification mode (resets counter to 0 upon `read`) and semaphore
+//!      mode (`EFD_SEMAPHORE`, decrements counter by 1 per `read`).
+//! 3. **File-Descriptor Timer Notifications ([`TimerFd`])**:
+//!    - Implements `timerfd_create(2)` and `timerfd_settime(2)`.
+//!    - Arms single-shot or periodic interval timers anchored to APIC monotonic clock ticks (100 Hz).
+//!    - Reading the descriptor returns the 64-bit integer count of expired intervals.
+//! 4. **Scatter/Gather Vectored I/O ([`IoVec`])**:
+//!    - Implements `readv(2)` and `writev(2)` zero-copy multi-buffer transfers.
+//! 5. **Kernel Asynchronous Completion Ring ([`AsyncCompletionQueue`])**:
+//!    - io_uring-style completion queues posting and reaping background I/O completions.
 
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
@@ -55,8 +70,11 @@ fn next_event_inode_num() -> u64 {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PollFd {
+    /// Target file descriptor to poll.
     pub fd: i32,
+    /// Requested event bitmask (POLLIN, POLLOUT, etc.).
     pub events: i16,
+    /// Returned event bitmask reported by kernel.
     pub revents: i16,
 }
 
@@ -64,7 +82,9 @@ pub struct PollFd {
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EpollEvent {
+    /// Bitmask of events (EPOLLIN, EPOLLOUT, EPOLLET, etc.).
     pub events: u32,
+    /// User payload / file descriptor token passed in `epoll_ctl`.
     pub data: u64,
 }
 
@@ -76,13 +96,14 @@ pub struct EpollItem {
     pub data: u64,
 }
 
-/// Epoll instance backed by an `Inode`, allowing nesting and unified VFS management.
+/// Epoll instance backed by an [`Inode`], allowing nesting and unified VFS management.
 pub struct EpollInstance {
     items: Spinlock<BTreeMap<i32, EpollItem>>,
     inode_num: u64,
 }
 
 impl EpollInstance {
+    /// Creates a new epoll instance.
     pub fn new() -> Self {
         Self {
             items: Spinlock::new(BTreeMap::new()),
@@ -90,6 +111,7 @@ impl EpollInstance {
         }
     }
 
+    /// Modifies, adds, or deletes monitored file descriptors within this epoll instance.
     pub fn ctl(&self, op: i32, fd: i32, event: EpollEvent) -> Result<(), FsError> {
         let mut items = self.items.lock();
         match op {

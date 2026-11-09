@@ -1,11 +1,47 @@
 /*
+ * ============================================================================
  * Application Processor (AP) Real-Mode Trampoline
+ * ============================================================================
  *
- * Bootstraps an Application Processor from 16-bit Real Mode into 64-bit Long Mode:
- *   16-bit Real Mode -> 32-bit Protected Mode -> 64-bit Long Mode
+ * Architecture & Bootstrapping Overview:
+ * When an x86_64 multiprocessor system boots, only the Bootstrap Processor
+ * (BSP) runs firmware (UEFI) and starts the OS kernel. All other Application
+ * Processors (APs) remain halted in an architectural Wait-For-SIPI (WFS) state,
+ * listening for Inter-Processor Interrupts (IPIs) on the APIC bus.
  *
- * Copied by the BSP to physical address 0x8000 (SIPI vector 0x08).
- * All addresses are computed relative to 0x8000 automatically by the assembler.
+ * Bootstrapping Sequence (Intel MultiProcessor / SDM Vol 3A):
+ * 1. The BSP copies this trampoline code into lower conventional memory (below 1 MiB).
+ *    NullOS locates the trampoline at physical page 0x8000 (page frame 8).
+ * 2. The BSP issues an INIT-SIPI-SIPI sequence to target APs.
+ * 3. The Startup IPI (SIPI) carries an 8-bit vector `0x08`, instructing the AP to
+ *    begin executing in 16-bit Real Address Mode at `CS:IP = 0x0800:0x0000`
+ *    (physical address `0x0800 << 4 = 0x8000`).
+ * 4. Mode Transitions executed by each AP:
+ *    - 16-bit Real Mode: Disables interrupts (CLI), clears direction flag (CLD),
+ *      initializes segment registers to 0, loads temporary 32-bit GDT (`gdt32`),
+ *      enables Protection Enable bit (`CR0.PE = 1`), and far jumps to 32-bit segment 0x08.
+ *    - 32-bit Protected Mode: Reloads segment selectors to 0x10, enables Physical Address
+ *      Extension (`CR4.PAE = 1`), PGE, OSFXSR, OSXMMEXCPT in CR4, writes the shared
+ *      kernel PML4 page table root to CR3, sets Long Mode Enable (`EFER.LME = 1`) and
+ *      No-Execute (`EFER.NXE = 1`) in IA32_EFER MSR (0xC0000080), enables Paging (`CR0.PG = 1`)
+ *      and Write Protect (`CR0.WP = 1`), and executes far jump to 64-bit segment 0x18.
+ *    - 64-bit Long Mode: Sets up segment registers to 0x10, loads per-CPU kernel stack
+ *      pointer from mailbox, places CPU ID into %rdi (System V AMD64 ABI 1st parameter),
+ *      writes 1 into mailbox status to acknowledge to BSP, and jumps to `ap_kernel_entry`.
+ *
+ * Mailbox Memory Layout (at fixed offsets within the 0x8000 page):
+ * +-------------------+---------------------------------------------------+
+ * | Offset            | Description                                       |
+ * +-------------------+---------------------------------------------------+
+ * | 0x0000 - 0x0007   | Short jump (0xEB) to `start16` entry              |
+ * | 0x0008 - 0x000F   | `ap_mailbox_cr3`: Physical address of PML4 root   |
+ * | 0x0010 - 0x0017   | `ap_mailbox_stack`: Virtual address of AP stack   |
+ * | 0x0018 - 0x001F   | `ap_mailbox_entry`: 64-bit kernel entry pointer   |
+ * | 0x0020 - 0x0027   | `ap_mailbox_cpu_id`: Logical CPU index (usize)    |
+ * | 0x0028 - 0x002F   | `ap_mailbox_status`: Atomic handshake state (1)  |
+ * | 0x0030 - 0x004F   | `gdt32` & descriptor table                        |
+ * | 0x0050+           | 16-bit, 32-bit, and 64-bit setup instructions     |
+ * +-------------------+---------------------------------------------------+
  */
 
 .section .rodata

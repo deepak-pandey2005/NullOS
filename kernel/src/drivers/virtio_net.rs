@@ -1,14 +1,27 @@
-//! VirtIO Network Device Driver (Phase 8 - M23 Network Driver).
+//! # VirtIO Network Device Driver
 //!
 //! Implements the VirtIO 0.9.5 / 1.0 paravirtualized network card (NIC) specification over PCI:
 //! - PCI device discovery (Vendor `0x1AF4`, Device `0x1000` legacy / `0x1041` modern).
 //! - Hardware MAC address discovery from device configuration space (`0x14..0x19`).
 //! - Dual Split Virtqueues:
-//!   - Queue 0: Receive Queue (RX) with pre-populated descriptor ring buffers.
-//!   - Queue 1: Transmit Queue (TX) with synchronous completion polling.
-//! - VirtIO 10-byte network packet header (`VirtIoNetHdr`) encapsulation.
+//!   - **Queue 0 (Receive / RX)**: Pre-populated descriptor ring buffers ready to absorb inbound packets.
+//!   - **Queue 1 (Transmit / TX)**: Synchronous completion polling for outgoing Ethernet frames.
+//! - VirtIO 10-byte network packet header ([`VirtIoNetHdr`]) encapsulation.
 //! - Raw packet transmission and reception primitives.
 //! - Device statistics tracking (RX/TX packets, RX/TX bytes).
+//!
+//! ### Split Virtqueue Architecture for Networking
+//!
+//! Unlike block devices that share a single queue for bidirectional commands, VirtIO networking
+//! requires separate, dedicated split virtqueues:
+//! - **Receive Queue (Queue 0)**: Guest provisions write-only memory buffers (`VIRTQ_DESC_F_WRITE`).
+//!   When an Ethernet packet arrives over the wire/tap device, the host hypervisor deposits the
+//!   header and payload into an available buffer and signals completion on the used ring.
+//!   The guest consumes the payload and must immediately re-arm the descriptor back to the available ring.
+//! - **Transmit Queue (Queue 1)**: When sending a packet, the guest constructs a 2-descriptor chain:
+//!   - Descriptor 0: 10-byte [`VirtIoNetHdr`] specifying checksum / GSO offload metadata.
+//!   - Descriptor 1: Raw Ethernet frame payload (up to 1514 bytes for standard MTU 1500).
+//!   The driver kicks Queue 1 and polls the used ring until the hypervisor finishes wire transmission.
 //!
 //! # Real Hardware vs. Virtual Machine Note:
 //! VirtIO-Net is a paravirtualized hypervisor standard (QEMU/KVM/VirtualBox).
@@ -31,43 +44,69 @@ use crate::memory::{self, PhysFrame, PAGE_SIZE_4K};
 use crate::println;
 use crate::sync::Spinlock;
 
-// PCI Vendor & Device IDs for VirtIO Network
+/// PCI Vendor ID for Red Hat / VirtIO hardware devices.
 pub const VIRTIO_VENDOR_ID: u16 = 0x1AF4;
+/// PCI Device ID for Transitional / Legacy VirtIO Network Adapter.
 pub const VIRTIO_DEV_NET_LEGACY: u16 = 0x1000;
+/// PCI Device ID for Modern VirtIO 1.0 Network Adapter.
 pub const VIRTIO_DEV_NET_MODERN: u16 = 0x1041;
 
 // VirtIO Legacy PCI I/O Register Offsets (relative to BAR0 I/O base)
+/// 32-bit R: Host feature bits.
 const VIRTIO_REG_DEVICE_FEATURES: u16 = 0x00;
+/// 32-bit W: Guest negotiated feature bits.
 const VIRTIO_REG_GUEST_FEATURES: u16 = 0x04;
+/// 32-bit RW: Queue Page Frame Number (physical frame >> 12).
 const VIRTIO_REG_QUEUE_ADDRESS: u16 = 0x08;
+/// 16-bit R: Number of descriptors in currently selected queue.
 const VIRTIO_REG_QUEUE_SIZE: u16 = 0x0C;
+/// 16-bit W: Queue index selector (0 = RX, 1 = TX).
 const VIRTIO_REG_QUEUE_SELECT: u16 = 0x0E;
+/// 16-bit W: Queue notify port (write queue index to kick hypervisor).
 const VIRTIO_REG_QUEUE_NOTIFY: u16 = 0x10;
+/// 8-bit RW: Device status register bits.
 const VIRTIO_REG_DEVICE_STATUS: u16 = 0x12;
+/// 8-bit R: Interrupt status register (cleared on read).
 const VIRTIO_REG_ISR_STATUS: u16 = 0x13;
+/// Start of device-specific configuration space.
 const VIRTIO_REG_DEVICE_CONFIG: u16 = 0x14;
 
 // VirtIO Device Status Flags
+/// Guest OS has acknowledged the device presence.
 const VIRTIO_STATUS_ACKNOWLEDGE: u8 = 1;
+/// Guest OS recognizes the device and loaded a driver.
 const VIRTIO_STATUS_DRIVER: u8 = 2;
+/// Driver setup is complete and device is live.
 const VIRTIO_STATUS_DRIVER_OK: u8 = 4;
+/// Feature negotiation completed successfully.
 const VIRTIO_STATUS_FEATURES_OK: u8 = 8;
+/// Driver encountered an unrecoverable failure.
 const VIRTIO_STATUS_FAILED: u8 = 128;
 
 // VirtIO Network Features
+/// Feature bit 5: Device has given MAC address.
 const VIRTIO_NET_F_MAC: u32 = 1 << 5;
+/// Feature bit 16: Device reports link status in config space.
 const VIRTIO_NET_F_STATUS: u32 = 1 << 16;
 
 // Virtqueue Descriptor Flags
+/// Buffer continues via the `next` descriptor index field.
 const VIRTQ_DESC_F_NEXT: u16 = 1;
+/// Buffer is write-only for the device (device writes to memory).
 const VIRTQ_DESC_F_WRITE: u16 = 2;
 
 // Maximum packet and buffer limits
+/// Length of an Ethernet hardware MAC address in bytes (6 bytes).
 pub const ETH_ALEN: usize = 6;
+/// Standard Ethernet Maximum Transmission Unit (MTU) payload size (1500 bytes).
 pub const ETH_MTU: usize = 1500;
-pub const ETH_MAX_FRAME: usize = 1514; // Header (14) + MTU (1500)
-pub const NET_HDR_SIZE: usize = 10;    // Standard 10-byte VirtIoNetHdr
-pub const RX_BUF_SIZE: usize = NET_HDR_SIZE + ETH_MAX_FRAME; // 1524 bytes
+/// Maximum Ethernet frame size: 14 bytes header (Dest MAC + Src MAC + EtherType) + 1500 bytes payload.
+pub const ETH_MAX_FRAME: usize = 1514;
+/// Standard 10-byte VirtIoNetHdr prefix size.
+pub const NET_HDR_SIZE: usize = 10;
+/// Size of pre-allocated receive buffer: 10 bytes header + 1514 bytes max frame = 1524 bytes.
+pub const RX_BUF_SIZE: usize = NET_HDR_SIZE + ETH_MAX_FRAME;
+/// Default number of pre-allocated RX buffers queued to the receive ring.
 const NUM_RX_BUFFERS: usize = 32;
 
 /// A 6-byte Ethernet Media Access Control (MAC) Address.
@@ -75,13 +114,17 @@ const NUM_RX_BUFFERS: usize = 32;
 pub struct MacAddress(pub [u8; ETH_ALEN]);
 
 impl MacAddress {
+    /// Broadcast MAC address `FF:FF:FF:FF:FF:FF`.
     pub const BROADCAST: Self = Self([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+    /// All-zeros MAC address `00:00:00:00:00:00`.
     pub const ZERO: Self = Self([0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
 
+    /// Creates a new MAC address from a 6-byte array.
     pub const fn new(bytes: [u8; ETH_ALEN]) -> Self {
         Self(bytes)
     }
 
+    /// Checks if this address matches the broadcast MAC.
     pub fn is_broadcast(&self) -> bool {
         self.0 == Self::BROADCAST.0
     }
@@ -101,18 +144,26 @@ impl fmt::Display for MacAddress {
 #[repr(C, align(16))]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct VirtqDesc {
+    /// 64-bit physical guest address of the buffer.
     pub addr: u64,
+    /// 32-bit length of the buffer in bytes.
     pub len: u32,
+    /// Descriptor flags (`VIRTQ_DESC_F_NEXT`, `VIRTQ_DESC_F_WRITE`).
     pub flags: u16,
+    /// Next descriptor index in the chain if `VIRTQ_DESC_F_NEXT` is set.
     pub next: u16,
 }
 
-/// Virtqueue Available Ring structure.
+/// Virtqueue Available Ring structure updated by the driver to pass requests to the device.
 #[repr(C)]
 pub struct VirtqAvail {
+    /// Driver flags (e.g. interrupt suppression).
     pub flags: u16,
+    /// Head index where the driver will place the next request descriptor index.
     pub idx: u16,
+    /// Ring array containing descriptor indices.
     pub ring: [u16; 256],
+    /// Event index for interrupt suppression (VirtIO 1.0).
     pub used_event: u16,
 }
 
@@ -120,37 +171,55 @@ pub struct VirtqAvail {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct VirtqUsedElem {
+    /// Index of the head descriptor of the completed chain.
     pub id: u32,
+    /// Total number of bytes written into buffer by the device.
     pub len: u32,
 }
 
-/// Virtqueue Used Ring structure.
+/// Virtqueue Used Ring structure updated by the device to notify completions.
 #[repr(C)]
 pub struct VirtqUsed {
+    /// Device flags (e.g. notification suppression).
     pub flags: u16,
+    /// Head index where the device will place the next completed request element.
     pub idx: u16,
+    /// Ring array containing completed request items.
     pub ring: [VirtqUsedElem; 256],
+    /// Event index for available ring notifications.
     pub avail_event: u16,
 }
 
 /// VirtIO Network Request/Response Header (10 bytes in legacy VirtIO 0.9.5).
+///
+/// Precedes every Ethernet packet transmitted or received over the VirtIO interface.
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct VirtIoNetHdr {
+    /// Checksum / packet flags.
     pub flags: u8,
+    /// Generic Segmentation Offload (GSO) type.
     pub gso_type: u8,
+    /// Ethernet + IP + L4 header length for GSO calculation.
     pub hdr_len: u16,
+    /// Maximum Segment Size for GSO.
     pub gso_size: u16,
+    /// Offset within packet where checksum calculation starts.
     pub csum_start: u16,
+    /// Offset relative to csum_start where checksum field is stored.
     pub csum_offset: u16,
 }
 
 /// Network interface I/O performance and packet statistics.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NetStats {
+    /// Total count of successfully received Ethernet frames.
     pub rx_packets: usize,
+    /// Total count of successfully transmitted Ethernet frames.
     pub tx_packets: usize,
+    /// Total payload and frame bytes received.
     pub rx_bytes: usize,
+    /// Total payload and frame bytes transmitted.
     pub tx_bytes: usize,
 }
 
@@ -205,8 +274,11 @@ unsafe fn outl(port: u16, val: u32) {
 
 /// Driver instance managing a VirtIO Network device.
 pub struct VirtIoNetDevice {
+    /// Base I/O port address decoded from BAR0.
     io_base: u16,
+    /// Hardware MAC address assigned to this network interface.
     mac: MacAddress,
+    /// Network packet and byte statistics.
     pub stats: NetStats,
 
     // Queue 0: Receive (RX)
@@ -233,6 +305,9 @@ unsafe impl Sync for VirtIoNetDevice {}
 
 impl VirtIoNetDevice {
     /// Probes and initializes a VirtIO Network device from a discovered PCI device.
+    ///
+    /// Configures legacy port I/O registers, negotiates MAC feature bits, allocates split virtqueues
+    /// for RX (queue 0) and TX (queue 1), pre-populates RX buffers, and transitions status to `DRIVER_OK`.
     pub fn probe(pci_dev: &PciDevice) -> Result<Self, &'static str> {
         // 1. Extract BAR0 I/O port address
         let io_base = match pci_dev.bars.first() {
@@ -348,6 +423,12 @@ impl VirtIoNetDevice {
     }
 
     /// Allocates memory for a single Split Virtqueue per specification.
+    ///
+    /// Layout:
+    /// - Descriptor Table: `q_size * 16` bytes.
+    /// - Available Ring: `4 + q_size * 2` bytes.
+    /// - Aligned to 4096-byte boundary.
+    /// - Used Ring: `4 + q_size * 8` bytes.
     unsafe fn alloc_queue(
         q_size: u16,
     ) -> Result<(PhysFrame, *mut VirtqDesc, *mut VirtqAvail, *mut VirtqUsed), &'static str> {
@@ -376,6 +457,9 @@ impl VirtIoNetDevice {
     }
 
     /// Transmits a raw Ethernet frame over the network.
+    ///
+    /// Constructs a 2-descriptor chain ([`VirtIoNetHdr`] + payload), inserts into TX Available Ring,
+    /// kicks Queue 1, and polls the Used Ring until transmission completes.
     pub fn send_packet(&mut self, packet: &[u8]) -> Result<(), &'static str> {
         if packet.is_empty() || packet.len() > ETH_MAX_FRAME {
             return Err("Packet size exceeds Ethernet MTU");
@@ -445,7 +529,9 @@ impl VirtIoNetDevice {
     }
 
     /// Checks the RX queue for an incoming network packet and copies it into `buf`.
+    ///
     /// Returns `Ok(Some(len))` if a packet was received, or `Ok(None)` if no packet is available.
+    /// Automatically strips the 10-byte VirtIO network header and re-arms the receive descriptor.
     pub fn receive_packet(&mut self, buf: &mut [u8]) -> Result<Option<usize>, &'static str> {
         unsafe {
             let used = &*self.rx_used_ring;
@@ -566,6 +652,9 @@ pub fn get_stats() -> Option<NetStats> {
 }
 
 /// Runs automated driver self-tests verifying packet transmission and loopback handling.
+///
+/// Constructs a test IEEE 802 Local Experimental frame (EtherType 0x88B5), transmits it,
+/// and verifies that interface statistics counters correctly record the transmission.
 pub fn run_self_tests() {
     println!("[VIRTIO-NET] Running VirtIO Network verification self-tests...");
 

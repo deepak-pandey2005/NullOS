@@ -1,8 +1,23 @@
-//! Anonymous Unidirectional Pipes (Phase 10 - M27 IPC).
+//! # Anonymous Unidirectional Pipes
 //!
-//! Provides ring-buffered inter-process data streaming conforming to POSIX `pipe(2)`.
-//! Reading from `pipefd[0]` retrieves data written to `pipefd[1]`.
-//! Supports EOF notification when writers close, and EPIPE error detection when readers close.
+//! ## Overview
+//! Pipes provide buffered, byte-oriented streaming communication between processes conforming
+//! to POSIX `pipe(2)`.
+//!
+//! A pipe pair consists of:
+//! - **Read End (`pipefd[0]`)**: Represented by [`PipeReadInode`]. Reading extracts bytes from the ring buffer.
+//! - **Write End (`pipefd[1]`)**: Represented by [`PipeWriteInode`]. Writing appends bytes into the ring buffer.
+//!
+//! ## Invariants & Reference Count Semantics:
+//! 1. **End-Of-File (EOF)**:
+//!    When all write endpoints to a pipe are closed (`writers == 0`), subsequent reads drain
+//!    any remaining buffered data and then return `Ok(0)` (EOF).
+//! 2. **Broken Pipe (EPIPE)**:
+//!    When all read endpoints to a pipe are closed (`readers == 0`), subsequent write attempts
+//!    fail immediately with `FsError::IoError` (EPIPE), and trigger a `SIGPIPE` signal in user space.
+//! 3. **Non-blocking Flow**:
+//!    The ring buffer holds up to [`DEFAULT_PIPE_CAPACITY`] bytes (4096 bytes). Writes write as
+//!    many bytes as capacity permits before returning.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -25,6 +40,7 @@ pub struct PipeBuffer {
 }
 
 impl PipeBuffer {
+    /// Constructs a new pipe circular buffer with the specified byte `capacity`.
     pub fn new(capacity: usize) -> Self {
         let mut buf = Vec::with_capacity(capacity);
         buf.resize(capacity, 0);
@@ -40,6 +56,9 @@ impl PipeBuffer {
     }
 
     /// Writes data into the circular buffer.
+    ///
+    /// # Errors
+    /// Returns `FsError::IoError` (EPIPE) if no readers remain open (`readers == 0`).
     pub fn write(&mut self, data: &[u8]) -> Result<usize, FsError> {
         if self.readers == 0 {
             // Broken pipe (EPIPE): no readers remain

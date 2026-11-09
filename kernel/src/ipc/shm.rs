@@ -1,8 +1,25 @@
-//! Shared Memory Subsystem (Phase 10 - M27 IPC).
+//! # Shared Memory Subsystem (POSIX `shmget` / `shmat`)
 //!
-//! Provides zero-copy inter-process memory sharing conforming to POSIX `shmget` / `shmat`.
-//! Multiple processes map identical physical memory frames into their separate address spaces,
-//! allowing instantaneous parallel data exchange without kernel copy overhead.
+//! ## Overview
+//! Shared memory represents the highest-throughput IPC mechanism in modern operating systems.
+//! Instead of copying data across kernel space (like pipes or sockets), shared memory maps
+//! the **exact same physical page frames** into the virtual address spaces of two or more
+//! isolated processes:
+//!
+//! ```text
+//! Process A Virtual Space                Physical Memory                Process B Virtual Space
+//! +---------------------+             +-------------------+             +---------------------+
+//! | Virtual Page 0x6000 | ----------> | Physical Frame #8 | <---------- | Virtual Page 0xA000 |
+//! +---------------------+             +-------------------+             +---------------------+
+//! ```
+//!
+//! ## Operational Pipeline:
+//! 1. [`shmget`]: Looks up an existing segment by `key`, or allocates `num_pages` zeroed physical
+//!    frames from the PMM and registers a new [`SharedMemorySegment`].
+//! 2. [`shmat`]: Walks the calling process's page table, mapping the segment's physical frames
+//!    at virtual address `vaddr` with `USER_ACCESSIBLE | WRITABLE` flags.
+//! 3. Data written by Process A is instantly visible to Process B at CPU bus speed without
+//!    issuing system calls or context switches.
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
@@ -18,11 +35,17 @@ pub struct ShmId(pub u64);
 
 /// Shared memory segment descriptor tracking allocated physical frames and attachment count.
 pub struct SharedMemorySegment {
+    /// Unique segment identifier.
     pub id: ShmId,
+    /// User-supplied lookup key (ftok or explicit constant).
     pub key: u64,
+    /// Total byte size of the segment (multiple of 4096).
     pub size: usize,
+    /// Physical frames backing this shared segment.
     pub frames: Vec<PhysFrame>,
+    /// Number of active process address space attachments.
     pub attachments: usize,
+    /// POSIX file permission mode (e.g. 0o666).
     pub permissions: u32,
 }
 

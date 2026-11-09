@@ -1,9 +1,35 @@
-//! NullOS Memory Management Subsystem (Phase 3).
+//! # NullOS Memory Management Subsystem
 //!
-//! Subsystems:
-//! - M7: Physical Memory Manager (PMM) with Bitmap Frame Allocator
-//! - M8: Virtual Memory & 4-level x86_64 Paging (Prepared)
-//! - M9: Kernel Heap Allocator & GlobalAlloc (Prepared)
+//! ## Subsystem Architecture Overview
+//! The NullOS memory subsystem provides a complete 3-tier memory management hierarchy:
+//! 1. **Physical Memory Management (PMM - Milestone 7)**:
+//!    - Built upon [`BitmapFrameAllocator`].
+//!    - Discovers physical memory topology via the UEFI Memory Map ([`uefi_mmap`]).
+//!    - Allocates and deallocates 4 KiB physical page frames ([`PhysFrame`]) and contiguous
+//!      multi-frame physical blocks for DMA buffers.
+//! 2. **Virtual Memory Management & 4-Level Paging (VMM - Milestone 8)**:
+//!    - Implements x86_64 4-level paging (`PML4` -> `PDPT` -> `PD` -> `PT`) via [`paging`].
+//!    - Manages isolated per-process user virtual address spaces via [`AddressSpace`].
+//!    - Identity-maps kernel code, stack, heap, APIC registers, and device MMIO.
+//! 3. **Dynamic Kernel Heap Allocator (Milestone 9)**:
+//!    - Implements a slab/freelist kernel heap allocator (`LinkedChunk` & global allocator)
+//!      via [`heap`], enabling standard Rust `alloc` collections (`Vec`, `String`, `Box`, `Arc`).
+//!
+//! ## Bootstrap Memory Layout & Placement
+//! During kernel initialization in [`init`]:
+//! - The UEFI memory map is scanned to identify conventional usable RAM and find the highest
+//!   physical RAM address (`max_phys_addr`).
+//! - The PMM bitmap size is computed: $\lceil \text{total\_frames} / 8 \rceil$ bytes.
+//! - A contiguous conventional RAM block strictly above the loaded kernel ELF image and the
+//!   lower 1 MiB boundary is allocated to house the PMM bitmap.
+//! - All conventional memory descriptors are marked free in the bitmap, after which
+//!   hardware-critical zones are reserved:
+//!   - Lower 1 MiB (`0x00000000..0x00100000`): Preserves BIOS IVT, BDA, and SMP trampoline.
+//!   - Kernel ELF image: `.text`, `.rodata`, `.data`, and `.bss` segments.
+//!   - BootInfo structure & UEFI memory map buffer.
+//!   - Framebuffer MMIO range (if situated within RAM bounds).
+//!   - PMM Bitmap memory region itself.
+
 #![allow(unused_imports, dead_code)]
 
 pub mod address;
@@ -27,7 +53,20 @@ use bootinfo::BootInfo;
 /// Global thread-safe physical frame allocator protected by spinlock.
 static FRAME_ALLOCATOR: Spinlock<Option<BitmapFrameAllocator>> = Spinlock::new(None);
 
-/// Initializes the Physical Memory Manager (PMM) using the UEFI Memory Map.
+/// Initializes the Physical Memory Manager (PMM), Virtual Memory (VMM), and Kernel Heap.
+///
+/// # Execution Pipeline:
+/// 1. Iterates over the UEFI memory map passed by the bootloader in `boot_info`.
+/// 2. Calculates total conventional RAM and locates the highest physical address.
+/// 3. Allocates physical memory for the PMM bitmap above the kernel image.
+/// 4. Initializes the [`BitmapFrameAllocator`].
+/// 5. Marks all conventional memory ranges as free.
+/// 6. Explicitly reserves critical hardware, kernel, bootloader, and framebuffer regions.
+/// 7. Initializes x86_64 4-level paging ([`paging::init`]).
+/// 8. Initializes the dynamic kernel heap allocator ([`heap::init`]).
+///
+/// # Parameters
+/// - `boot_info`: Pointer to bootloader handoff information.
 pub fn init(boot_info: &'static BootInfo) {
     println!();
     println!("----------------------------------------");

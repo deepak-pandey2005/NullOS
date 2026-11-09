@@ -1,7 +1,17 @@
-//! Process Signaling Subsystem (Phase 10 - M27 IPC).
+//! # Asynchronous Process Signaling Subsystem
 //!
-//! Provides standard POSIX-like asynchronous process signals, signal delivery,
-//! bitmask tracking, and default actions (termination, ignore).
+//! ## Overview
+//! Signals are asynchronous notifications dispatched to processes by the kernel or
+//! other processes (via `kill(2)`).
+//!
+//! ### Signal Semantics & Invariants:
+//! - **Uncatchable Signals**: `SIGKILL` (9) and `SIGSTOP` (19) cannot be caught, ignored, or blocked.
+//! - **PID 1 Immunity**: The `init` process (`ProcessId::INIT`) cannot be killed with `SIGKILL`.
+//! - **Default Actions**:
+//!   - `SIGKILL`, `SIGTERM`, `SIGQUIT`, `SIGINT`: Immediate process termination with exit status
+//!     encoded as `128 + signal_number` per POSIX convention.
+//!   - `SIGCHLD`: Notification to parent process when a child exits; ignored by default.
+//!   - `SIGPIPE`: Issued when writing to a pipe or socket with no active readers.
 
 use crate::task::process::{ProcessId, PROCESS_TABLE};
 
@@ -9,23 +19,41 @@ use crate::task::process::{ProcessId, PROCESS_TABLE};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum Signal {
+    /// Hangup detected on controlling terminal or death of controlling process.
     SIGHUP = 1,
+    /// Interrupt from keyboard (`Ctrl+C`).
     SIGINT = 2,
+    /// Quit from keyboard (`Ctrl+\`).
     SIGQUIT = 3,
+    /// Illegal instruction.
     SIGILL = 4,
+    /// Trace/breakpoint trap.
     SIGTRAP = 5,
+    /// Abort signal from `abort(3)`.
     SIGABRT = 6,
+    /// Bus error (bad memory access).
     SIGBUS = 7,
+    /// Floating-point exception.
     SIGFPE = 8,
+    /// Kill signal (unblockable termination).
     SIGKILL = 9,
+    /// User-defined signal 1.
     SIGUSR1 = 10,
+    /// Invalid memory reference / page fault violation.
     SIGSEGV = 11,
+    /// User-defined signal 2.
     SIGUSR2 = 12,
+    /// Broken pipe: write to pipe with no readers.
     SIGPIPE = 13,
+    /// Timer signal from `alarm(2)`.
     SIGALRM = 14,
+    /// Termination signal (graceful shutdown request).
     SIGTERM = 15,
+    /// Child process stopped or terminated.
     SIGCHLD = 17,
+    /// Continue if stopped.
     SIGCONT = 18,
+    /// Stop process execution (unblockable pause).
     SIGSTOP = 19,
 }
 

@@ -1,23 +1,29 @@
 /*
  * Thread Context Switch Assembly Primitive for x86_64.
  *
- * Prototype (SysV AMD64 ABI):
+ * Prototype (System V AMD64 ABI):
  *   extern "C" fn switch_threads(prev_rsp_ptr: *mut u64, next_rsp: u64);
  *
  * Parameters:
- *   %rdi: Pointer to location where the current thread's %rsp will be saved
- *   %rsi: The new thread's %rsp to switch to
+ *   %rdi: Pointer to `u64` where the outgoing thread's current %rsp is written.
+ *   %rsi: The incoming thread's target %rsp to be loaded into the CPU.
+ *
+ * Mechanics:
+ * Under System V AMD64 ABI, registers %rax, %rcx, %rdx, %rsi, %rdi, %r8..%r11 are
+ * caller-saved (scratch registers). Functions that yield or are preempted expect
+ * only the callee-saved registers (%rbx, %rbp, %r12, %r13, %r14, %r15, and RFLAGS)
+ * to be preserved across context switches.
  */
 
 .global switch_threads
 .type switch_threads, @function
 
 switch_threads:
-    # 1. Save CPU flags and immediately disable interrupts to ensure atomic saving
+    /* Step 1: Save outgoing thread CPU flags and disable interrupts during stack pivot */
     pushfq
     cli
 
-    # 2. Save callee-preserved registers on the old stack
+    /* Step 2: Push System V AMD64 callee-preserved registers onto the outgoing stack */
     push %r15
     push %r14
     push %r13
@@ -25,13 +31,13 @@ switch_threads:
     push %rbx
     push %rbp
 
-    # 3. Save current %rsp into *prev_rsp_ptr
+    /* Step 3: Save the outgoing thread's top of stack pointer into *prev_rsp_ptr */
     mov %rsp, (%rdi)
 
-    # 4. Switch CPU stack pointer to next thread's %rsp
+    /* Step 4: Atomically pivot the CPU stack pointer to the incoming thread's stack */
     mov %rsi, %rsp
 
-    # 5. Restore callee-preserved registers from the new thread's stack
+    /* Step 5: Restore callee-preserved registers from the incoming thread's stack */
     pop %rbp
     pop %rbx
     pop %r12
@@ -39,9 +45,9 @@ switch_threads:
     pop %r14
     pop %r15
 
-    # 6. Sanitize and restore CPU flags (clear Trap Flag 0x100 and Nested Task 0x4000)
+    /* Step 6: Sanitize flags: mask off Trap Flag (0x100) and Nested Task (0x4000), restore RFLAGS */
     andq $~0x4100, (%rsp)
     popfq
 
-    # 7. Return into the new thread (pops %rip from stack)
+    /* Step 7: Pop target thread's saved %rip from the stack and resume execution */
     ret

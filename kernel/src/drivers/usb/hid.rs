@@ -1,10 +1,29 @@
-//! USB HID (Human Interface Device) Driver (Phase 12 - M31).
+//! # USB Human Interface Device (HID) Driver
 //!
-//! Decodes USB Boot Protocol input reports:
-//! - 8-byte Keyboard Boot Report (Modifiers + 6 Key Usage IDs).
-//! - 3/4-byte Mouse Boot Report (Buttons + Relative X/Y deltas).
-//! - Dispatches keyboard events to console/shell and graphics event system.
-//! - Dispatches mouse events to window manager and mouse cursor engine.
+//! Implements USB HID Boot Protocol decoders and input dispatchers:
+//! - **8-byte Keyboard Boot Report**: Modifier keys (Left/Right Ctrl, Shift, Alt, GUI) + 6-key rollover array.
+//! - **3/4-byte Mouse Boot Report**: Button bitmask (Left, Right, Middle) + relative signed X/Y deltas.
+//! - **Event Routing**: Key events are queued to [`USB_CHAR_QUEUE`] for console/shell consumption
+//!   and [`INPUT_QUEUE`] for GUI desktop applications. Mouse events update [`MOUSE`] coordinates
+//!   and generate button down/up events.
+//!
+//! ### USB Keyboard Boot Protocol Format (8 Bytes)
+//!
+//! ```text
+//! Byte 0: Modifier keys bitmask:
+//!         Bit 0: Left Ctrl,   Bit 1: Left Shift,   Bit 2: Left Alt,   Bit 3: Left GUI
+//!         Bit 4: Right Ctrl,  Bit 5: Right Shift,  Bit 6: Right Alt,  Bit 7: Right GUI
+//! Byte 1: Reserved (OEM / padding)
+//! Byte 2..7: Key Array (Up to 6 simultaneous USB HID Usage IDs)
+//! ```
+//!
+//! ### USB Mouse Boot Protocol Format (3 Bytes)
+//!
+//! ```text
+//! Byte 0: Button bitmask: Bit 0 = Left, Bit 1 = Right, Bit 2 = Middle
+//! Byte 1: Relative X displacement (signed 8-bit integer, two's complement)
+//! Byte 2: Relative Y displacement (signed 8-bit integer, two's complement)
+//! ```
 
 #![allow(dead_code)]
 
@@ -13,16 +32,23 @@ use crate::graphics::event::{InputEvent, MouseButton, INPUT_QUEUE};
 use crate::graphics::mouse::MOUSE;
 use crate::sync::Spinlock;
 
+/// FIFO buffer storing decoded ASCII characters from USB keyboard inputs for interactive shell reading.
 pub static USB_CHAR_QUEUE: Spinlock<VecDeque<char>> = Spinlock::new(VecDeque::new());
 
 /// State tracker for USB Keyboard Boot Protocol reports.
+///
+/// Keeps track of previously pressed keys and modifier states to synthesize
+/// edge-triggered key-down and key-up events.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct UsbKeyboardState {
+    /// Modifier bitmask from the previous report.
     pub prev_modifiers: u8,
+    /// 6-key array from the previous report.
     pub prev_keys: [u8; 6],
 }
 
 impl UsbKeyboardState {
+    /// Creates a new keyboard state tracker with no keys initially pressed.
     pub const fn new() -> Self {
         Self {
             prev_modifiers: 0,
@@ -31,6 +57,10 @@ impl UsbKeyboardState {
     }
 
     /// Processes an 8-byte standard USB Boot Protocol Keyboard Report.
+    ///
+    /// Computes set differences between current and previous keys to fire:
+    /// - `pressed: true` events for newly detected key usages.
+    /// - `pressed: false` events for keys that were released.
     pub fn process_report(&mut self, report: &[u8; 8]) {
         let modifiers = report[0];
         let keys = [
@@ -76,15 +106,19 @@ impl UsbKeyboardState {
 /// State tracker for USB Mouse Boot Protocol reports.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct UsbMouseState {
+    /// Button bitmask from the previous report.
     pub prev_buttons: u8,
 }
 
 impl UsbMouseState {
+    /// Creates a new mouse state tracker with all buttons unpressed.
     pub const fn new() -> Self {
         Self { prev_buttons: 0 }
     }
 
     /// Processes a standard 3-byte or 4-byte USB Boot Protocol Mouse Report.
+    ///
+    /// Updates cursor position on screen and detects button press and release transitions.
     pub fn process_report(&mut self, report: &[u8]) {
         if report.len() < 3 {
             return;
@@ -126,16 +160,20 @@ impl UsbMouseState {
     }
 }
 
-/// Global USB HID input state trackers.
+/// Global USB keyboard state tracker.
 pub static USB_KEYBOARD: Spinlock<UsbKeyboardState> = Spinlock::new(UsbKeyboardState::new());
+/// Global USB mouse state tracker.
 pub static USB_MOUSE: Spinlock<UsbMouseState> = Spinlock::new(UsbMouseState::new());
 
-/// Reads a pending character from the USB keyboard input queue.
+/// Reads a pending character from the USB keyboard input queue, if one is available.
 pub fn read_char() -> Option<char> {
     USB_CHAR_QUEUE.lock().pop_front()
 }
 
-/// Translates a USB HID Usage ID to an ASCII character.
+/// Translates a standard USB HID Keyboard Usage ID to its corresponding ASCII character.
+///
+/// Handles letters, numerical digits, control keys (Enter, Esc, Backspace, Tab, Space),
+/// and punctuation symbols, accounting for the `shift` modifier state.
 pub fn hid_usage_to_char(usage: u8, shift: bool) -> Option<char> {
     match usage {
         // Letters A-Z

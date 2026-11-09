@@ -1,9 +1,27 @@
-//! Fast Userspace Mutex (Futex) Subsystem (Phase 11 - M28).
+//! # Fast Userspace Mutex (Futex) Subsystem
 //!
-//! Provides the core synchronization engine for Ring 3 userspace threads:
-//! - `FUTEX_WAIT`: Blocks if value matches expected condition.
-//! - `FUTEX_WAKE`: Wakes up specified number of waiters on a userspace address.
-//! - `FUTEX_REQUEUE`: Requeues waiters from one futex address to another (used for condvars).
+//! ## Overview
+//! Futexes provide the core building block for high-performance userspace synchronization
+//! libraries (e.g. `pthread_mutex`, `pthread_cond`, C++ `std::mutex`).
+//!
+//! ### Core Philosophy
+//! In the uncontended case, locking and unlocking occur entirely in Ring 3 userspace
+//! using atomic assembly instructions (`lock cmpxchg`), without issuing a system call.
+//! The kernel is invoked only when contention occurs (to sleep) or when releasing a contended
+//! lock (to wake sleepers).
+//!
+//! ### Implemented Operations:
+//! 1. **`FUTEX_WAIT` ([`futex_wait`])**:
+//!    - Atomically validates that the 32-bit integer at `uaddr` equals `expected`.
+//!    - If unequal, returns `EAGAIN` immediately (preventing missed wakeups).
+//!    - If equal, enqueues the caller thread into [`FUTEX_REGISTRY`] under `(ProcessId, uaddr)`
+//!      and suspends the thread via [`crate::task::block_current_thread`].
+//! 2. **`FUTEX_WAKE` ([`futex_wake`])**:
+//!    - Searches [`FUTEX_REGISTRY`] for waiters on `(ProcessId, uaddr)`.
+//!    - Wakes up to `max_wake` threads via [`crate::task::wake_thread`].
+//! 3. **`FUTEX_REQUEUE` ([`futex_requeue`])**:
+//!    - Wakes up to `max_wake` threads on `uaddr1` and moves up to `max_requeue` remaining
+//!      waiters onto `uaddr2` (essential for `pthread_cond_broadcast` without thundering-herd lock contention).
 
 use crate::sync::Spinlock;
 use crate::task::process::ProcessId;
@@ -11,9 +29,13 @@ use crate::task::thread::ThreadId;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
+/// Futex operation: block if value equals expected condition.
 pub const FUTEX_WAIT: u32 = 0;
+/// Futex operation: wake up specified number of waiters on an address.
 pub const FUTEX_WAKE: u32 = 1;
+/// Futex operation: wake waiters on source address and requeue remaining waiters on destination address.
 pub const FUTEX_REQUEUE: u32 = 3;
+/// Flag indicating futex is private to the process address space.
 pub const FUTEX_PRIVATE_FLAG: u32 = 128;
 
 /// Global registry tracking blocked user threads keyed by (ProcessId, Userspace Virtual Address).

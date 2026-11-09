@@ -1,14 +1,29 @@
-//! NullOS Advanced Interactive Shell (`nsh`) (Phase 7 - Userspace Shell & CLI).
+//! # NullOS Advanced Interactive Shell (`nsh`)
 //!
-//! Provides a modern Unix-style command-line environment featuring:
-//! - Environment variable storage (`$PATH`, `$USER`, `$PWD`, etc.), `export`, `env`, `unset`
-//! - Dynamic variable expansion (`$VAR`, `${VAR}`, `$?`, `$$`)
-//! - Standard I/O Redirection (`> file`, `>> file`, `< file`)
-//! - Pipelines (`cmd1 | cmd2 | cmd3`)
-//! - Background asynchronous execution (`cmd &`) & Job control (`jobs`)
-//! - Process signaling (`kill <pid>`)
-//! - Unix CLI utilities: `grep`, `wc`, `head`, `tail`, `pwd`, `cd`, `rm`
-//! - Direct PATH binary execution and ELF loading
+//! ## Overview
+//! `nsh` is the native command-line interface for NullOS, designed to provide a Unix-compliant
+//! interactive environment with full support for:
+//! 1. **Environment Variables**:
+//!    - Built-in `$PATH`, `$USER`, `$HOME`, `$SHELL`, `$OS`, `$ARCH`, `$PWD`.
+//!    - Commands: `export VAR=val`, `env`, `unset VAR`.
+//! 2. **Variable Expansion**:
+//!    - Standard `$VAR` and `${VAR}` parameter substitution.
+//!    - Special shell variables: `$?` (last exit code) and `$$` (shell PID).
+//! 3. **Input/Output Redirection**:
+//!    - Standard output redirection: `command > file` (truncate/create).
+//!    - Standard append redirection: `command >> file` (append/create).
+//!    - Standard input redirection: `command < file`.
+//! 4. **Pipelining**:
+//!    - Inter-command streaming via anonymous VFS pipes: `cmd1 | cmd2 | cmd3`.
+//! 5. **Background Jobs & Process Control**:
+//!    - Background execution: `command &`.
+//!    - Job table listing: `jobs`.
+//!    - Process termination: `kill <pid>`.
+//! 6. **Direct Binary Execution**:
+//!    - Searches directories specified in `$PATH` (`/bin`, `/disk`) to load and execute user ELF binaries.
+//! 7. **Unix Core Utilities**:
+//!    - Built-in implementations of `ls`, `cat`, `echo`, `mkdir`, `rm`, `pwd`, `cd`, `grep`,
+//!      `wc`, `head`, `tail`, `ps`, `mem`, `clear`, `reboot`, `poweroff`.
 
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
@@ -26,16 +41,22 @@ use crate::{print, println};
 /// Lifecycle state of a shell background job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobState {
+    /// Actively executing in the background.
     Running,
+    /// Finished executing with recorded exit code.
     Done(i32),
 }
 
 /// A tracked background execution job with inline command storage (zero heap allocations).
 #[derive(Debug, Clone, Copy)]
 pub struct Job {
+    /// Sequential job identifier (e.g. `[1]`).
     pub id: usize,
+    /// Length of command string stored in `cmd_bytes`.
     pub cmd_len: usize,
+    /// Inline command character buffer.
     pub cmd_bytes: [u8; 128],
+    /// Current execution state of the job.
     pub state: JobState,
 }
 

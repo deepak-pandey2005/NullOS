@@ -1,54 +1,121 @@
-//! Syscall Numbers, Dispatcher, and Ring 3 User Mode Execution (Phase 5).
+//! # System Call Dispatcher & Ring 3 Execution Engine
+//!
+//! ## System Call Architecture (x86_64 AMD64 ABI)
+//! NullOS implements fast hardware system calls using the x86_64 `SYSCALL` and `SYSRET`
+//! instructions. When a Ring 3 user process executes `SYSCALL`:
+//! 1. Hardware loads `%rip` from `IA32_LSTAR` (`syscall_entry` in `syscall.S`).
+//! 2. Hardware loads `%cs` and `%ss` from `IA32_STAR`.
+//! 3. Hardware saves user `%rip` to `%rcx` and user `%rflags` to `%r11`.
+//! 4. The kernel stub switches `%rsp` to the current thread's kernel stack (`set_kernel_rsp`),
+//!    saves general-purpose registers, maps `%r10` to the 4th argument (replacing `%rcx`),
+//!    and invokes [`syscall_dispatcher`].
+//! 5. Upon completion, the return value in `%rax` is returned to userspace via `sysretq`.
+//!
+//! ## System V AMD64 Syscall Calling Conventions:
+//! - Syscall Number: `%rax`
+//! - Argument 1: `%rdi`
+//! - Argument 2: `%rsi`
+//! - Argument 3: `%rdx`
+//! - Argument 4: `%r10` (converted from `%rcx` which is destroyed by `syscall`)
+//! - Argument 5: `%r8`
+//! - Argument 6: `%r9`
+//! - Return Value: `%rax` (0 or positive on success, `-errno` on failure)
+//!
+//! ## Security & Buffer Isolation Invariants:
+//! All user pointer arguments are validated via [`crate::security::validate_user_buffer`]
+//! to ensure user requests cannot read or mutate higher-half kernel memory.
 
 use crate::memory::address::{Page, PhysAddr, PhysFrame, VirtAddr, PAGE_SIZE_4K};
 use crate::memory::PageTableFlags;
 use crate::{print, println};
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+/// POSIX read(2) syscall number (0).
 pub const SYS_READ: u64 = 0;
+/// POSIX write(2) syscall number (1).
 pub const SYS_WRITE: u64 = 1;
+/// POSIX open(2) syscall number (2).
 pub const SYS_OPEN: u64 = 2;
+/// POSIX close(2) syscall number (3).
 pub const SYS_CLOSE: u64 = 3;
+/// POSIX stat(2) syscall number (4).
 pub const SYS_STAT: u64 = 4;
+/// POSIX lseek(2) syscall number (8).
 pub const SYS_LSEEK: u64 = 8;
+/// POSIX mmap(2) syscall number (9).
 pub const SYS_MMAP: u64 = 9;
+/// POSIX pipe(2) syscall number (22).
 pub const SYS_PIPE: u64 = 22;
+/// POSIX sched_yield(2) syscall number (24).
 pub const SYS_YIELD: u64 = 24;
+/// POSIX getpid(2) syscall number (39).
 pub const SYS_GETPID: u64 = 39;
+/// Linux clone(2) thread spawn syscall number (56).
 pub const SYS_CLONE: u64 = 56;
+/// Thread termination syscall number (57).
 pub const SYS_THREAD_EXIT: u64 = 57;
+/// Thread join syscall number (58).
 pub const SYS_THREAD_JOIN: u64 = 58;
+/// POSIX exit(2) process exit syscall number (60).
 pub const SYS_EXIT: u64 = 60;
+/// POSIX waitpid(2) child reap syscall number (61).
 pub const SYS_WAITPID: u64 = 61;
+/// POSIX kill(2) process signal syscall number (62).
 pub const SYS_KILL: u64 = 62;
+/// Sleep timer syscall number (100).
 pub const SYS_SLEEP: u64 = 100;
+/// Linux arch_prctl(2) architecture control syscall number (158).
 pub const SYS_ARCH_PRCTL: u64 = 158;
+/// POSIX gettid(2) thread identifier syscall number (186).
 pub const SYS_GETTID: u64 = 186;
+/// Linux futex(2) fast userspace mutex syscall number (202).
 pub const SYS_FUTEX: u64 = 202;
 
+/// POSIX poll(2) syscall number (7).
 pub const SYS_POLL: u64 = 7;
+/// POSIX readv(2) vectored read syscall number (19).
 pub const SYS_READV: u64 = 19;
+/// POSIX writev(2) vectored write syscall number (20).
 pub const SYS_WRITEV: u64 = 20;
+/// Linux epoll_create(2) syscall number (213).
 pub const SYS_EPOLL_CREATE: u64 = 213;
+/// Linux epoll_wait(2) syscall number (232).
 pub const SYS_EPOLL_WAIT: u64 = 232;
+/// Linux epoll_ctl(2) syscall number (233).
 pub const SYS_EPOLL_CTL: u64 = 233;
+/// Linux timerfd_create(2) syscall number (283).
 pub const SYS_TIMERFD_CREATE: u64 = 283;
+/// Linux eventfd(2) syscall number (284).
 pub const SYS_EVENTFD: u64 = 284;
+/// Linux timerfd_settime(2) syscall number (286).
 pub const SYS_TIMERFD_SETTIME: u64 = 286;
+/// Linux timerfd_gettime(2) syscall number (287).
 pub const SYS_TIMERFD_GETTIME: u64 = 287;
+/// Linux eventfd2(2) syscall number (290).
 pub const SYS_EVENTFD2: u64 = 290;
+/// Linux epoll_create1(2) syscall number (291).
 pub const SYS_EPOLL_CREATE1: u64 = 291;
+/// Dynamic linker dlopen syscall number (300).
 pub const SYS_DLOPEN: u64 = 300;
+/// Dynamic linker dlsym syscall number (301).
 pub const SYS_DLSYM: u64 = 301;
+/// Dynamic linker dlclose syscall number (302).
 pub const SYS_DLCLOSE: u64 = 302;
 
+/// Sets Thread Local Storage (TLS) register `%gs` base address.
 pub const ARCH_SET_GS: u64 = 0x1001;
+/// Sets Thread Local Storage (TLS) register `%fs` base address.
 pub const ARCH_SET_FS: u64 = 0x1002;
+/// Reads Thread Local Storage (TLS) register `%fs` base address.
 pub const ARCH_GET_FS: u64 = 0x1003;
+/// Reads Thread Local Storage (TLS) register `%gs` base address.
 pub const ARCH_GET_GS: u64 = 0x1004;
 
+/// Memory page protection: read permission.
 pub const PROT_READ: u64 = 1;
+/// Memory page protection: write permission.
 pub const PROT_WRITE: u64 = 2;
+/// Memory page protection: execute permission.
 pub const PROT_EXEC: u64 = 4;
 
 const USER_CODE_VADDR: u64 = 0x0040_0000; // 4 MiB

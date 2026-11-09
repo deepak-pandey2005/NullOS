@@ -1,16 +1,39 @@
-//! Condition Variable Primitive (Phase 11 - M28).
+//! # Condition Variable Synchronization Primitive
 //!
-//! Enables threads to block while waiting for a condition and wake up when signaled.
+//! ## Overview
+//! A condition variable allows execution threads to block until a specific state
+//! predicate becomes true. Condition variables are always paired with a [`super::Mutex`].
+//!
+//! ## Usage Pattern (Predicate Checking Loop):
+//! ```rust,ignore
+//! let mut guard = mutex.lock();
+//! while !predicate_condition(&*guard) {
+//!     guard = condvar.wait(guard);
+//! }
+//! // Critical section with predicate satisfied
+//! ```
+//!
+//! ## Invariants & Mechanics:
+//! 1. **Atomic Wait Sequence**:
+//!    - The caller's [`ThreadId`] is enqueued on `waiters`.
+//!    - The [`MutexGuard`] is released, permitting competing threads to enter the critical section.
+//!    - The calling thread is suspended via [`crate::task::block_current_thread`].
+//!    - When signaled via [`notify_one`] or [`notify_all`], the thread re-acquires the [`Mutex`]
+//!      before [`wait`] returns.
+//! 2. **Spurious Wakeup Resistance**:
+//!    - Applications must always test the predicate inside a `while` loop rather than an `if` block.
 
 use crate::sync::{MutexGuard, Spinlock};
 use crate::task::thread::ThreadId;
 use alloc::vec::Vec;
 
+/// A synchronization primitive for thread signaling and state waiting.
 pub struct Condvar {
     waiters: Spinlock<Vec<ThreadId>>,
 }
 
 impl Condvar {
+    /// Creates a new Condition Variable with an empty wait queue.
     pub const fn new() -> Self {
         Self {
             waiters: Spinlock::new(Vec::new()),
@@ -18,7 +41,8 @@ impl Condvar {
     }
 
     /// Atomically releases the supplied Mutex and blocks the current thread on this condition variable.
-    /// Re-acquires the mutex before returning.
+    ///
+    /// Re-acquires the mutex before returning to the caller.
     pub fn wait<'a, T>(&self, guard: MutexGuard<'a, T>) -> MutexGuard<'a, T> {
         let mutex = guard.mutex;
         let tid = match crate::task::current_thread_id() {

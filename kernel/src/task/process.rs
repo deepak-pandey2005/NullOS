@@ -1,14 +1,33 @@
-//! Process Management (Phase 5 - M14).
+//! # Process Management and Lifecycle
 //!
-//! Subsystem features:
-//! - Thread-safe PID allocator (ProcessId starting from 1).
+//! ## Process Subsystem Architecture
+//! A process encapsulates an isolated virtual memory address space ([`AddressSpace`]),
+//! an independent file descriptor table ([`crate::fs::fd::FileDescriptorTable`]), and one
+//! or more execution threads.
+//!
+//! ### Process Lifecycle & State Machine
+//! ```text
+//!    create_process()
+//!          |
+//!          v
+//!      [Created] ----> [Ready] <---> [Running]
+//!                         ^             |
+//!                         |             v
+//!                         +------- [Waiting]
+//!                                       | (exit_process / kill)
+//!                                       v
+//!                                   [Zombie] ----> (reaped by waitpid) ----> [Terminated]
+//! ```
+//!
+//! ### Subsystem Features:
+//! - Thread-safe PID allocator ([`ProcessId`] starting from 1).
 //! - Process Control Block (PCB): Process structure with PID, state, parent/child relationships,
 //!   dedicated AddressSpace (PML4), thread collection, and exit codes.
-//! - Global thread-safe ProcessTable.
-//! - Process creation (spawn_process / create_process) loading ELF executables.
-//! - Process lifecycle management (Created, Ready, Running, Waiting, Zombie, Terminated).
-//! - Parent/child waiting primitives (waitpid) and clean zombie harvesting.
-//! - First user process ("init" / PID 1) launch.
+//! - Global thread-safe ProcessTable ([`PROCESS_TABLE`]).
+//! - Process creation ([`create_process`] / [`execute_user_elf`]) loading ELF executables.
+//! - Process lifecycle management (`Created`, `Ready`, `Running`, `Waiting`, `Zombie`, `Terminated`).
+//! - Parent/child waiting primitives ([`waitpid`]) and clean zombie harvesting.
+//! - First user process ("init" / PID 1) launch ([`spawn_init_process`]).
 
 use crate::memory::AddressSpace;
 use crate::println;
@@ -24,8 +43,10 @@ use core::sync::atomic::{AtomicU64, Ordering};
 pub struct ProcessId(pub u64);
 
 impl ProcessId {
+    /// Canonical PID 1 assigned to the initial root user process ("init").
     pub const INIT: ProcessId = ProcessId(1);
 
+    /// Returns the raw numeric PID value as `u64`.
     #[inline]
     pub const fn as_u64(&self) -> u64 {
         self.0
@@ -42,11 +63,17 @@ pub fn allocate_pid() -> ProcessId {
 /// The lifecycle state of a process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcessState {
+    /// Newly allocated process; memory mapping in progress.
     Created,
+    /// Ready for execution; threads enqueued in the scheduler.
     Ready,
+    /// Actively executing in Ring 3 or kernel mode.
     Running,
+    /// Blocked waiting for a child process to exit.
     Waiting(Option<ProcessId>), // Blocked waiting for a child process to exit
+    /// Terminated, holding exit status until parent reaps it.
     Zombie(i32),                // Terminated, holding exit status until parent reaps it
+    /// Fully reaped and deallocated.
     Terminated,                 // Fully reaped and deallocated
 }
 
@@ -68,14 +95,23 @@ pub enum ProcessState {
 
 /// Process Control Block (PCB) representing an isolated program with its own address space.
 pub struct Process {
+    /// Process identifier.
     pub pid: ProcessId,
+    /// Process name / program invocation name.
     pub name: String,
+    /// Current execution or lifecycle state.
     pub state: ProcessState,
+    /// Parent process PID, if spawned by another process.
     pub parent_pid: Option<ProcessId>,
+    /// List of active or zombie child process IDs.
     pub children: Vec<ProcessId>,
+    /// List of thread IDs belonging to this process.
     pub threads: Vec<ThreadId>,
+    /// Dedicated 4-level x86_64 virtual memory address space.
     pub address_space: AddressSpace,
+    /// POSIX file descriptor table mapping integer FDs to VFS file descriptions.
     pub fd_table: crate::fs::fd::FileDescriptorTable,
+    /// Exit status code recorded upon termination.
     pub exit_code: Option<i32>,
 }
 

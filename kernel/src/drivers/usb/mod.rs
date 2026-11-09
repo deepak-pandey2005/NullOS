@@ -1,12 +1,19 @@
-//! USB Subsystem & xHCI Host Controller (Phase 12 - M31).
+//! # USB Subsystem & xHCI Host Controller
 //!
-//! Features:
-//! - Full xHCI 1.0/1.1/1.2 Host Controller Driver.
-//! - TRB Command & Transfer Rings with Producer Cycle State tracking.
-//! - Event Ring Segment Table (ERST) & Interrupter 0 event dispatching.
-//! - Root Hub port management & USB Device enumeration.
-//! - Standard USB Descriptors parsing (Device, Config, Interface, Endpoint, HID).
-//! - USB HID Boot Protocol Drivers for Keyboards and Mice.
+//! This module provides a complete, modern Universal Serial Bus (USB 2.0 / USB 3.x) subsystem
+//! driven by an eXtensible Host Controller Interface (xHCI) driver.
+//!
+//! ### Subsystem Capabilities
+//! - **xHCI 1.0 / 1.1 / 1.2 Specification Compliance**: Capability Registers, Operational Registers,
+//!   Runtime Registers, and Doorbell Registers.
+//! - **Ring Buffer Memory Management**: Command Rings, Transfer Rings, and Event Rings utilizing
+//!   Transfer Request Blocks (TRBs) with hardware cycle state tracking.
+//! - **Root Hub Management & Port Enumeration**: Resetting ports, detecting USB 2.0 (High Speed)
+//!   and USB 3.0 (SuperSpeed) protocols, assigning Device Contexts in the Device Context Base Address Array (DCBAA).
+//! - **USB Descriptor Decoders**: Parsing Standard Device, Configuration, Interface, Endpoint,
+//!   and HID Descriptors.
+//! - **Human Interface Device (HID) Drivers**: Boot Protocol drivers for USB Keyboards and USB Mice,
+//!   feeding input events directly into the kernel console and window manager.
 
 #![allow(dead_code)]
 
@@ -20,12 +27,15 @@ use crate::println;
 pub use hid::read_char;
 pub use xhci::{XhciUsbDevice, XHCI};
 
-/// Initializes the USB Subsystem and probes for xHCI controllers.
+/// Initializes the USB Subsystem and probes PCI for xHCI controllers.
+///
+/// Discovers PCI devices matching Class 0x0C (Serial Bus), Subclass 0x03 (USB),
+/// and Programming Interface 0x30 (xHCI).
 pub fn init() {
     xhci::init();
 }
 
-/// Retrieves a cloned list of all enumerated USB devices.
+/// Retrieves a cloned list of all enumerated USB devices attached to the xHCI controller.
 pub fn list_devices() -> Vec<XhciUsbDevice> {
     let guard = XHCI.lock();
     match guard.as_ref() {
@@ -34,7 +44,7 @@ pub fn list_devices() -> Vec<XhciUsbDevice> {
     }
 }
 
-/// Returns the total count of enumerated USB devices.
+/// Returns the total count of successfully enumerated USB devices.
 pub fn device_count() -> usize {
     let guard = XHCI.lock();
     match guard.as_ref() {
@@ -43,7 +53,9 @@ pub fn device_count() -> usize {
     }
 }
 
-/// Polls USB input devices (keyboards and mice) for new transfer events.
+/// Polls USB input devices (keyboards and mice) for new transfer completion events.
+///
+/// Should be invoked periodically by the main kernel loop or desktop window manager.
 pub fn poll_inputs() {
     if let Some(ref mut controller) = *XHCI.lock() {
         controller.poll_inputs();
@@ -51,6 +63,12 @@ pub fn poll_inputs() {
 }
 
 /// Runs automated verification self-tests for Milestone 31 (USB & xHCI Controller).
+///
+/// Asserts:
+/// 1. xHCI specification version is valid ($\ge$ 0.96 / 1.0).
+/// 2. Operational limits (MaxSlots, MaxPorts, MaxIntrs) are non-zero.
+/// 3. Command and Event Ring DMA memory allocations are valid physical addresses.
+/// 4. Discovered USB devices have valid Slot IDs and MaxPacketSizes.
 pub fn run_self_tests() {
     println!();
     println!("--------------------------------------------------");

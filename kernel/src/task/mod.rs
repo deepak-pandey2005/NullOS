@@ -1,8 +1,59 @@
-//! NullOS Task Execution Subsystem (Phase 4).
+//! # NullOS Task Execution Subsystem
 //!
-//! Subsystems:
-//! - M10: Kernel Threads, Stack Frames, and Assembly Context Switching
-//! - M11: Preemptive Multitasking Round-Robin Scheduler & Sleep Primitives
+//! ## Subsystem Architecture Overview
+//! The NullOS task management subsystem provides a complete, modern OS multitasking environment
+//! supporting both lightweight kernel threads and fully isolated user-mode processes:
+//!
+//! ```text
+//!                          +-----------------------+
+//!                          |  Scheduler (M11/M24)  |
+//!                          +-----------------------+
+//!                                     |
+//!               +---------------------+---------------------+
+//!               |                                           |
+//!               v                                           v
+//!     +-------------------+                       +-------------------+
+//!     |   Kernel Thread   |                       |   User Process    |
+//!     | (Ring 0, Same AS) |                       | (Ring 3, Priv AS) |
+//!     +-------------------+                       +-------------------+
+//!               |                                           |
+//!     +-------------------+                       +-------------------+
+//!     | 64 KiB Kernel Stk |                       | Isolated Address- |
+//!     | Callee-saved regs |                       | Space, User Stack |
+//!     +-------------------+                       +-------------------+
+//!                                                           |
+//!                                                 +-------------------+
+//!                                                 |  SYSCALL Handlers |
+//!                                                 | (Fast sysenter)   |
+//!                                                 +-------------------+
+//! ```
+//!
+//! ### Key Sub-Components:
+//! 1. **Kernel Threads ([`thread`])**:
+//!    - Independent execution streams with individual 64 KiB stacks.
+//!    - Architectural context switching implemented in assembly (`switch.S`), saving and
+//!      restoring callee-saved registers (`%rbx`, `%rsp`, `%rbp`, `%r12`..`%r15`, `%rflags`).
+//! 2. **Preemptive Round-Robin Scheduler ([`scheduler`])**:
+//!    - Preemptive quantum enforced via APIC Timer interrupts (vector 32).
+//!    - Manages Ready, Running, Blocked, Sleeping, and Terminated thread states.
+//!    - Priority levels (0 = idle, 1 = normal, 2 = high, 3 = real-time).
+//! 3. **Processes & Address Spaces ([`process`])**:
+//!    - POSIX-like process lifecycle: `create_process`, `execute_user_elf`, `fork`, `exit_process`, `waitpid`.
+//!    - Per-process file descriptor table ([`crate::fs::fd::FileTable`]) and virtual memory ([`crate::memory::AddressSpace`]).
+//! 4. **User-Mode ELF Loader ([`elf`])**:
+//!    - Parses 64-bit ELF executable headers, maps `PT_LOAD` segments into user virtual memory,
+//!      zeroes `.bss`, allocates user stack at `0x0000_7FFF_FFFF_0000`, and prepares arguments (`argc`/`argv`).
+//! 5. **Fast System Calls ([`syscall`])**:
+//!    - Dispatches 30+ POSIX-compatible system calls (`read`, `write`, `open`, `close`, `fork`, `execve`,
+//!      `waitpid`, `pipe`, `socket`, `mmap`, `futex`, `kill`) via x86_64 `SYSCALL`/`SYSRET`.
+//! 6. **Dynamic Linking & Relocations ([`dynlink`])**:
+//!    - Runtime relocation (`R_X86_64_RELATIVE`, `R_X86_64_GLOB_DAT`, `R_X86_64_JUMP_SLOT`)
+//!      for shared ELF libraries.
+//! 7. **Event Multiplexing ([`event`])**:
+//!    - Readiness notifications and epoll-style wait mechanisms for scalable IPC and networking.
+//! 8. **Kernel Shell ([`shell`])**:
+//!    - Interactive diagnostic command-line interface with built-in commands (`help`, `ls`, `ps`, `mem`, `cat`, etc.).
+
 #![allow(unused_imports, dead_code)]
 
 pub mod dynlink;

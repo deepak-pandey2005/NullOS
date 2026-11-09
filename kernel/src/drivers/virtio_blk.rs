@@ -1,11 +1,36 @@
-//! VirtIO Block Device Driver (Phase 6 - M18 Block Devices).
+//! # VirtIO Block Device Driver
 //!
 //! Implements the VirtIO 0.9.5 / 1.0 paravirtualized block device specification over PCI:
 //! - PCI bus device discovery (Vendor `0x1AF4`, Device `0x1001` / `0x1042`).
 //! - Legacy PCI I/O port register access.
 //! - Split Virtqueue memory management (Descriptor Table, Available Ring, Used Ring).
 //! - 512-byte sector read and write DMA transfers.
-//! - Integration with the generic `BlockDevice` trait and global block registry.
+//! - Integration with the generic [`BlockDevice`] trait and global block registry.
+//!
+//! ### VirtIO Split Virtqueue Architecture
+//!
+//! A Virtqueue is composed of three contiguous memory structures aligned per the VirtIO specification:
+//! ```text
+//! +-------------------------------------------------------+
+//! | Descriptor Table: [VirtqDesc; queue_size]             |
+//! | (queue_size * 16 bytes)                               |
+//! +-------------------------------------------------------+
+//! | Available Ring: flags, idx, ring[queue_size]          |
+//! | (4 + queue_size * 2 bytes)                            |
+//! +-------------------------------------------------------+
+//! | PAD to 4096-byte boundary                             |
+//! +-------------------------------------------------------+
+//! | Used Ring: flags, idx, ring[queue_size] (flags, id)   |
+//! | (4 + queue_size * 8 bytes)                            |
+//! +-------------------------------------------------------+
+//! ```
+//!
+//! ### Request Descriptor Chaining
+//!
+//! Each 512-byte sector I/O operation consumes a 3-descriptor chain:
+//! 1. **Descriptor 0 (Header)**: Contains [`VirtIoBlkReqHeader`] (request type and 64-bit sector). Device reads (`NEXT`).
+//! 2. **Descriptor 1 (Data Buffer)**: 512-byte physical buffer. Device reads on write, device writes on read (`NEXT` | `WRITE`).
+//! 3. **Descriptor 2 (Status Byte)**: 1-byte return status (`0 = OK`, `1 = IOERR`, `2 = UNSUPP`). Device writes (`WRITE`).
 //!
 //! # Real Hardware vs. Virtual Machine Note:
 //! VirtIO-Blk is a paravirtualized hypervisor standard (QEMU/KVM/VirtualBox).
@@ -28,59 +53,91 @@ use crate::memory::{self, PhysFrame, PAGE_SIZE_4K};
 use crate::drivers::block::{BlockDevice, BlockError, SECTOR_SIZE, register_block_device};
 use crate::drivers::pci::{self, BarType, PciDevice};
 
-// PCI Vendor & Device IDs for VirtIO
+/// PCI Vendor ID for Red Hat / VirtIO paravirtualized hardware.
 const VIRTIO_VENDOR_ID: u16 = 0x1AF4;
-const VIRTIO_DEV_BLOCK_LEGACY: u16 = 0x1001; // Transitional / Legacy Block Device
-const VIRTIO_DEV_BLOCK_MODERN: u16 = 0x1042; // Modern VirtIO 1.0 Block Device
+/// PCI Device ID for Transitional / Legacy VirtIO Block Device.
+const VIRTIO_DEV_BLOCK_LEGACY: u16 = 0x1001;
+/// PCI Device ID for Modern VirtIO 1.0 Block Device.
+const VIRTIO_DEV_BLOCK_MODERN: u16 = 0x1042;
 
 // VirtIO Legacy PCI I/O Register Offsets (relative to BAR0 I/O base)
-const VIRTIO_REG_DEVICE_FEATURES: u16 = 0x00; // 32-bit R: Host feature bits
-const VIRTIO_REG_GUEST_FEATURES: u16  = 0x04; // 32-bit W: Guest negotiated feature bits
-const VIRTIO_REG_QUEUE_ADDRESS: u16   = 0x08; // 32-bit RW: Queue PFN (physical frame / 4096)
-const VIRTIO_REG_QUEUE_SIZE: u16      = 0x0C; // 16-bit R: Number of descriptors in queue
-const VIRTIO_REG_QUEUE_SELECT: u16    = 0x0E; // 16-bit W: Queue index selector (0 for block)
-const VIRTIO_REG_QUEUE_NOTIFY: u16    = 0x10; // 16-bit W: Queue notify (write queue index to kick)
-const VIRTIO_REG_DEVICE_STATUS: u16   = 0x12; // 8-bit RW: Device status bits
-const VIRTIO_REG_ISR_STATUS: u16      = 0x13; // 8-bit R: Interrupt status
-const VIRTIO_REG_DEVICE_CONFIG: u16   = 0x14; // Start of device-specific configuration space
+/// 32-bit R: Host feature bits.
+const VIRTIO_REG_DEVICE_FEATURES: u16 = 0x00;
+/// 32-bit W: Guest negotiated feature bits.
+const VIRTIO_REG_GUEST_FEATURES: u16  = 0x04;
+/// 32-bit RW: Queue Page Frame Number (physical frame >> 12).
+const VIRTIO_REG_QUEUE_ADDRESS: u16   = 0x08;
+/// 16-bit R: Number of descriptors in currently selected queue.
+const VIRTIO_REG_QUEUE_SIZE: u16      = 0x0C;
+/// 16-bit W: Queue index selector (0 for block request queue).
+const VIRTIO_REG_QUEUE_SELECT: u16    = 0x0E;
+/// 16-bit W: Queue notify port (write queue index to kick hypervisor).
+const VIRTIO_REG_QUEUE_NOTIFY: u16    = 0x10;
+/// 8-bit RW: Device status register bits.
+const VIRTIO_REG_DEVICE_STATUS: u16   = 0x12;
+/// 8-bit R: Interrupt status register (cleared on read).
+const VIRTIO_REG_ISR_STATUS: u16      = 0x13;
+/// Start of device-specific configuration space.
+const VIRTIO_REG_DEVICE_CONFIG: u16   = 0x14;
 
 // VirtIO Device Status Flags
+/// Guest OS has acknowledged the device presence.
 const VIRTIO_STATUS_ACKNOWLEDGE: u8 = 1;
+/// Guest OS recognizes the device and loaded a driver.
 const VIRTIO_STATUS_DRIVER: u8      = 2;
+/// Driver setup is complete and device is live.
 const VIRTIO_STATUS_DRIVER_OK: u8   = 4;
+/// Feature negotiation completed successfully.
 const VIRTIO_STATUS_FEATURES_OK: u8 = 8;
+/// Driver encountered an unrecoverable failure.
 const VIRTIO_STATUS_FAILED: u8      = 128;
 
 // VirtIO Block Request Types
-const VIRTIO_BLK_T_IN: u32  = 0; // Read from disk into memory
-const VIRTIO_BLK_T_OUT: u32 = 1; // Write from memory to disk
+/// Read sector(s) from block storage into host memory.
+const VIRTIO_BLK_T_IN: u32  = 0;
+/// Write sector(s) from host memory to block storage.
+const VIRTIO_BLK_T_OUT: u32 = 1;
+/// Flush volatile hardware write caches.
 const VIRTIO_BLK_T_FLUSH: u32 = 4;
 
 // VirtIO Block Response Status
+/// Request completed successfully.
 const VIRTIO_BLK_S_OK: u8     = 0;
+/// Device reported an unrecoverable I/O error.
 const VIRTIO_BLK_S_IOERR: u8  = 1;
+/// Request command is unsupported by the controller.
 const VIRTIO_BLK_S_UNSUPP: u8 = 2;
 
 // Virtqueue Descriptor Flags
-const VIRTQ_DESC_F_NEXT: u16  = 1; // Buffer continues via the `next` field
-const VIRTQ_DESC_F_WRITE: u16 = 2; // Buffer is write-only for the device (device writes to it)
+/// Buffer continues via the `next` descriptor index field.
+const VIRTQ_DESC_F_NEXT: u16  = 1;
+/// Buffer is write-only for the device (device writes to memory).
+const VIRTQ_DESC_F_WRITE: u16 = 2;
 
 /// Standard VirtIO 16-byte memory buffer descriptor.
 #[repr(C, align(16))]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct VirtqDesc {
+    /// 64-bit physical guest address of the buffer.
     pub addr: u64,
+    /// 32-bit length of the buffer in bytes.
     pub len: u32,
+    /// Descriptor flags (`VIRTQ_DESC_F_NEXT`, `VIRTQ_DESC_F_WRITE`).
     pub flags: u16,
+    /// Next descriptor index in the chain if `VIRTQ_DESC_F_NEXT` is set.
     pub next: u16,
 }
 
-/// Virtqueue Available Ring structure.
+/// Virtqueue Available Ring structure updated by the driver to pass requests to the device.
 #[repr(C)]
 pub struct VirtqAvail {
+    /// Driver flags (e.g. interrupt suppression).
     pub flags: u16,
+    /// Head index where the driver will place the next request descriptor index.
     pub idx: u16,
+    /// Ring array containing descriptor indices.
     pub ring: [u16; 256],
+    /// Event index for interrupt suppression (VirtIO 1.0).
     pub used_event: u16,
 }
 
@@ -88,25 +145,34 @@ pub struct VirtqAvail {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct VirtqUsedElem {
+    /// Index of the head descriptor of the completed chain.
     pub id: u32,
+    /// Total number of bytes written into buffer by the device.
     pub len: u32,
 }
 
-/// Virtqueue Used Ring structure.
+/// Virtqueue Used Ring structure updated by the device to notify completions.
 #[repr(C)]
 pub struct VirtqUsed {
+    /// Device flags (e.g. notification suppression).
     pub flags: u16,
+    /// Head index where the device will place the next completed request element.
     pub idx: u16,
+    /// Ring array containing completed request items.
     pub ring: [VirtqUsedElem; 256],
+    /// Event index for available ring notifications.
     pub avail_event: u16,
 }
 
-/// VirtIO Block Request Header placed in the first descriptor.
+/// VirtIO Block Request Header placed in the first descriptor of an I/O chain.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct VirtIoBlkReqHeader {
+    /// Command type (`VIRTIO_BLK_T_IN`, `VIRTIO_BLK_T_OUT`, `VIRTIO_BLK_T_FLUSH`).
     pub req_type: u32,
+    /// Reserved field (must be 0).
     pub reserved: u32,
+    /// Logical Block Address (sector number) on disk.
     pub sector: u64,
 }
 
@@ -161,14 +227,23 @@ unsafe fn outl(port: u16, val: u32) {
 
 /// Driver instance managing a single VirtIO Block PCI device.
 pub struct VirtIoBlockDevice {
+    /// Base I/O port address decoded from BAR0.
     io_base: u16,
+    /// Total disk capacity in 512-byte sectors.
     capacity_sectors: u64,
+    /// Number of descriptors in the active virtqueue (e.g. 128 or 256).
     queue_size: u16,
+    /// Allocated physical frame backing the virtqueue memory.
     _base_frame: PhysFrame,
+    /// Number of contiguous physical frames allocated.
     _num_frames: usize,
+    /// Pointer to the descriptor table.
     desc_table: *mut VirtqDesc,
+    /// Pointer to the available ring.
     avail_ring: *mut VirtqAvail,
+    /// Pointer to the used ring.
     used_ring: *mut VirtqUsed,
+    /// Synchronized tracker for the last processed used ring index.
     last_used_idx: Spinlock<u16>,
 }
 
@@ -179,6 +254,9 @@ unsafe impl Sync for VirtIoBlockDevice {}
 
 impl VirtIoBlockDevice {
     /// Attempts to probe and initialize a VirtIO Block device from a discovered PCI device.
+    ///
+    /// Performs feature handshake, allocates contiguous physical memory for the split virtqueue,
+    /// configures queue registers, enables the device, and reads capacity geometry.
     pub fn probe(pci_dev: &PciDevice) -> Result<Self, BlockError> {
         // Extract BAR0 I/O port address
         let io_base = match pci_dev.bars.first() {
@@ -448,6 +526,9 @@ pub fn init() {
 }
 
 /// Executes automated verification self-tests on the VirtIO block device.
+///
+/// Writes a deterministic 512-byte test pattern to sector 10, reads it back,
+/// and asserts that the written and read bytes match exactly.
 pub fn run_self_tests() {
     println!("[VIRTIO-BLK] Running VirtIO block verification self-tests...");
 

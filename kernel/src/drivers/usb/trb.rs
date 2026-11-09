@@ -1,84 +1,147 @@
-//! USB 3.0 xHCI Transfer Request Block (TRB) Definitions (Phase 12 - M31).
+//! # USB 3.0 xHCI Transfer Request Block (TRB) Definitions
 //!
 //! Implements TRB data structures according to the xHCI Specification 1.2:
 //! - 16-byte fixed-size descriptors.
-//! - Command Ring TRBs: Enable Slot, Disable Slot, Address Device, Configure Endpoint.
-//! - Transfer Ring TRBs: Normal, Setup Stage, Data Stage, Status Stage, Link TRB.
-//! - Event Ring TRBs: Command Completion, Transfer Event, Port Status Change.
+//! - **Command Ring TRBs**: Enable Slot, Disable Slot, Address Device, Configure Endpoint, Evaluate Context, No-Op.
+//! - **Transfer Ring TRBs**: Normal, Setup Stage, Data Stage, Status Stage, Link TRB.
+//! - **Event Ring TRBs**: Command Completion, Transfer Event, Port Status Change.
 //! - Producer Cycle State (PCS) tracking and completion codes.
+//!
+//! ### TRB Structure Layout (16 Bytes)
+//!
+//! ```text
+//! Byte 0..7   : Parameter (64-bit Physical Address, Data Buffer, or Immediate Data)
+//! Byte 8..11  : Status (Transfer Length, Interrupter Target, Completion Code)
+//! Byte 12..15 : Control (Cycle Bit, Chain, IOC, TRB Type, Direction, Slot/Endpoint ID)
+//! ```
 
 #![allow(dead_code)]
 
-/// TRB Types as defined by xHCI Specification Section 6.4.3.5.
+/// TRB Type: Normal Transfer TRB (Bulk, Interrupt).
 pub const TRB_TYPE_NORMAL: u32 = 1;
+/// TRB Type: Setup Stage for USB Control transfers on EP0.
 pub const TRB_TYPE_SETUP_STAGE: u32 = 2;
+/// TRB Type: Data Stage for USB Control transfers on EP0.
 pub const TRB_TYPE_DATA_STAGE: u32 = 3;
+/// TRB Type: Status Stage for USB Control transfers on EP0.
 pub const TRB_TYPE_STATUS_STAGE: u32 = 4;
+/// TRB Type: Isochronous Transfer TRB.
 pub const TRB_TYPE_ISOCH: u32 = 5;
+/// TRB Type: Link TRB connecting segments of a ring.
 pub const TRB_TYPE_LINK: u32 = 6;
+/// TRB Type: Event Data TRB.
 pub const TRB_TYPE_EVENT_DATA: u32 = 7;
+/// TRB Type: No-Op Command TRB.
 pub const TRB_TYPE_NOOP_COMMAND: u32 = 8;
+/// TRB Type: Enable Slot Command TRB.
 pub const TRB_TYPE_ENABLE_SLOT: u32 = 9;
+/// TRB Type: Disable Slot Command TRB.
 pub const TRB_TYPE_DISABLE_SLOT: u32 = 10;
+/// TRB Type: Address Device Command TRB.
 pub const TRB_TYPE_ADDRESS_DEVICE: u32 = 11;
+/// TRB Type: Configure Endpoint Command TRB.
 pub const TRB_TYPE_CONFIGURE_ENDPOINT: u32 = 12;
+/// TRB Type: Evaluate Context Command TRB.
 pub const TRB_TYPE_EVALUATE_CONTEXT: u32 = 13;
+/// TRB Type: Reset Endpoint Command TRB.
 pub const TRB_TYPE_RESET_ENDPOINT: u32 = 14;
+/// TRB Type: Stop Endpoint Command TRB.
 pub const TRB_TYPE_STOP_ENDPOINT: u32 = 15;
+/// TRB Type: Set TR Dequeue Pointer Command TRB.
 pub const TRB_TYPE_SET_TR_DEQUEUE: u32 = 16;
+/// TRB Type: Reset Device Command TRB.
 pub const TRB_TYPE_RESET_DEVICE: u32 = 17;
+/// TRB Type: Force Event Command TRB.
 pub const TRB_TYPE_FORCE_EVENT: u32 = 18;
+/// TRB Type: Transfer Event (generated on Event Ring).
 pub const TRB_TYPE_TRANSFER_EVENT: u32 = 32;
+/// TRB Type: Command Completion Event.
 pub const TRB_TYPE_COMMAND_COMPLETION: u32 = 33;
+/// TRB Type: Port Status Change Event.
 pub const TRB_TYPE_PORT_STATUS_CHANGE: u32 = 34;
+/// TRB Type: Bandwidth Request Event.
 pub const TRB_TYPE_BANDWIDTH_REQUEST: u32 = 35;
+/// TRB Type: Doorbell Event.
 pub const TRB_TYPE_DOORBELL_EVENT: u32 = 36;
+/// TRB Type: Host Controller Event.
 pub const TRB_TYPE_HOST_CONTROLLER_EVENT: u32 = 37;
+/// TRB Type: Device Notification Event.
 pub const TRB_TYPE_DEVICE_NOTIFICATION: u32 = 38;
+/// TRB Type: Microframe Index Wrap Event.
 pub const TRB_TYPE_MFINDEX_WRAP: u32 = 39;
 
 // TRB Control Flags
+/// Cycle bit (bit 0): toggled to mark TRB ownership between software and hardware.
 pub const TRB_FLAG_CYCLE: u32 = 1 << 0;
+/// Toggle Cycle bit (bit 1): Used in Link TRB to invert the cycle state upon ring wrap.
 pub const TRB_FLAG_TOGGLE_CYCLE: u32 = 1 << 1;
-pub const TRB_FLAG_ISP: u32 = 1 << 2;          // Interrupt on Short Packet
-pub const TRB_FLAG_CHAIN: u32 = 1 << 4;        // Chain bit
-pub const TRB_FLAG_IOC: u32 = 1 << 5;          // Interrupt On Completion
-pub const TRB_FLAG_IDT: u32 = 1 << 6;          // Immediate Data
-pub const TRB_FLAG_BSR: u32 = 1 << 9;          // Block Set Address Request
-pub const TRB_FLAG_DIR_IN: u32 = 1 << 16;      // Transfer Direction: IN
+/// Interrupt on Short Packet (ISP) flag.
+pub const TRB_FLAG_ISP: u32 = 1 << 2;
+/// Chain bit (CHAIN): links consecutive TRBs into an atomic transaction.
+pub const TRB_FLAG_CHAIN: u32 = 1 << 4;
+/// Interrupt On Completion (IOC): instructs controller to issue an event on completion.
+pub const TRB_FLAG_IOC: u32 = 1 << 5;
+/// Immediate Data (IDT): parameter field holds raw data bytes rather than a pointer.
+pub const TRB_FLAG_IDT: u32 = 1 << 6;
+/// Block Set Address Request (BSR): do not issue USB SET_ADDRESS request to physical device.
+pub const TRB_FLAG_BSR: u32 = 1 << 9;
+/// Direction bit: `1` indicates device-to-host (IN), `0` indicates host-to-device (OUT).
+pub const TRB_FLAG_DIR_IN: u32 = 1 << 16;
 
 // xHCI Completion Codes (xHCI Spec Section 6.4.5)
+/// Invalid completion code.
 pub const CC_INVALID: u8 = 0;
+/// Transaction completed successfully.
 pub const CC_SUCCESS: u8 = 1;
+/// DMA data buffer overrun/underrun error.
 pub const CC_DATA_BUFFER_ERROR: u8 = 2;
+/// Babble detected on the USB bus.
 pub const CC_BABBLE_DETECTED: u8 = 3;
+/// USB transaction error (CRC, timeout, PID corruption).
 pub const CC_USB_TRANSACTION_ERROR: u8 = 4;
+/// TRB structure malformed or invalid type.
 pub const CC_TRB_ERROR: u8 = 5;
+/// Endpoint returned a STALL handshake.
 pub const CC_STALL_ERROR: u8 = 6;
+/// Host controller internal resource exhaustion.
 pub const CC_RESOURCE_ERROR: u8 = 7;
+/// Insufficient periodic bus bandwidth.
 pub const CC_BANDWIDTH_ERROR: u8 = 8;
+/// All hardware device slots are exhausted.
 pub const CC_NO_SLOTS_AVAILABLE: u8 = 9;
+/// Target slot is in Disabled state.
 pub const CC_SLOT_NOT_ENABLED: u8 = 11;
+/// Target endpoint is not enabled or configured.
 pub const CC_ENDPOINT_NOT_ENABLED: u8 = 12;
+/// Inbound transfer received fewer bytes than buffer size (short packet).
 pub const CC_SHORT_PACKET: u8 = 13;
+/// Parameter error in input context.
 pub const CC_PARAMETER_ERROR: u8 = 17;
+/// Context state transitions invalid.
 pub const CC_CONTEXT_STATE_ERROR: u8 = 19;
+/// Event ring is completely full.
 pub const CC_EVENT_RING_FULL: u8 = 21;
+/// Command ring stopped by driver.
 pub const CC_COMMAND_RING_STOPPED: u8 = 24;
+/// Command execution aborted.
 pub const CC_COMMAND_ABORTED: u8 = 25;
+/// Stopped by command.
 pub const CC_STOPPED: u8 = 26;
 
-/// 16-byte Transfer Request Block (TRB).
+/// 16-byte Transfer Request Block (TRB) aligned to 16 bytes.
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Trb {
+    /// Parameter field: physical memory pointer or immediate data.
     pub parameter: u64,
+    /// Status field: transfer length, completion code, and interrupter target.
     pub status: u32,
+    /// Control field: TRB type, cycle state, IOC, and endpoint/slot routing.
     pub control: u32,
 }
 
 impl Trb {
-    /// Constructs a blank TRB.
+    /// Constructs a blank, zeroed TRB.
     pub const fn empty() -> Self {
         Self {
             parameter: 0,
@@ -292,4 +355,3 @@ impl Trb {
         }
     }
 }
-

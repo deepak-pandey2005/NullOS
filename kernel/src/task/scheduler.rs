@@ -1,10 +1,39 @@
-//! Preemptive Round-Robin Thread Scheduler (Phase 4 - M11).
+//! # Preemptive Round-Robin Thread Scheduler
 //!
-//! Features:
-//! - Cooperative yielding via `yield_now()`.
-//! - Preemptive multitasking triggered by APIC Timer interrupts.
-//! - Sleep and wake primitives with tick tracking.
-//! - Complete clean thread lifecycle termination.
+//! ## Scheduler Architecture
+//! The NullOS scheduler implements preemptive, priority-aware Round-Robin multitasking.
+//! It coordinates execution between:
+//! - **Ready Queue (`ready_queue`)**: FIFO queue of runnable threads awaiting CPU timeslices.
+//! - **Sleeping Queue (`sleeping_queue`)**: Threads waiting for a specific APIC timer tick target.
+//! - **Blocked Map (`blocked_threads`)**: Threads waiting on synchronization primitives (Mutex, Condvar, Semaphore, Futex, IPC pipe).
+//! - **Reap Vector (`dead_threads`)**: Deceased threads whose 64 KiB stacks cannot be freed until
+//!   the CPU is safely executing on a different thread's stack.
+//!
+//! ## Context Switch Workflow
+//! Every context switch (whether triggered voluntarily by [`yield_now`] or preemptively by [`timer_tick`]):
+//! 1. Acquires [`SCHEDULER`] spinlock.
+//! 2. Reaps any previously terminated threads in `dead_threads`.
+//! 3. Moves current thread to `Ready` or `Blocked` queue.
+//! 4. Pops the next thread from `ready_queue` and marks it `Running`.
+//! 5. Updates hardware CPU registers for Ring 3 privilege transitions:
+//!    - TSS `rsp0`: Set to `next.stack.top()` so interrupts in user mode land on this thread's kernel stack.
+//!    - Fast Syscall Kernel RSP: Set to `next.stack.top()` so `SYSCALL` switches to this stack.
+//!    - `IA32_FS_BASE` MSR: Reloads Thread-Local Storage pointer (`next.fs_base`).
+//! 6. Drops the spinlock and calls assembly [`switch_threads`] (`switch.S`).
+//!
+//! TODO(scheduler): Multi-Core SMP Scalability (Per-CPU Runqueues):
+//! - Replace the single global `SCHEDULER` spinlock with per-CPU runqueues (e.g. `PerCpuScheduler`).
+//! - A single global lock creates severe bus lock contention when all APs (Application Processors)
+//!   field timer ticks and attempt to reschedule concurrently.
+//! - Implement work-stealing: an idle core whose local ready queue is empty should probe and steal
+//!   ready threads from busy neighbor cores' queues with minimal lock contention.
+//!
+//! TODO(scheduler): Fair Scheduling Algorithms (CFS or MLFQ):
+//! - Replace simple FIFO round-robin scheduling with a Completely Fair Scheduler (CFS) or Multi-Level
+//!   Feedback Queue (MLFQ).
+//! - Maintain virtual runtime (`vruntime`) tracked via high-precision APIC/TSC timestamps, prioritizing
+//!   I/O-bound interactive tasks while preventing CPU starvation for compute-intensive threads.
+
 #![allow(dead_code)]
 
 use super::thread::{switch_threads, Thread, ThreadId, ThreadState};
@@ -14,31 +43,26 @@ use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::vec::Vec;
 
-// TODO(scheduler): Multi-Core SMP Scalability (Per-CPU Runqueues):
-// - Replace the single global `SCHEDULER` spinlock with per-CPU runqueues (e.g. `PerCpuScheduler`).
-// - A single global lock creates severe bus lock contention when all APs (Application Processors)
-//   field timer ticks and attempt to reschedule concurrently.
-// - Implement work-stealing: an idle core whose local ready queue is empty should probe and steal
-//   ready threads from busy neighbor cores' queues with minimal lock contention.
-//
-// TODO(scheduler): Fair Scheduling Algorithms (CFS or MLFQ):
-// - Replace simple FIFO round-robin scheduling with a Completely Fair Scheduler (CFS) or Multi-Level
-//   Feedback Queue (MLFQ).
-// - Maintain virtual runtime (`vruntime`) tracked via high-precision APIC/TSC timestamps, prioritizing
-//   I/O-bound interactive tasks while preventing CPU starvation for compute-intensive threads.
-
+/// Core scheduling state holding queues and context tracking.
 pub struct Scheduler {
+    /// Currently executing thread on the CPU.
     current: Option<Box<Thread>>,
+    /// FIFO queue of runnable threads ready for a timeslice.
     ready_queue: VecDeque<Box<Thread>>,
+    /// List of threads sleeping until a future tick.
     sleeping_queue: Vec<Box<Thread>>,
+    /// Map of blocked threads keyed by ThreadId.
     blocked_threads: BTreeMap<ThreadId, Box<Thread>>,
+    /// Terminated threads queued for deferred deallocation.
     dead_threads: Vec<Box<Thread>>,
+    /// Cumulative context switch count.
     total_switches: u64,
 }
 
 static SCHEDULER: Spinlock<Option<Scheduler>> = Spinlock::new(None);
 
 impl Scheduler {
+    /// Creates a new empty scheduler instance.
     pub const fn new() -> Self {
         Self {
             current: None,
@@ -52,6 +76,9 @@ impl Scheduler {
 }
 
 /// Initializes the Preemptive Kernel Scheduler.
+///
+/// Encapsulates the running bootstrap execution stream into `Thread 0` ("kernel_main"),
+/// sets TSS `rsp0` and syscall kernel stack pointers, and activates scheduling.
 pub fn init() {
     let mut sched = Scheduler::new();
     // Establish main kernel execution context as Thread 0

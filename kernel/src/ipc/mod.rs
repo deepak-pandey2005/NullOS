@@ -1,10 +1,37 @@
-//! Inter-Process Communication (IPC) Subsystem (Phase 10 - M27).
+//! # Inter-Process Communication (IPC) Subsystem
 //!
-//! Submodules:
-//! - `pipe`: Anonymous unidirectional ring-buffered pipes conforming to POSIX `pipe(2)`.
-//! - `shm`: Zero-copy physical memory sharing conforming to POSIX `shmget` / `shmat`.
-//! - `signal`: Asynchronous process signaling conforming to POSIX `kill(2)` and signals.
-//! - `unix_socket`: Bidirectional local Unix Domain sockets (`AF_UNIX`) and `socketpair(2)`.
+//! ## Subsystem Architecture Overview
+//! Modern multitasking environments require flexible, low-latency mechanisms for isolated
+//! processes to coordinate, exchange data, and notify events:
+//!
+//! ```text
+//!    +---------------------------------------------------------------+
+//!    |                    NullOS IPC Subsystem                       |
+//!    +---------------------------------------------------------------+
+//!         |                  |                 |                 |
+//!         v                  v                 v                 v
+//!   +-----------+      +-----------+     +-----------+     +-----------+
+//!   |   Pipes   |      | Shared Mem|     |  Signals  |     | Unix Sockets
+//!   | (Streams) |      | (Zero-cpy)|     | (Events)  |     | (Sockets) |
+//!   +-----------+      +-----------+     +-----------+     +-----------+
+//!         |                  |                 |                 |
+//!   Unidirectional     Shared Physical   Asynchronous      Bidirectional
+//!     Byte Ring         Page Frames      Status Alerts       Full Duplex
+//! ```
+//!
+//! ### Subsystem Components:
+//! 1. **Anonymous Pipes ([`pipe`])**:
+//!    - Unidirectional 64 KiB ring buffers conforming to POSIX `pipe(2)`.
+//!    - Tracks active reader and writer reference counts. Writing to a pipe with 0 readers returns `EPIPE`.
+//!    - Powers shell command pipelines (`cmd1 | cmd2 | cmd3`).
+//! 2. **Shared Memory Segments ([`shm`])**:
+//!    - Zero-copy IPC mapping identical physical RAM frames into multiple process address spaces.
+//!    - Conforms to SysV / POSIX `shmget` and `shmat`.
+//! 3. **Asynchronous Signals ([`signal`])**:
+//!    - Implements standard POSIX signal dispatch (`SIGKILL`, `SIGTERM`, `SIGINT`, `SIGCHLD`, `SIGSEGV`).
+//! 4. **Unix Domain Sockets ([`unix_socket`])**:
+//!    - Full-duplex bidirectional communication channels conforming to `AF_UNIX` and `socketpair(2)`.
+
 #![allow(unused_imports, dead_code)]
 
 pub mod pipe;

@@ -1,10 +1,25 @@
-//! High-Performance Framebuffer Text Console Driver with ANSI Color Support.
+//! # High-Performance Framebuffer Text Console Driver with ANSI Color Support
 //!
-//! Features:
-//! - Thread-safe & interrupt-safe synchronization using Spinlock.
-//! - Optimized fast burst memory copy for instantaneous screen scrolling.
-//! - ANSI escape code parsing for colored kernel diagnostic logs.
-//! - Antialiased vector-quality font rasterization via noto-sans-mono-bitmap.
+//! ## Overview
+//! This module provides a fast graphical text console rendered directly into the UEFI GOP
+//! linear framebuffer memory aperture.
+//!
+//! ### Subsystem Capabilities:
+//! 1. **Antialiased Vector-Quality Font Rasterization**:
+//!    - Uses the `noto-sans-mono-bitmap` crate to render clean 16x9 monospaced glyphs.
+//!    - Performs linear alpha-channel color blending (`blend_color`) between foreground and background pixels.
+//! 2. **ANSI Color Escape Sequences**:
+//!    - Built-in finite state machine (`AnsiState`) parsing standard ECMA-48 / ANSI SGR color sequences
+//!      (e.g. `\x1b[31m` red, `\x1b[32m` green, `\x1b[34m` blue, `\x1b[0m` reset).
+//! 3. **High-Performance Hardware Scrolling**:
+//!    - Implements rapid screen scrolling using block memory moves (`core::ptr::copy`), shifting
+//!      all display scanlines up by one character row (`CHAR_HEIGHT = 16` pixels) in a single burst.
+//! 4. **Circular `dmesg` Ring Buffer**:
+//!    - Maintains an un-allocated 64 KiB circular byte buffer (`DMESG_RING`) capturing all kernel log output.
+//!    - Safe across early boot, interrupts, and memory allocator locks.
+//! 5. **Compositor Suspension Protocol**:
+//!    - Provides [`set_suspended`] to pause direct text rendering when the desktop Window Manager is active,
+//!      preventing log text from stomping over GUI window canvases.
 //!
 //! // TODO(phase12-m30-gui): Implement double-buffered 2D graphics canvas and window compositor:
 //! // 1. Allocate an off-screen secondary backbuffer to prevent tearing and flicker during fast animations.
@@ -20,12 +35,17 @@ use bootinfo::{FramebufferInfo, PixelFormat};
 use core::fmt;
 use noto_sans_mono_bitmap::{get_raster, FontWeight, RasterHeight};
 
+/// Raster font height (16 pixels).
 const FONT_HEIGHT: RasterHeight = RasterHeight::Size16;
+/// Pixel height of each rendered character cell.
 const CHAR_HEIGHT: usize = 16;
+/// Pixel width of each rendered character cell.
 const CHAR_WIDTH: usize = 9;
 
-const DEFAULT_FG: u32 = 0x00E2E8F0; // Clean light slate text
-const DEFAULT_BG: u32 = 0x000F172A; // Dark slate blue background
+/// Default foreground color: clean light slate text (0x00E2E8F0).
+const DEFAULT_FG: u32 = 0x00E2E8F0;
+/// Default background color: dark slate blue (0x000F172A).
+const DEFAULT_BG: u32 = 0x000F172A;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum AnsiState {
@@ -35,6 +55,7 @@ enum AnsiState {
     Param(u32),
 }
 
+/// Linear framebuffer text console renderer.
 pub struct FramebufferConsole {
     address: u64,
     width: usize,

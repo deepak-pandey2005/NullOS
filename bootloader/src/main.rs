@@ -1,3 +1,23 @@
+//! NullOS UEFI Bootloader Entry Point (Phase 1 - M1 Milestone).
+//!
+//! # Architecture & Responsibilities
+//! The bootloader executes in 64-bit UEFI Long Mode environment before the OS kernel takes control.
+//! It is responsible for bridging UEFI firmware protocols with the bare-metal kernel:
+//! 1. **Serial Diagnostic Output**: Initializes 16550 UART COM1 (0x3F8) for early diagnostic logging.
+//! 2. **Graphics Configuration**: Uses UEFI Graphics Output Protocol (GOP) to query and configure
+//!    a high-resolution linear framebuffer (e.g. 1280x800, 32-bit BGR/RGB).
+//! 3. **ACPI Table Pointer Discovery**: Searches UEFI Configuration Tables for ACPI 2.0 (`XSDT`)
+//!    or legacy ACPI 1.0 (`RSDP`) root pointers.
+//! 4. **Storage & File I/O**: Opens the FAT32 EFI System Partition (ESP), loads the 64-bit ELF kernel
+//!    executable (`kernel.elf`) into temporary memory.
+//! 5. **ELF64 Parsing & Segment Mapping**: Parses ELF headers, verifies machine architecture (`EM_X86_64`),
+//!    and maps all `PT_LOAD` segments into physical memory pages with proper permissions.
+//! 6. **Kernel Command Line**: Allocates a persistent pool buffer containing boot flags (e.g. `console=com1`).
+//! 7. **Memory Map Acquisition**: Queries the UEFI memory descriptor table before exiting boot services.
+//! 8. **ExitBootServices Transition**: Calls `exit_boot_services`, transitioning the system into raw bare metal.
+//! 9. **Handoff Contract (`BootInfo`)**: Populates the unified `BootInfo` structure and executes a direct jump
+//!    to the 64-bit kernel entry point with `%rdi` pointing to `BootInfo`.
+
 #![no_std]
 #![no_main]
 
@@ -13,9 +33,19 @@ use uefi::boot::{allocate_pool, MemoryType};
 use uefi::entry;
 use uefi::mem::memory_map::MemoryMap;
 
+/// Primary UEFI Bootloader Entry Point invoked by UEFI firmware.
+///
+/// # Execution Environment
+/// - CPU is already in 64-bit Long Mode with identity paging active.
+/// - Interrupts are managed by UEFI firmware until `exit_boot_services` is invoked.
+/// - Returns `uefi::Status::SUCCESS` on normal exit, or never returns if execution
+///   successfully jumps into the kernel.
 #[entry]
 fn main() -> uefi::Status {
+    // Initialize the standard UEFI library logging and console helpers
     let _ = uefi::helpers::init();
+
+    // Bring up COM1 16550 UART early so hardware logs can be streamed over serial
     unsafe {
         serial::init();
     }
@@ -25,7 +55,11 @@ fn main() -> uefi::Status {
     uefi::println!("         Phase 1 — M1 Milestone         ");
     uefi::println!("========================================");
 
-    // 1. Initialize GOP Framebuffer
+    // ------------------------------------------------------------------------
+    // Step 1: Initialize Graphics Output Protocol (GOP) Linear Framebuffer
+    // ------------------------------------------------------------------------
+    // Queries the video hardware for a linear 32-bit color framebuffer.
+    // This allows the kernel to render graphics directly without BIOS VGA calls.
     uefi::println!("[BOOT] Initializing GOP Framebuffer...");
     let framebuffer = match gop::init_gop() {
         Ok(fb) => {
@@ -40,6 +74,7 @@ fn main() -> uefi::Status {
         }
         Err(err) => {
             uefi::println!("[BOOT] GOP warning: {}", err);
+            // Fall back to headless / zeroed framebuffer info if GOP fails
             bootinfo::FramebufferInfo {
                 address: 0,
                 size: 0,
@@ -52,7 +87,11 @@ fn main() -> uefi::Status {
         }
     };
 
-    // 2. Discover ACPI RSDP
+    // ------------------------------------------------------------------------
+    // Step 2: Discover ACPI Root System Description Pointer (RSDP)
+    // ------------------------------------------------------------------------
+    // Scans UEFI system configuration tables for the ACPI GUID to locate the RSDP,
+    // which provides the kernel with hardware topology, MADT, FADT, and HPET tables.
     uefi::println!("[BOOT] Discovering ACPI RSDP...");
     let acpi_rsdp = match acpi::find_acpi_rsdp() {
         Some(addr) => {
@@ -65,7 +104,11 @@ fn main() -> uefi::Status {
         }
     };
 
-    // 3. Load kernel.elf from filesystem
+    // ------------------------------------------------------------------------
+    // Step 3: Load kernel.elf from the EFI System Partition (ESP)
+    // ------------------------------------------------------------------------
+    // Uses UEFI Simple File System protocol to locate the root FAT volume and
+    // reads the raw bytes of `kernel.elf` into an allocated heap buffer.
     uefi::println!("[BOOT] Loading kernel.elf from filesystem...");
     let kernel_bytes = match fs::load_kernel_file() {
         Ok(bytes) => {
@@ -80,7 +123,11 @@ fn main() -> uefi::Status {
         }
     };
 
-    // 4. Parse ELF64 and load segments
+    // ------------------------------------------------------------------------
+    // Step 4: Parse ELF64 Binary and Load Segments into Memory
+    // ------------------------------------------------------------------------
+    // Inspects ELF headers, allocates physical pages for each `PT_LOAD` segment,
+    // copies code and data, and zero-fills the uninitialized `.bss` memory.
     uefi::println!("[BOOT] Parsing ELF and loading segments...");
     let loaded_kernel = match elf::load_elf(kernel_bytes) {
         Ok(k) => {
@@ -100,7 +147,10 @@ fn main() -> uefi::Status {
         }
     };
 
-    // 4b. Prepare kernel command line
+    // ------------------------------------------------------------------------
+    // Step 4b: Allocate and Populate Kernel Command Line
+    // ------------------------------------------------------------------------
+    // Passes boot parameters (console devices, log levels, test flags) to the kernel.
     const DEFAULT_CMDLINE: &[u8] = b"console=com1 loglevel=info";
     let cmdline_len = DEFAULT_CMDLINE.len();
     let cmdline_ptr = match allocate_pool(MemoryType::LOADER_DATA, cmdline_len) {
@@ -122,7 +172,11 @@ fn main() -> uefi::Status {
         }
     };
 
-    // 5. Pre-allocate buffer for MemoryMap descriptors
+    // ------------------------------------------------------------------------
+    // Step 5: Pre-allocate Storage Buffer for UEFI Memory Map Descriptors
+    // ------------------------------------------------------------------------
+    // Allocating memory dynamically after calling `exit_boot_services` is forbidden.
+    // We pre-allocate a 32 KiB buffer upfront using `LOADER_DATA` memory type.
     const MMAP_BUFFER_SIZE: usize = 32768; // 32 KiB
     let mmap_storage_ptr = match allocate_pool(MemoryType::LOADER_DATA, MMAP_BUFFER_SIZE) {
         Ok(ptr) => ptr.as_ptr() as *mut u8,
@@ -134,7 +188,10 @@ fn main() -> uefi::Status {
         }
     };
 
-    // 6. Pre-allocate BootInfo structure
+    // ------------------------------------------------------------------------
+    // Step 6: Pre-allocate BootInfo Handoff Contract Structure
+    // ------------------------------------------------------------------------
+    // Allocates the final `BootInfo` block passed across the bootloader-kernel boundary.
     let boot_info_ptr = match allocate_pool(MemoryType::LOADER_DATA, core::mem::size_of::<BootInfo>()) {
         Ok(ptr) => ptr.as_ptr() as *mut BootInfo,
         Err(_) => {
@@ -145,11 +202,15 @@ fn main() -> uefi::Status {
         }
     };
 
-    // 7. Exit UEFI Boot Services
+    // ------------------------------------------------------------------------
+    // Step 7: Exit UEFI Boot Services (The Point of No Return)
+    // ------------------------------------------------------------------------
+    // Disables UEFI firmware services, stops timer interrupts, and returns the final
+    // authoritative memory map snapshot describing all physical RAM regions.
     uefi::println!("[BOOT] Exiting UEFI Boot Services...");
     let memory_map = unsafe { uefi::boot::exit_boot_services(Some(MemoryType::LOADER_DATA)) };
 
-    // Copy memory descriptors into persistent mmap_storage_ptr
+    // Copy memory descriptors into persistent pre-allocated `mmap_storage_ptr`
     let mut count = 0usize;
     let mut desc_size = 0usize;
 
@@ -174,7 +235,9 @@ fn main() -> uefi::Status {
         descriptor_version: 1,
     };
 
-    // 8. Populate BootInfo and transfer control to kernel
+    // ------------------------------------------------------------------------
+    // Step 8: Populate BootInfo and Transfer Execution to Kernel Entry
+    // ------------------------------------------------------------------------
     unsafe {
         boot_info_ptr.write(BootInfo {
             framebuffer,
@@ -192,7 +255,8 @@ fn main() -> uefi::Status {
             boot_info_ptr as u64
         );
 
-        // Populate both %rdi (SysV ABI) and %rcx (Win64 ABI) to ensure compatibility
+        // Populate both %rdi (System V AMD64 ABI) and %rcx (Microsoft x64 ABI)
+        // to guarantee seamless calling-convention compatibility when leaping into `kernel_main`.
         core::arch::asm!(
             "jmp {entry}",
             in("rdi") boot_info_ptr as u64,
@@ -203,6 +267,10 @@ fn main() -> uefi::Status {
     }
 }
 
+/// Global Panic Handler for the UEFI Bootloader.
+///
+/// Halts execution in a tight spin-loop if any fatal assertion or error triggers
+/// during the early pre-kernel phase.
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     loop {

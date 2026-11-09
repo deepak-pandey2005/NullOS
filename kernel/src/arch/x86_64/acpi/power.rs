@@ -1,12 +1,50 @@
-//! ACPI and Hardware System Power Management Primitives.
+//! # ACPI and Hardware System Power Management Primitives
 //!
-//! Provides software-directed shutdown (`poweroff`) via ACPI S5 sleep state
-//! and clean system reboot (`reboot`) via ACPI RESET_REG, 8042 KBC, PCI CF9, and Triple Fault.
+//! ## Overview
+//! This module implements reliable, multi-tier power management primitives for NullOS:
+//! - [`poweroff`]: Clean system shutdown using the ACPI S5 sleep state transition, followed
+//!   by hypervisor/emulator fallbacks and a final CPU halt loop.
+//! - [`reboot`]: System reset using a robust 4-stage cascading fallback sequence ensuring
+//!   clean reboot across real x86_64 motherboards and virtual machines alike.
+//!
+//! ## ACPI S5 Sleep State Transition Mechanics
+//! ACPI defines S5 as the "Soft Off" state where platform hardware enters its lowest power mode.
+//! To enter S5:
+//! 1. Ensure ACPI hardware mode is enabled (`SCI_EN` in `PM1a_CNT`).
+//! 2. Calculate PM1 Control register value:
+//!    $$\text{PM1\_VAL} = (\text{SLP\_TYP} \ll 10) \mid \text{SLP\_EN} \quad (\text{where } \text{SLP\_EN} = 1 \ll 13 = \text{0x2000})$$
+//! 3. Write `PM1a_VAL` to the `PM1a_CNT_BLK` I/O port.
+//! 4. If `PM1b_CNT_BLK` is defined by the motherboard, write `PM1b_VAL` to `PM1b_CNT_BLK`.
+//! 5. If hardware remains powered (e.g. running in QEMU/Bochs/VirtualBox), write known emulator
+//!    poweroff control sequences to ports `0x604`, `0xB004`, and `0x4004`.
+//!
+//! ## 4-Stage Cascading Reboot Sequence
+//! If one mechanism fails or is unsupported by hardware, execution immediately cascades to the next:
+//! 1. **Stage 1 (ACPI 2.0+ `RESET_REG`)**:
+//!    Writes `reset_value` to the generic address register specified in the FADT.
+//! 2. **Stage 2 (8042 Keyboard Controller)**:
+//!    Polls port `0x64` until the input buffer is empty, then writes `0xFE` (Pulse Output Line),
+//!    pulling the CPU reset line low.
+//! 3. **Stage 3 (PCI Reset Control Port `0xCF9`)**:
+//!    Writes `0x02` (System Reset) followed by `0x06` (Full Cold Reset) to PCI port `0xCF9`.
+//! 4. **Stage 4 (CPU Triple Fault)**:
+//!    Loads an invalid IDT (`limit: 0, base: 0`) using `lidt` and executes `int3`. Because the
+//!    IDT has limit 0, vector 3 triggers a Page Fault or General Protection Fault. Delivering that
+//!    fault also fails because the IDT is invalid, triggering a Double Fault (#DF). Delivering
+//!    the Double Fault fails again, forcing the CPU hardware into an immediate unmaskable
+//!    Triple Fault, which reasserts the platform RESET pin.
 
 use crate::arch::x86_64::acpi::fadt::{inb, outb, outw};
 use crate::println;
 
 /// Shuts down the machine cleanly using ACPI S5 state and emulator fallbacks.
+///
+/// Flushes filesystem caches, asserts ACPI S5 sleep control registers, issues
+/// emulator shutdown port writes, and disables CPU interrupts before entering
+/// a permanent `hlt` loop if power is still present.
+///
+/// # Panics / Return
+/// This function never returns (`!`).
 pub fn poweroff() -> ! {
     println!();
     println!("--------------------------------------------------");
@@ -66,6 +104,15 @@ pub fn poweroff() -> ! {
 }
 
 /// Reboots the computer using a 4-stage cascading restart sequence.
+///
+/// Cascades through:
+/// 1. ACPI 2.0+ `RESET_REG`.
+/// 2. 8042 Keyboard Controller output port `0xFE`.
+/// 3. Fast PCI reset port `0xCF9`.
+/// 4. CPU Triple Fault via empty IDTR + `int3`.
+///
+/// # Panics / Return
+/// This function never returns (`!`).
 pub fn reboot() -> ! {
     println!();
     println!("--------------------------------------------------");
