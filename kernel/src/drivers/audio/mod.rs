@@ -1,11 +1,18 @@
-//! Audio Subsystem & Intel High Definition Audio (HDA) Driver (Phase 12 - M32).
+//! # Audio Subsystem & Intel High Definition Audio (HDA) Driver
 //!
-//! Subsystem features:
-//! - PCI hardware discovery and 64-bit MMIO initialization.
-//! - CORB and RIRB command/response circular ring engines.
-//! - Audio Codec discovery and Widget tree traversal.
-//! - Linear PCM procedural sound synthesis and ping-pong DMA streaming.
-//! - User-facing audio playback API (`beep`, `play_tone`, `stop`).
+//! Provides a modern audio subsystem centered around the Intel High Definition Audio specification:
+//! - **PCI Discovery & MMIO Mapping**: Scans for PCI Class 0x04 (Multimedia), Subclass 0x03 (HD Audio),
+//!   identity-mapping the 64-bit BAR0 MMIO space.
+//! - **CORB & RIRB Ring Engines**: Implements the Command Output Ring Buffer (CORB) and Response Input Ring Buffer
+//!   (RIRB) to send verbs to audio codecs and receive responses asynchronously.
+//! - **Codec & Widget Graph Traversal**: Discovers audio codecs on the link, iterates widget trees
+//!   to locate Audio Output (DAC) widgets and Pin Complex widgets configured for headphone/line-out jacks.
+//! - **Linear PCM Sound Synthesis**: In-kernel integer sine wave and square wave synthesis with fixed-point
+//!   trigonometric tables, tone generators, and multi-tone chimes.
+//! - **Direct Memory Access (DMA) Audio Streams**: Buffer Descriptor List (BDL) cyclic DMA engines with
+//!   ping-pong buffers for glitch-free audio output.
+//! - **Kernel Audio API**: High-level primitives ([`play_tone`], [`beep`], [`stop`], [`get_status`])
+//!   for notification sounds and music synthesis.
 
 #![allow(dead_code)]
 
@@ -15,31 +22,42 @@ pub mod pcm;
 pub use hda::HDA;
 use crate::println;
 
-/// Status summary of the Intel HD Audio subsystem.
+/// Status summary and capabilities of the Intel HD Audio subsystem.
 #[derive(Clone, Debug)]
 pub struct AudioStatus {
+    /// HDA specification major version (typically 1).
     pub spec_version_major: u8,
+    /// HDA specification minor version (typically 0).
     pub spec_version_minor: u8,
+    /// Number of output stream descriptors supported by the controller.
     pub output_streams: u8,
+    /// Number of input stream descriptors supported by the controller.
     pub input_streams: u8,
+    /// Total count of audio codecs discovered on the link.
     pub codec_count: usize,
+    /// Node ID of the active Digital-to-Analog Converter (DAC) widget.
     pub active_dac_nid: u8,
+    /// Node ID of the active Pin Complex (speaker/headphone) widget.
     pub active_pin_nid: u8,
+    /// Active sample rate in Hertz (e.g. 48000 Hz or 44100 Hz).
     pub sample_rate: u32,
+    /// True if an audio stream is currently actively playing.
     pub is_playing: bool,
 }
 
-/// Initializes the Intel HD Audio subsystem.
+/// Initializes the Intel HD Audio subsystem and probes the PCI bus.
 pub fn init() {
     hda::init();
 }
 
-/// Checks if an active Intel HD Audio controller is present.
+/// Checks if an active Intel HD Audio controller is present and initialized.
 pub fn is_available() -> bool {
     HDA.lock().is_some()
 }
 
 /// Plays a pure sine wave tone at `freq_hz` for `duration_ms`.
+///
+/// Synthesizes 16-bit signed PCM samples and streams them through the primary output DMA engine.
 pub fn play_tone(freq_hz: u32, duration_ms: u32) -> Result<(), &'static str> {
     let mut guard = HDA.lock();
     match guard.as_mut() {
@@ -48,7 +66,7 @@ pub fn play_tone(freq_hz: u32, duration_ms: u32) -> Result<(), &'static str> {
     }
 }
 
-/// Plays a two-tone musical startup chime.
+/// Plays a pleasant two-tone musical startup chime.
 pub fn beep() -> Result<(), &'static str> {
     let mut guard = HDA.lock();
     match guard.as_mut() {
@@ -57,14 +75,14 @@ pub fn beep() -> Result<(), &'static str> {
     }
 }
 
-/// Stops any ongoing audio playback.
+/// Stops any ongoing audio playback and halts the DMA stream engine.
 pub fn stop() {
     if let Some(ref mut controller) = *HDA.lock() {
         controller.stop();
     }
 }
 
-/// Retrieves the current status and metrics of the audio controller.
+/// Retrieves the current status, metrics, and active node configuration of the audio controller.
 pub fn get_status() -> Option<AudioStatus> {
     let guard = HDA.lock();
     guard.as_ref().map(|c| AudioStatus {
@@ -81,6 +99,13 @@ pub fn get_status() -> Option<AudioStatus> {
 }
 
 /// Runs automated verification self-tests for Milestone 32 (Intel HD Audio).
+///
+/// Asserts:
+/// 1. HDA specification version is valid ($\ge$ 1.0).
+/// 2. Stream capabilities (output stream descriptors) are non-zero.
+/// 3. CORB, RIRB, BDL, and Ping-Pong DMA buffer allocations are valid non-zero physical addresses.
+/// 4. Discovered codecs expose valid Vendor ID, DAC node ID, and Pin node ID.
+/// 5. Procedural PCM tone generation produces time-varying samples and activates the DMA stream.
 pub fn run_self_tests() {
     println!();
     println!("--------------------------------------------------");

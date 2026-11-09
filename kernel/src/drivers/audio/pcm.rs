@@ -1,10 +1,10 @@
-//! PCM (Pulse Code Modulation) Audio Synthesizer & Buffer Management (Phase 12 - M32).
+//! # PCM (Pulse Code Modulation) Audio Synthesizer & Buffer Management
 //!
-//! Features:
-//! - Standard PCM audio format representation (sample rate, bit depth, channels).
-//! - Intel HDA 16-bit format descriptor encoder (`SD_FMT`).
-//! - Precomputed 256-point fixed-point sine wave lookup table.
-//! - Procedural pure tone generator and musical chime synthesizer.
+//! Provides software sound synthesis and audio format encoding for the Intel HD Audio driver:
+//! - **Standard PCM Format Representation**: Sample rate, bit depth (8/16/20/24/32-bit), and channel count.
+//! - **Intel HDA Format Encoder**: Serializes [`PcmFormat`] into the 16-bit `SD_FMT` stream descriptor register.
+//! - **Fixed-Point Sine Table**: 256-entry lookup table spanning a full $2\pi$ period, avoiding floating-point math in the kernel.
+//! - **Procedural Sound Synthesis**: Generates pure sine tones and multi-tone chimes with 16.16 fixed-point phase accumulators.
 
 #![allow(dead_code)]
 
@@ -34,18 +34,23 @@ const SINE_TABLE: [i16; 256] = [
 /// Linear PCM Audio Format Descriptor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PcmFormat {
+    /// Sample rate in Hertz (e.g. 44100 or 48000).
     pub sample_rate: u32,
+    /// Bit depth per sample (e.g. 16 for 16-bit audio).
     pub bit_depth: u8,
+    /// Number of audio channels (e.g. 2 for stereo).
     pub channels: u8,
 }
 
 impl PcmFormat {
+    /// Standard CD Quality audio: 44.1 kHz, 16-bit signed PCM, 2 channels (Stereo).
     pub const CD_QUALITY: Self = Self {
         sample_rate: 44100,
         bit_depth: 16,
         channels: 2,
     };
 
+    /// Standard DVD Quality audio: 48.0 kHz, 16-bit signed PCM, 2 channels (Stereo).
     pub const DVD_QUALITY: Self = Self {
         sample_rate: 48000,
         bit_depth: 16,
@@ -55,11 +60,11 @@ impl PcmFormat {
     /// Encodes this PCM format into the Intel HDA 16-bit stream format register (`SD_FMT`).
     ///
     /// Bitfields:
-    /// - Bit 14: Base sample rate (0 = 48 kHz, 1 = 44.1 kHz)
-    /// - Bits 11..13: Sample rate multiplier (0 = x1)
-    /// - Bits 8..10: Sample rate divisor (0 = /1)
-    /// - Bits 4..6: Bits per sample (001 = 16-bit PCM)
-    /// - Bits 0..3: Channels - 1 (1 = Stereo)
+    /// - **Bit 14**: Base sample rate (0 = 48 kHz, 1 = 44.1 kHz)
+    /// - **Bits 11..13**: Sample rate multiplier (0 = x1)
+    /// - **Bits 8..10**: Sample rate divisor (0 = /1)
+    /// - **Bits 4..6**: Bits per sample (`001` = 16-bit PCM)
+    /// - **Bits 0..3**: Channels minus 1 (`0` = Mono, `1` = Stereo)
     pub fn to_hda_format(&self) -> u16 {
         let mut fmt = 0u16;
 
@@ -84,10 +89,15 @@ impl PcmFormat {
 }
 
 /// Generates interleaved stereo 16-bit PCM samples for a pure sine tone.
-/// `buffer`: target slice of `i16` samples (length must be an even number: `[L, R, L, R, ...]`).
-/// `freq_hz`: frequency in Hertz (e.g. 440 for A4 concert pitch).
-/// `sample_rate`: sample rate in Hertz (e.g. 44100 or 48000).
-/// `volume`: output scaling factor (0 to 32767).
+///
+/// Computes samples using fixed-point table lookup and 16.16 phase accumulation:
+/// $\text{phase\_step} = \frac{f \cdot 256 \cdot 256}{f_s}$.
+///
+/// # Arguments
+/// * `buffer` - Target slice of `i16` samples (length must be even: `[L, R, L, R, ...]`)
+/// * `freq_hz` - Frequency in Hertz (e.g. 440 for A4 concert pitch)
+/// * `sample_rate` - Sample rate in Hertz (e.g. 44100 or 48000)
+/// * `volume` - Output scaling factor (0 to 32767)
 pub fn generate_sine_tone(
     buffer: &mut [i16],
     freq_hz: u32,
@@ -118,6 +128,10 @@ pub fn generate_sine_tone(
 }
 
 /// Generates a pleasant two-tone musical chime into the provided stereo buffer.
+///
+/// Splits the buffer into two equal halves:
+/// 1. First half: C5 pitch (523 Hz).
+/// 2. Second half: G5 pitch (784 Hz).
 pub fn generate_chime(buffer: &mut [i16], sample_rate: u32) {
     let half_frames = (buffer.len() / 4) * 2;
     let (first_half, second_half) = buffer.split_at_mut(half_frames);
@@ -127,4 +141,3 @@ pub fn generate_chime(buffer: &mut [i16], sample_rate: u32) {
     // Tone 2: G5 (784 Hz)
     generate_sine_tone(second_half, 784, sample_rate, 20000);
 }
-

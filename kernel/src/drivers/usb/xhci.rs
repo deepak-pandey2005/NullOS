@@ -1,16 +1,24 @@
-//! USB 3.0 xHCI (Extensible Host Controller Interface) Driver (Phase 12 - M31).
+//! # USB 3.0 xHCI (Extensible Host Controller Interface) Driver
 //!
-//! Subsystem features:
-//! - PCI hardware discovery for Class 0x0C (Serial), Subclass 0x03, Prog IF 0x30 (xHCI).
-//! - 64-bit MMIO BAR0 mapping with cache-disable / write-through flags.
-//! - Capability, Operational, Runtime, and Doorbell register parsing.
-//! - BIOS-to-OS ownership handoff (xECP USB Legacy Support).
-//! - Transfer Request Block (TRB) circular rings: Command Ring and Event Ring with ERST.
-//! - Device Context Base Address Array (DCBAA) and Scratchpad buffer allocation.
-//! - Root Hub port scanning, reset signaling, and speed negotiation via PORTSC.
-//! - USB Device slot allocation, address assignment, and EP0 control pipe setup.
-//! - USB Device descriptor extraction and device classification.
-//! - HID Boot Protocol configuration for USB Keyboards and Mice.
+//! This module implements a full, specification-compliant driver for the Universal Serial Bus
+//! 3.0 eXtensible Host Controller Interface (xHCI 1.0 / 1.1 / 1.2):
+//! - **PCI Discovery & MMIO Mapping**: Locates controllers matching Class 0x0C, Subclass 0x03,
+//!   Programming Interface 0x30, identity-mapping the 64-bit BAR0 MMIO space with cache-disabled
+//!   and no-execute attributes.
+//! - **Capability, Operational, Runtime, and Doorbell Registers**: Decodes register block offsets,
+//!   maximum slot/port/interrupter limits, and doorbell stride registers.
+//! - **BIOS-to-OS Ownership Handoff**: Negotiates hardware ownership from system BIOS/SMM firmware
+//!   via the extended capability pointer (xECP) USB Legacy Support semaphore registers.
+//! - **Ring Buffer Management**: Circular Transfer Request Block (TRB) rings for Command submission
+//!   and Event notification using the Event Ring Segment Table (ERST) and Interrupter 0.
+//! - **Device Context Base Address Array (DCBAA)**: Allocates device context structures and scratchpad
+//!   paging memory per controller requirements.
+//! - **Root Hub Port Management**: Detects hardware connection transitions, drives port reset signaling,
+//!   and negotiates bus speed (Low 1.5 Mbps, Full 12 Mbps, High 480 Mbps, SuperSpeed 5 Gbps).
+//! - **Device Enumeration Pipeline**: Slot allocation, Device Context configuration, USB Addressing,
+//!   Descriptor tree extraction (Device, Config, Interface, Endpoint, HID), and Configuration activation.
+//! - **HID Input Dispatch**: Automatic binding for USB Boot Protocol Keyboards and Mice, polling
+//!   interrupt endpoints and feeding decoded scancodes and mouse coordinates to the console and GUI.
 
 #![allow(dead_code)]
 
@@ -27,40 +35,66 @@ use crate::println;
 use crate::sync::Spinlock;
 
 // Operational Register Offsets (relative to Operational Base)
+/// 32-bit USB Command Register.
 const REG_USBCMD: usize = 0x00;
+/// 32-bit USB Status Register.
 const REG_USBSTS: usize = 0x04;
+/// 32-bit Page Size Register.
 const REG_PAGESIZE: usize = 0x08;
+/// 32-bit Device Notification Control Register.
 const REG_DNCTRL: usize = 0x14;
+/// 64-bit Command Ring Control Register.
 const REG_CRCR: usize = 0x18;
+/// 64-bit Device Context Base Address Array Pointer Register.
 const REG_DCBAAP: usize = 0x30;
+/// 32-bit Configure Register (MaxSlotsEn).
 const REG_CONFIG: usize = 0x38;
+/// Base offset for Port Status and Control (PORTSC) registers.
 const REG_PORTSC_BASE: usize = 0x400;
 
 // USBCMD Flags
-const USBCMD_RS: u32 = 1 << 0;       // Run/Stop
-const USBCMD_HCRST: u32 = 1 << 1;    // Host Controller Reset
-const USBCMD_INTE: u32 = 1 << 2;     // Interrupter Enable
+/// Run/Stop bit: `1` starts controller execution, `0` stops controller.
+const USBCMD_RS: u32 = 1 << 0;
+/// Host Controller Reset bit: `1` initiates hardware reset.
+const USBCMD_HCRST: u32 = 1 << 1;
+/// Interrupter Enable bit: enables interrupt generation.
+const USBCMD_INTE: u32 = 1 << 2;
 
 // USBSTS Flags
-const USBSTS_HCH: u32 = 1 << 0;      // Host Controller Halted
-const USBSTS_HSE: u32 = 1 << 2;      // Host System Error
-const USBSTS_EINT: u32 = 1 << 3;     // Event Interrupt
-const USBSTS_PCD: u32 = 1 << 4;      // Port Change Detect
-const USBSTS_CNR: u32 = 1 << 11;     // Controller Not Ready
+/// Host Controller Halted: `1` indicates controller is stopped.
+const USBSTS_HCH: u32 = 1 << 0;
+/// Host System Error: `1` indicates a fatal system bus error.
+const USBSTS_HSE: u32 = 1 << 2;
+/// Event Interrupt: `1` indicates pending event in event ring.
+const USBSTS_EINT: u32 = 1 << 3;
+/// Port Change Detect: `1` indicates port status change.
+const USBSTS_PCD: u32 = 1 << 4;
+/// Controller Not Ready: `1` indicates controller is busy initializing/resetting.
+const USBSTS_CNR: u32 = 1 << 11;
 
 // PORTSC Flags
-const PORTSC_CCS: u32 = 1 << 0;      // Current Connect Status
-const PORTSC_PED: u32 = 1 << 1;      // Port Enabled/Disabled
-const PORTSC_PR: u32 = 1 << 4;       // Port Reset
-const PORTSC_PP: u32 = 1 << 9;       // Port Power
+/// Current Connect Status: `1` indicates a USB device is physically present.
+const PORTSC_CCS: u32 = 1 << 0;
+/// Port Enabled/Disabled: `1` indicates port is enabled and active.
+const PORTSC_PED: u32 = 1 << 1;
+/// Port Reset: `1` asserts USB bus reset on this port.
+const PORTSC_PR: u32 = 1 << 4;
+/// Port Power: `1` provides power to the port.
+const PORTSC_PP: u32 = 1 << 9;
+/// Bitmask for negotiated port speed (bits 10..13).
 const PORTSC_SPEED_MASK: u32 = 0x0F << 10;
 
 // Port Speeds
+/// USB Full-Speed (12 Mbps).
 pub const PORT_SPEED_FULL: u8 = 1;
+/// USB Low-Speed (1.5 Mbps).
 pub const PORT_SPEED_LOW: u8 = 2;
+/// USB High-Speed (480 Mbps).
 pub const PORT_SPEED_HIGH: u8 = 3;
+/// USB 3.0 SuperSpeed (5 Gbps).
 pub const PORT_SPEED_SUPER: u8 = 4;
 
+/// Number of TRBs allocated per command and transfer ring (must fit in a single 4 KiB page).
 const RING_TRB_COUNT: usize = 64;
 
 /// Safe MMIO 32-bit register read.
@@ -87,16 +121,24 @@ unsafe fn mmio_write64(base: *mut u8, offset: usize, val: u64) {
     unsafe { core::ptr::write_volatile(base.add(offset) as *mut u64, val); }
 }
 
-/// Represents a circular TRB transfer ring in DMA memory.
+/// Circular TRB transfer ring allocated in physical DMA memory.
 pub struct TrbRing {
+    /// Physical memory frame backing this ring buffer.
     pub ring_frame: PhysFrame,
+    /// Virtual pointer to the TRB array.
     pub trbs: *mut Trb,
+    /// Capacity of the ring in TRB elements.
     pub size: usize,
+    /// Index where the next TRB will be enqueued.
     pub enqueue_idx: usize,
+    /// Producer Cycle State (PCS) bit to tag outgoing TRBs.
     pub cycle_state: bool,
 }
 
 impl TrbRing {
+    /// Allocates and initializes a new circular TRB ring.
+    ///
+    /// Configures the final entry as a Link TRB pointing back to the first TRB with Toggle Cycle set.
     pub fn new() -> Option<Self> {
         let frame = memory::alloc_frame()?;
         let trbs = frame.start_address().as_u64() as *mut Trb;
@@ -120,11 +162,15 @@ impl TrbRing {
         })
     }
 
+    /// Returns the physical base address of the ring buffer.
     pub fn phys_addr(&self) -> u64 {
         self.ring_frame.start_address().as_u64()
     }
 
     /// Pushes a TRB into the ring, tagging it with the current Producer Cycle State (PCS).
+    ///
+    /// When reaching the Link TRB at the end of the ring, updates the Link TRB's cycle bit,
+    /// wraps the enqueue index back to 0, and toggles the internal cycle state.
     pub fn push(&mut self, mut trb: Trb) {
         trb.set_cycle_bit(self.cycle_state);
         unsafe {
@@ -162,19 +208,33 @@ impl core::fmt::Debug for TrbRing {
 /// Discovered USB device on the xHCI bus.
 #[derive(Clone)]
 pub struct XhciUsbDevice {
+    /// Hardware Slot ID assigned by the xHCI controller.
     pub slot_id: u8,
+    /// 1-based root hub port number where the device is plugged in.
     pub port_num: u8,
+    /// Negotiated protocol speed (Low, Full, High, SuperSpeed).
     pub speed: u8,
+    /// USB Vendor ID from Device Descriptor.
     pub vendor_id: u16,
+    /// USB Product ID from Device Descriptor.
     pub product_id: u16,
+    /// USB Device Class code.
     pub class_code: u8,
+    /// USB Device Subclass code.
     pub subclass: u8,
+    /// USB Device Protocol code.
     pub protocol: u8,
+    /// Maximum packet size for Endpoint 0.
     pub max_packet_size: u8,
+    /// True if device supports USB HID Boot Keyboard protocol.
     pub is_keyboard: bool,
+    /// True if device supports USB HID Boot Mouse protocol.
     pub is_mouse: bool,
+    /// Optional Interrupt IN transfer ring for HID input polling.
     pub ep_in_ring: Option<Arc<Spinlock<TrbRing>>>,
+    /// Device Context Index (DCI) for Interrupt IN endpoint.
     pub ep_in_dci: u8,
+    /// DMA buffer frame holding received input reports.
     pub ep_in_buf: Option<PhysFrame>,
 }
 
@@ -198,23 +258,41 @@ impl core::fmt::Debug for XhciUsbDevice {
 
 /// The NullOS xHCI Host Controller Driver instance.
 pub struct XhciController {
+    /// Base virtual address of MMIO space.
     pub mmio_base: *mut u8,
+    /// Base virtual address of Operational Registers.
     pub op_base: *mut u8,
+    /// Base virtual address of Runtime Registers.
     pub rt_base: *mut u8,
+    /// Base virtual address of Doorbell Registers.
     pub db_base: *mut u8,
+    /// Capability register length in bytes.
     pub caplength: u8,
+    /// xHCI specification release version in BCD.
     pub hciversion: u16,
+    /// Maximum number of device slots supported by hardware.
     pub max_slots: u8,
+    /// Maximum number of root hub ports supported by hardware.
     pub max_ports: u8,
+    /// Maximum number of interrupters supported by hardware.
     pub max_intrs: u16,
+    /// Host Command Ring for issuing commands to xHCI.
     pub command_ring: TrbRing,
+    /// Physical memory frame backing the primary Event Ring.
     pub event_ring_frame: PhysFrame,
+    /// Virtual pointer to the primary Event Ring TRBs.
     pub event_ring: *mut Trb,
+    /// Dequeue index for reading events from the Event Ring.
     pub event_dequeue_idx: usize,
+    /// Consumer Cycle State (CCS) expected for valid event TRBs.
     pub event_cycle_state: bool,
+    /// Physical memory frame backing the Device Context Base Address Array (DCBAA).
     pub dcbaa_frame: PhysFrame,
+    /// List of successfully enumerated USB devices.
     pub devices: Vec<XhciUsbDevice>,
+    /// Retained input context frames to keep DMA valid.
     pub input_context_frames: Vec<PhysFrame>,
+    /// Retained device context frames to keep DMA valid.
     pub device_context_frames: Vec<PhysFrame>,
 }
 
@@ -245,6 +323,9 @@ impl XhciController {
     }
 
     /// Checks the Event Ring for an available event posted by the hardware.
+    ///
+    /// Validates the TRB's cycle bit against the driver's current event cycle state,
+    /// advances the dequeue pointer, and writes the Event Ring Dequeue Pointer (ERDP) register.
     pub fn poll_event(&mut self) -> Option<Trb> {
         let trb = unsafe { *self.event_ring.add(self.event_dequeue_idx) };
         if trb.cycle_bit() == self.event_cycle_state {
@@ -319,6 +400,9 @@ impl XhciController {
     }
 
     /// Executes a standard USB Control Transfer on Endpoint 0 of a given slot.
+    ///
+    /// Manages Setup Stage, optional Data Stage, and Status Stage TRBs, rings the slot doorbell,
+    /// and waits for the transfer event completion.
     pub fn control_transfer(
         &mut self,
         slot_id: u8,
@@ -359,6 +443,9 @@ impl XhciController {
     }
 
     /// Polls connected USB input endpoints (keyboards, mice) and processes new reports.
+    ///
+    /// Checks for completion events on interrupt endpoints, unpacks report buffers,
+    /// dispatches to keyboard/mouse drivers, and re-queues transfer TRBs.
     pub fn poll_inputs(&mut self) {
         let db_base = self.db_base;
         // Poll event ring for transfer events
@@ -398,10 +485,19 @@ impl XhciController {
     }
 }
 
-/// Global xHCI Host Controller instance.
+/// Global thread-safe xHCI Host Controller instance.
 pub static XHCI: Spinlock<Option<XhciController>> = Spinlock::new(None);
 
 /// Probes the PCI bus for an xHCI controller, initializes the host, and enumerates devices.
+///
+/// Follows the standard initialization sequence:
+/// 1. Discovers xHCI PCI device (Class 0x0C, Subclass 0x03, Prog IF 0x30).
+/// 2. Decodes BAR0 MMIO window and identity-maps pages with `NO_CACHE`.
+/// 3. Negotiates BIOS-to-OS ownership via extended capability pointer (xECP).
+/// 4. Resets the controller and waits for CNR (Controller Not Ready) to clear.
+/// 5. Configures MaxSlots, allocates DCBAA, Command Ring, Event Ring, and ERST.
+/// 6. Starts controller execution (`USBCMD_RS | USBCMD_INTE`).
+/// 7. Enumerates root hub ports.
 pub fn init() {
     println!();
     println!("--------------------------------------------------");
