@@ -450,11 +450,13 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str("  audio / sndstat      - Display Intel HD Audio controller status and codecs (M32)\n");
             out.push_str("  beep                 - Play musical startup chime (M32)\n");
             out.push_str("  play <freq> [ms]     - Play a procedural sine wave tone at frequency (M32)\n");
+            out.push_str("  acpi                 - Display ACPI tables, FADT, DSDT, and power configurations (M33)\n");
+            out.push_str("  poweroff / shutdown  - Power off computer via ACPI S5 sleep transition (M33)\n");
+            out.push_str("  reboot               - Reboot machine via ACPI RESET_REG, 8042, or PCI (M33)\n");
             out.push_str("  test                 - Run comprehensive automated subsystem & shell tests\n");
             out.push_str("  gui                  - Launch Desktop Window Manager & Compositor demo (M30)\n");
             out.push_str("  mem                  - Display physical memory manager statistics\n");
             out.push_str("  uptime               - Display system timer ticks\n");
-            out.push_str("  reboot               - Reboot physical or virtual machine\n");
             out.push_str("  exec <path>          - Execute a Ring 3 ELF binary\n");
             out.push_str("\nSyntax Features:\n");
             out.push_str("  Pipelines:           cmd1 | cmd2 | cmd3\n");
@@ -1157,19 +1159,81 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             let ticks = apic::get_ticks();
             (alloc::format!("Uptime: {} APIC timer ticks\n", ticks), 0)
         }
+        "acpi" => {
+            let mut out = String::new();
+            if let Some(info) = crate::arch::x86_64::acpi::get_acpi_info() {
+                out.push_str("Advanced Configuration and Power Interface (ACPI) Status:\n");
+                out.push_str(&alloc::format!(
+                    "  RSDP Address:    {:#014x} (Revision: {}, OEM: \"{}\")\n",
+                    info.rsdp_addr,
+                    info.revision,
+                    core::str::from_utf8(&info.oem_id).unwrap_or("???")
+                ));
+                out.push_str(&alloc::format!("  Total Tables:    {} cataloged\n", info.tables.len()));
+                out.push_str("--------------------------------------------------------------------------------\n");
+                out.push_str(&alloc::format!("{:<8} {:<18} {:<12} {:<6} {}\n", "TABLE", "PHYSICAL ADDR", "LENGTH", "REV", "OEM ID"));
+                out.push_str("--------------------------------------------------------------------------------\n");
+                for tbl in &info.tables {
+                    out.push_str(&alloc::format!(
+                        "{:<8} {:#016x} {:<12} {:<6} \"{}\"\n",
+                        tbl.signature_str(),
+                        tbl.address,
+                        alloc::format!("{} B", tbl.length),
+                        tbl.revision,
+                        tbl.oem_id_str()
+                    ));
+                }
+                out.push_str("--------------------------------------------------------------------------------\n");
+                if let Some(ref fadt) = info.fadt {
+                    out.push_str("FADT (\"FACP\") Power Management Configuration:\n");
+                    out.push_str(&alloc::format!(
+                        "  PM1a_CNT Port:   0x{:04x} (Status: {})\n",
+                        fadt.pm1a_cnt_blk,
+                        if fadt.is_acpi_enabled() { "ACPI Mode (SCI_EN=1)" } else { "Legacy Mode" }
+                    ));
+                    out.push_str(&alloc::format!("  PM1b_CNT Port:   0x{:04x}\n", fadt.pm1b_cnt_blk));
+                    out.push_str(&alloc::format!(
+                        "  SMI_CMD Port:    0x{:04x} (Enable Val: 0x{:02x}, Disable Val: 0x{:02x})\n",
+                        fadt.smi_cmd, fadt.acpi_enable, fadt.acpi_disable
+                    ));
+                    out.push_str(&alloc::format!(
+                        "  Reset Register:  {}\n",
+                        if fadt.supports_reset_reg() { "Supported (ACPI 2.0+)" } else { "Unsupported (Fallback to 8042/PCI)" }
+                    ));
+                    out.push_str(&alloc::format!("  DSDT Address:    {:#014x}\n", fadt.dsdt_address));
+                }
+                if let Some(ref dsdt) = info.dsdt {
+                    out.push_str("DSDT Definition Block & AML Sleep States:\n");
+                    out.push_str(&alloc::format!("  Length:          {} bytes\n", dsdt.length));
+                    out.push_str(&alloc::format!(
+                        "  \\_S5 Soft-Off:   {} (SLP_TYPa: 0x{:02x}, SLP_TYPb: 0x{:02x})\n",
+                        if dsdt.s5_supported { "Discovered in DSDT" } else { "Emulation Fallback" },
+                        dsdt.slp_typa,
+                        dsdt.slp_typb
+                    ));
+                }
+                if let Some(ref hpet) = info.hpet {
+                    out.push_str("HPET (\"HPET\") High Precision Event Timer Configuration:\n");
+                    out.push_str(&alloc::format!("  MMIO Base:       {:#014x}\n", hpet.address));
+                    out.push_str(&alloc::format!("  Timer Block ID:  {:#x}\n", hpet.block_id));
+                    out.push_str(&alloc::format!("  Min Clock Tick:  {} fs\n", hpet.min_tick));
+                }
+                if let Some(ref madt) = info.madt {
+                    out.push_str("MADT (\"APIC\") Topology Summary:\n");
+                    out.push_str(&alloc::format!("  CPU Cores:       {} online\n", madt.cpus.len()));
+                    out.push_str(&alloc::format!("  BSP APIC ID:     {}\n", madt.bsp_apic_id));
+                    out.push_str(&alloc::format!("  I/O APICs:       {}\n", madt.io_apics.len()));
+                }
+            } else {
+                out.push_str("ACPI subsystem is not initialized.\n");
+            }
+            (out, 0)
+        }
+        "poweroff" | "shutdown" => {
+            crate::arch::x86_64::acpi::poweroff();
+        }
         "reboot" => {
-            println!("Rebooting system...");
-            unsafe {
-                core::arch::asm!(
-                    "out dx, al",
-                    in("dx") 0x64u16,
-                    in("al") 0xFEu8,
-                    options(nomem, nostack),
-                );
-            }
-            loop {
-                unsafe { core::arch::asm!("hlt"); }
-            }
+            crate::arch::x86_64::acpi::reboot();
         }
         "exec" => {
             if args.is_empty() {
@@ -1667,7 +1731,11 @@ pub fn run_automated_tests() {
     execute_command("beep");
     crate::drivers::audio::run_self_tests();
 
-    println!("[SHELL] All Phase 7, 8, 9, 10, 11 & 12 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics and Audio tests passed successfully!");
+    println!("[SHELL] 25. Testing ACPI Table Parser, FADT, DSDT & System Power Subsystem (M33)...");
+    execute_command("acpi");
+    crate::arch::x86_64::acpi::run_self_tests();
+
+    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12 & 13 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio and ACPI/Power tests passed successfully!");
 }
 
 /// Interactive Shell Loop that listens on USB Keyboard, PS/2 Keyboard, and COM1 serial input

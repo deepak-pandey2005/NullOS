@@ -503,17 +503,17 @@ scripts\windows\run.bat --headless    # Run automated headless test suite
 # Phase 13 — ACPI & Power
 
 ### M33 — ACPI
-- [ ] ACPI table parser
-- [ ] RSDP
-- [ ] RSDT/XSDT
-- [ ] FADT
-- [ ] MADT
-- [ ] HPET
-- [ ] Power management
-- [ ] Shutdown
-- [ ] Reboot
-- [ ] Sleep
-- [ ] CPU power states
+- [x] ACPI table parser
+- [x] RSDP
+- [x] RSDT/XSDT
+- [x] FADT
+- [x] MADT
+- [x] HPET
+- [x] Power management
+- [x] Shutdown
+- [x] Reboot
+- [x] Sleep
+- [x] CPU power states
 
 ---
 

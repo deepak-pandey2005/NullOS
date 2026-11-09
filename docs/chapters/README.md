@@ -259,3 +259,13 @@ Welcome to the comprehensive textbook documentation for **NullOS**. This curricu
 - Stream Descriptor DMA engines: Buffer Descriptor List (BDL) cyclic ping-pong double buffers (Buffer A / Buffer B), cyclic buffer length (`CBL`), and Last Valid Index (`LVI`).
 - Linear PCM Synthesizer: 256-point fixed-point sine lookup table, procedural pure sine tone generation, and dual-frequency startup chime chords ($C_5 \rightarrow G_5$).
 - Shell audio diagnostics: `audio` / `sndstat`, `beep`, and `play <freq> [duration]` interactive commands and Test 24 automated verification suite.
+
+### [Chapter 28: ACPI Table Architecture & System Power Management](chapter28_acpi_and_power_management.md)
+- Evolution of system power: Legacy PC/AT ports, APM firmware bottlenecks, and OS-Directed Power Management (OSPM).
+- ACPI table discovery: Root System Description Pointer (RSDP), 32-bit RSDT, and 64-bit XSDT descriptor traversal.
+- Table integrity: 36-byte standard ACPI table header, signature matching, and 8-bit checksum verification.
+- Fixed ACPI Description Table (FADT): Power management register blocks (`PM1a_CNT`, `PM1b_CNT`), SMI command port, ACPI hardware enable sequence, and reset register definitions.
+- Differentiated System Description Table (DSDT): Byte-compiled AML parsing, scanning for `\_S5` package, and extracting `SLP_TYPa` and `SLP_TYPb` sleep state values.
+- System power primitives: Full software-directed shutdown via ACPI S5 sleep transitions with emulator fallbacks (ports `0x604` and `0xB004`).
+- Cascading reboot sequence: ACPI `RESET_REG`, 8042 keyboard controller pulse line (`0xFE`), PCI reset (`0xCF9`), and CPU Triple Fault fallback.
+- Interactive shell diagnostics: `acpi`, `poweroff` / `shutdown`, and `reboot` commands, with automated Test Phase 25.
