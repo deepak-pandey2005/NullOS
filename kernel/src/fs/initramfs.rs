@@ -1,7 +1,20 @@
 //! In-Memory RamFS & Initramfs Filesystem Driver (Phase 6 - M15 Initramfs).
 //!
-//! Provides a fully functional in-memory filesystem that supports directories, files,
-//! dynamic reading, writing, and loading from TAR archives.
+//! # Architecture Overview
+//!
+//! `RamFs` is a volatile in-memory filesystem that implements the VFS [`FileSystem`]
+//! and [`Inode`] traits. It serves two essential purposes in NullOS:
+//! 1. **Early Boot Initramfs**: Acts as the initial root filesystem (`"/"`) before
+//!    persistent storage drivers (SATA, NVMe, VirtIO) and partitions are probed.
+//! 2. **Standard Device Node Provider**: Hosts volatile virtual character devices
+//!    (`/dev/console`, `/dev/null`, `/dev/zero`) and temporary directory spaces (`/tmp`).
+//!
+//! # Node Types
+//! - [`RamFile`]: In-memory regular file containing a dynamically resizable byte buffer (`Vec<u8>`).
+//! - [`RamDirectory`]: In-memory directory maintaining an ordered map of child names to inodes.
+//! - [`ConsoleDevice`]: Special device routing write operations to the serial UART output.
+//! - [`ZeroDevice`]: Reads yield continuous streams of zero bytes.
+//! - [`NullDevice`]: Discards all written data; reads yield immediate EOF.
 
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
@@ -14,13 +27,15 @@ use super::vfs::{DirEntry, FileStat, FileType, FileSystem, FsError, Inode};
 use crate::drivers::serial;
 use crate::sync::Spinlock;
 
+/// Monotonically increasing atomic counter allocating unique 64-bit inode numbers.
 static NEXT_INODE: AtomicU64 = AtomicU64::new(1);
 
+/// Allocates a new unique 64-bit inode identification number.
 fn alloc_inode_num() -> u64 {
     NEXT_INODE.fetch_add(1, Ordering::SeqCst)
 }
 
-/// An in-memory regular file node.
+/// An in-memory regular file node storing byte data in a heap buffer.
 pub struct RamFile {
     inode_num: u64,
     data: Spinlock<Vec<u8>>,
@@ -28,6 +43,7 @@ pub struct RamFile {
 }
 
 impl RamFile {
+    /// Creates a new in-memory file pre-initialized with the specified byte slice and mode.
     pub fn new(initial_data: &[u8], mode: u32) -> Self {
         Self {
             inode_num: alloc_inode_num(),
@@ -88,7 +104,7 @@ impl Inode for RamFile {
     }
 }
 
-/// An in-memory directory node.
+/// An in-memory directory node storing child inodes in an associative map.
 pub struct RamDirectory {
     inode_num: u64,
     children: Spinlock<BTreeMap<String, Arc<dyn Inode>>>,
@@ -97,6 +113,7 @@ pub struct RamDirectory {
 }
 
 impl RamDirectory {
+    /// Creates a new empty directory node with the specified mode bits.
     pub fn new(mode: u32) -> Self {
         Self {
             inode_num: alloc_inode_num(),
@@ -106,16 +123,19 @@ impl RamDirectory {
         }
     }
 
+    /// Inserts a child inode under the directory entry `name`.
     pub fn insert_child(&self, name: &str, node: Arc<dyn Inode>) {
         let mut children = self.children.lock();
         children.insert(name.to_string(), node);
     }
 
+    /// Inserts a typed directory child, tracking it in both `children` and `dirs`.
     pub fn insert_dir(&self, name: &str, dir: Arc<RamDirectory>) {
         self.children.lock().insert(name.to_string(), dir.clone());
         self.dirs.lock().insert(name.to_string(), dir);
     }
 
+    /// Retrieves a reference to a child directory if present.
     #[allow(dead_code)]
     pub fn get_dir(&self, name: &str) -> Option<Arc<RamDirectory>> {
         self.dirs.lock().get(name).cloned()
@@ -193,6 +213,7 @@ pub struct ConsoleDevice {
 }
 
 impl ConsoleDevice {
+    /// Creates a new console device node.
     pub fn new() -> Self {
         Self {
             inode_num: alloc_inode_num(),
@@ -250,6 +271,7 @@ pub struct ZeroDevice {
 }
 
 impl ZeroDevice {
+    /// Creates a new zero device node.
     pub fn new() -> Self {
         Self {
             inode_num: alloc_inode_num(),
@@ -299,6 +321,7 @@ pub struct NullDevice {
 }
 
 impl NullDevice {
+    /// Creates a new null sink device node.
     pub fn new() -> Self {
         Self {
             inode_num: alloc_inode_num(),
@@ -347,12 +370,13 @@ pub struct RamFs {
 }
 
 impl RamFs {
+    /// Creates a new RamFS filesystem instance with an initial root directory.
     pub fn new() -> Self {
         let root = Arc::new(RamDirectory::new(0o755));
         Self { root }
     }
 
-    /// Populates standard root directories and device nodes (`/dev`, `/bin`, `/etc`, `/tmp`).
+    /// Populates standard root directories and device nodes (`/dev`, `/bin`, `/lib`, `/etc`, `/tmp`, `/disk`, `/mnt`).
     pub fn populate_defaults(&self) {
         // Create /dev directory and devices
         let dev = Arc::new(RamDirectory::new(0o755));

@@ -1,11 +1,46 @@
 //! Transmission Control Protocol (TCP) State Machine & Transport Layer (Phase 8 - M24 Network Stack).
 //!
-//! Implements RFC 793 connection-oriented stream transport:
-//! - 20-byte TCP Segment Header serialization and parsing.
-//! - TCP Pseudo-Header Checksum calculation.
-//! - Full 11-state TCP Connection State Machine (`Closed` through `Established`).
-//! - Three-way handshake generation (`SYN`, `SYN-ACK`, `ACK`).
-//! - Graceful connection teardown (`FIN`, `ACK`).
+//! # Architecture & Protocol Specification
+//!
+//! TCP (defined in [RFC 793](https://www.rfc-editor.org/rfc/rfc793)) provides a reliable,
+//! ordered, full-duplex byte-stream transport service on top of the best-effort IPv4 layer.
+//!
+//! ## TCP Segment Format (RFC 793):
+//!
+//! ```text
+//!  0                   1                   2                   3
+//!  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |          Source Port          |       Destination Port        |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                        Sequence Number                        |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                    Acknowledgment Number                      |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |  Data |           |U|A|P|R|S|F|                               |
+//! | Offset| Reserved  |R|C|S|S|Y|I|            Window             |
+//! |       |           |G|K|H|T|N|N|                               |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |           Checksum            |         Urgent Pointer        |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                    Options                    |    Padding    |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                             data                              |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! ```
+//!
+//! ## Control Flags:
+//! - **URG (0x20)**: Urgent Pointer field significant.
+//! - **ACK (0x10)**: Acknowledgment field significant.
+//! - **PSH (0x08)**: Push function (deliver buffered data to receiving app immediately).
+//! - **RST (0x04)**: Reset connection abruptly.
+//! - **SYN (0x02)**: Synchronize sequence numbers to establish connection.
+//! - **FIN (0x01)**: No more data from sender; begin connection teardown.
+//!
+//! ## State Machine:
+//! Tracks the standard 11 states:
+//! `Closed` -> `Listen` -> `SynSent` -> `SynReceived` -> `Established` ->
+//! `FinWait1` -> `FinWait2` -> `CloseWait` -> `Closing` -> `LastAck` -> `TimeWait`.
 //!
 //! TODO(net/tcp): Implement RFC 793 Sliding Window Flow Control:
 //! - Track send sequence variables: `SND.UNA` (oldest unacknowledged seq), `SND.NXT` (next seq to send),
@@ -29,30 +64,48 @@ use core::fmt;
 use crate::net::ipv4::{self, Ipv4Addr, IpProtocol};
 use crate::println;
 
+/// Minimum TCP header length in bytes (no options, data offset = 5 words = 20 bytes).
 pub const TCP_HDR_MIN_LEN: usize = 20;
 
 // TCP Control Flags
+/// FIN bit: No more data from sender.
 pub const TCP_FLAG_FIN: u8 = 0x01;
+/// SYN bit: Synchronize sequence numbers (initiate connection).
 pub const TCP_FLAG_SYN: u8 = 0x02;
+/// RST bit: Abort / reset connection.
 pub const TCP_FLAG_RST: u8 = 0x04;
+/// PSH bit: Push buffered data to user process.
 pub const TCP_FLAG_PSH: u8 = 0x08;
+/// ACK bit: Acknowledgment field valid.
 pub const TCP_FLAG_ACK: u8 = 0x10;
+/// URG bit: Urgent pointer valid.
 pub const TCP_FLAG_URG: u8 = 0x20;
 
 /// Standard 11-State TCP Connection State Machine (RFC 793).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TcpState {
+    /// Initial disconnected state.
     #[default]
     Closed,
+    /// Passive open: waiting for incoming connection request (SYN).
     Listen,
+    /// Active open: SYN sent, waiting for SYN-ACK.
     SynSent,
+    /// SYN received, SYN-ACK sent, waiting for final ACK.
     SynReceived,
+    /// Three-way handshake complete; active full-duplex data transfer.
     Established,
+    /// Active close: local application closed socket, FIN sent, waiting for ACK or FIN.
     FinWait1,
+    /// Local FIN acknowledged, waiting for remote FIN.
     FinWait2,
+    /// Passive close: remote host sent FIN, local host sent ACK, waiting for local app close.
     CloseWait,
+    /// Simultaneous close: both endpoints sent FIN simultaneously.
     Closing,
+    /// Local FIN sent after CloseWait, waiting for final ACK.
     LastAck,
+    /// Waiting 2MSL (Maximum Segment Lifetime) before returning to Closed to absorb delayed segments.
     TimeWait,
 }
 
@@ -74,22 +127,32 @@ impl fmt::Display for TcpState {
     }
 }
 
-/// Standard 20-byte TCP Segment Header.
+/// Standard 20-byte TCP Segment Header in network byte order.
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct TcpHeader {
+    /// Originating transport port.
     pub src_port: u16,
+    /// Destination transport port.
     pub dst_port: u16,
+    /// Sequence number of first data byte in this segment (or initial sequence number during SYN).
     pub seq_num: u32,
+    /// Acknowledgment number: next expected byte sequence number from sender.
     pub ack_num: u32,
-    pub data_offset_res: u8, // High 4 bits: data offset in 32-bit words (5 = 20 bytes)
-    pub flags: u8,           // Control flags (FIN, SYN, RST, PSH, ACK, URG)
-    pub window_size: u16,    // Flow control window size
-    pub checksum: u16,       // 16-bit one's complement checksum
-    pub urgent_ptr: u16,     // Urgent pointer
+    /// Data offset in 32-bit words (top 4 bits) + 4 reserved bits.
+    pub data_offset_res: u8,
+    /// Control flags bitmask (`TCP_FLAG_*`).
+    pub flags: u8,
+    /// Advertised receive window size in bytes.
+    pub window_size: u16,
+    /// 16-bit Internet Checksum over pseudo-header and TCP segment.
+    pub checksum: u16,
+    /// Offset to urgent data if URG flag set.
+    pub urgent_ptr: u16,
 }
 
 impl TcpHeader {
+    /// Constructs a new TCP header with fields converted to network byte order.
     pub fn new(
         src_port: u16,
         dst_port: u16,
@@ -111,30 +174,37 @@ impl TcpHeader {
         }
     }
 
+    /// Returns source port in host byte order.
     pub fn src_port(&self) -> u16 {
         u16::from_be(self.src_port)
     }
 
+    /// Returns destination port in host byte order.
     pub fn dst_port(&self) -> u16 {
         u16::from_be(self.dst_port)
     }
 
+    /// Returns sequence number in host byte order.
     pub fn seq_num(&self) -> u32 {
         u32::from_be(self.seq_num)
     }
 
+    /// Returns acknowledgment number in host byte order.
     pub fn ack_num(&self) -> u32 {
         u32::from_be(self.ack_num)
     }
 
+    /// Returns total header length in bytes, derived from the data offset nibble.
     pub fn header_length(&self) -> usize {
         ((self.data_offset_res >> 4) * 4) as usize
     }
 
+    /// Returns flow control window size in host byte order.
     pub fn window_size(&self) -> u16 {
         u16::from_be(self.window_size)
     }
 
+    /// Checks whether the specified flag bit is set.
     pub fn has_flag(&self, flag: u8) -> bool {
         (self.flags & flag) != 0
     }

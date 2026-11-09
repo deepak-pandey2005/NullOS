@@ -1,15 +1,39 @@
+/**
+ * @file hello.c
+ * @brief NullOS Ring 3 C Userspace Integration & Sanity Test Program
+ *
+ * This executable tests the fundamental execution capabilities of userspace programs
+ * running under NullOS in unprivileged CPU privilege level 3 (Ring 3):
+ * 1. Process environment: Validates process ID acquisition (`getpid`) and verifies
+ *    command-line arguments passed via the stack (`argc`, `argv`).
+ * 2. C runtime string operations: Tests string measurement (`strlen`), copying (`strcpy`),
+ *    and lexicographic comparison (`strcmp`).
+ * 3. Dynamic heap memory management: Tests heap expansion via `malloc`, writes formatted
+ *    strings into dynamically allocated buffers, and validates heap release via `free`.
+ * 4. Virtual File System (VFS) integration: Tests file descriptor operations (`open`,
+ *    `read`, `close`) against persistent storage files (`/disk/README.TXT`) and fallback
+ *    initramfs files (`/hello.txt`).
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
 
+/**
+ * @brief Main entry point for the user-mode Hello program.
+ *
+ * @param argc Number of command-line arguments.
+ * @param argv Array of pointers to argument strings.
+ * @return 0 on success, non-zero on failure.
+ */
 int main(int argc, char **argv) {
     printf("====================================================\n");
     printf("   Hello from Ring 3 C Userspace on NullOS!        \n");
     printf("====================================================\n");
 
-    /* 1. Verify Process ID */
+    /* 1. Verify Process ID and Command-Line Arguments */
     pid_t pid = getpid();
     printf("[USER HELLO] Running in isolated process with PID: %ld (argc=%d)\n", (long)pid, argc);
     if (argv && argv[0]) {

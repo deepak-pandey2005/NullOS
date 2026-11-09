@@ -1,63 +1,95 @@
 //! POSIX USTAR Archive Parser (Phase 6 - M15 Initramfs).
 //!
-//! Features:
-//! - Standard POSIX USTAR 512-byte block parser.
-//! - Zero-copy extraction of file contents.
-//! - Octal string numeric decoding (size, mode, uid, gid).
-//! - Directory & regular file type detection.
+//! # Architecture & Format
+//!
+//! The POSIX Uniform Standard Tape Archive (USTAR) format stores files sequentially
+//! in 512-byte blocks. Each archive entry begins with a 512-byte header describing
+//! the file (filename, size, file permissions, ownership, and entry type).
+//!
+//! ## Header Structure (512 bytes):
+//! - `0..100`: File name path (NUL-terminated ASCII string).
+//! - `100..108`: File mode permissions in octal ASCII.
+//! - `108..116`: Owner user ID (UID) in octal ASCII.
+//! - `116..124`: Group ID (GID) in octal ASCII.
+//! - `124..136`: File size in octal ASCII bytes.
+//! - `136..148`: Modification timestamp in octal ASCII.
+//! - `148..156`: Checksum over entire header (computed assuming checksum field is space characters).
+//! - `156`: Type flag character (`'0'` = normal file, `'5'` = directory).
+//! - `257..263`: USTAR magic string (`"ustar\0"` or `"ustar "`).
+//!
+//! ## Zero-Copy Design
+//! This parser extracts file slices directly referencing the underlying read-only
+//! memory buffer, avoiding unnecessary heap allocations and buffer copies during
+//! early kernel boot.
 
 use core::str;
 
-/// POSIX USTAR magic identifier.
+/// Standard POSIX USTAR magic string identifier.
 #[allow(dead_code)]
 pub const USTAR_MAGIC: &[u8; 6] = b"ustar\0";
+/// Alternate GNU tar magic string variant.
 #[allow(dead_code)]
 pub const USTAR_MAGIC_ALT: &[u8; 6] = b"ustar ";
 
-/// Type flag representing the type of archive entry.
+/// Type flag representing the nature of an archive entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum TarType {
+    /// Regular byte file content.
     NormalFile,
+    /// Directory container.
     Directory,
+    /// Hard link reference.
     HardLink,
+    /// Symbolic link reference.
     SymLink,
+    /// Character special device node.
     CharacterDevice,
+    /// Block special storage device node.
     BlockDevice,
+    /// FIFO / Named pipe.
     Fifo,
+    /// Unrecognized or vendor-specific typeflag byte.
     Unknown(u8),
 }
 
-/// A parsed TAR entry pointing directly into the archive slice (zero-copy).
+/// A parsed TAR entry pointing directly into the archive memory slice (zero-copy).
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct TarEntry<'a> {
+    /// Extracted file or directory path name.
     pub name: &'a str,
+    /// File size in bytes.
     pub size: usize,
+    /// POSIX file permission mode.
     pub mode: u32,
+    /// Classification of entry (file, directory, link, etc.).
     pub entry_type: TarType,
+    /// Direct byte slice of file payload starting after the 512-byte header.
     pub data: &'a [u8],
 }
 
 /// TAR Archive reader iterating over contiguous 512-byte blocks.
 pub struct TarArchive<'a> {
+    /// Backing memory buffer holding the raw TAR archive.
     pub data: &'a [u8],
+    /// Current byte offset into the archive.
     offset: usize,
 }
 
 #[allow(dead_code)]
 impl<'a> TarArchive<'a> {
-    /// Creates a new TAR archive reader from raw bytes.
+    /// Creates a new TAR archive reader wrapping raw archive bytes.
     pub fn new(data: &'a [u8]) -> Self {
         Self { data, offset: 0 }
     }
 
-    /// Resets the iterator to the beginning of the archive.
+    /// Resets the iterator back to the beginning of the archive.
     pub fn reset(&mut self) {
         self.offset = 0;
     }
 
-    /// Searches for a file in the archive by exact path name.
+    /// Searches for a file in the archive by exact normalized path name.
     pub fn find(&self, path: &str) -> Option<TarEntry<'a>> {
         let mut archive = TarArchive::new(self.data);
         let trimmed_query = path.trim_start_matches('/');
@@ -74,6 +106,10 @@ impl<'a> TarArchive<'a> {
 impl<'a> Iterator for TarArchive<'a> {
     type Item = TarEntry<'a>;
 
+    /// Parses the next 512-byte USTAR block into a [`TarEntry`].
+    ///
+    /// Skips past the file content and aligns the cursor to the subsequent 512-byte boundary.
+    /// Returns `None` when encountering the end-of-archive marker (all zeroes) or EOF.
     fn next(&mut self) -> Option<Self::Item> {
         while self.offset + 512 <= self.data.len() {
             let header = &self.data[self.offset..self.offset + 512];
@@ -140,7 +176,9 @@ impl<'a> Iterator for TarArchive<'a> {
     }
 }
 
-/// Parses an ASCII octal string into a numeric `usize`.
+/// Parses an ASCII octal string (NUL or space terminated) into a numeric `usize`.
+///
+/// Returns `None` if illegal characters or arithmetic overflow occur.
 pub fn parse_octal(bytes: &[u8]) -> Option<usize> {
     let mut val: usize = 0;
     let mut started = false;

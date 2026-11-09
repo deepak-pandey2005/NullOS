@@ -1,7 +1,12 @@
 //! Socket Abstraction & POSIX Networking API (Phase 8 - M24 Network Stack).
 //!
-//! Provides the Layer 5 Berkeley Sockets abstraction (`socket`, `bind`, `listen`,
-//! `accept`, `connect`, `send`, `recv`, `close`), transport demultiplexing, and connection tables.
+//! # Architecture & Purpose
+//!
+//! Provides the Layer 5 Berkeley Sockets abstraction for user processes and kernel tasks:
+//! - POSIX-like API: `socket`, `bind`, `listen`, `accept`, `connect`, `send`, `recv`, `close`.
+//! - Socket descriptors: managed through [`SocketId`] identifiers and a global [`SOCKET_TABLE`].
+//! - Transport demultiplexing: routes incoming UDP datagrams and TCP segments to target queues.
+//! - State transitions: manages TCP connection lifecycle (3-way handshake, teardown).
 
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::vec::Vec;
@@ -18,32 +23,48 @@ use crate::sync::Spinlock;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SocketId(pub u64);
 
+/// Atomic counter dispensing unique SocketId values.
 static NEXT_SOCKET_ID: AtomicU64 = AtomicU64::new(1);
+/// Atomic counter assigning ephemeral local port numbers (49152..65535).
 static NEXT_EPHEMERAL_PORT: AtomicU16 = AtomicU16::new(49152);
 
 /// Socket Communication Semantics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SocketType {
-    Stream,   // TCP stream
-    Datagram, // UDP datagram
-    Raw,      // Raw packet
+    /// Reliable, ordered byte-stream transport (`SOCK_STREAM` / TCP).
+    Stream,
+    /// Unreliable, connectionless datagram transport (`SOCK_DGRAM` / UDP).
+    Datagram,
+    /// Raw protocol packet access (`SOCK_RAW`).
+    Raw,
 }
 
 /// Active Socket State Representation.
 pub struct Socket {
+    /// Unique socket identifier.
     pub id: SocketId,
+    /// Communication semantics (Stream, Datagram, Raw).
     pub sock_type: SocketType,
+    /// Local bound or ephemeral port.
     pub local_port: u16,
+    /// Remote connected peer IPv4 address.
     pub remote_ip: Option<Ipv4Addr>,
+    /// Remote connected peer port.
     pub remote_port: Option<u16>,
+    /// TCP connection state machine state.
     pub tcp_state: TcpState,
+    /// Local sequence counter for outgoing TCP data.
     pub local_seq: u32,
+    /// Remote sequence acknowledgment counter for incoming TCP data.
     pub remote_ack: u32,
+    /// Incoming received packet/payload byte queue.
     pub rx_queue: VecDeque<Vec<u8>>,
+    /// Queue of pending child connection sockets waiting to be accepted.
     pub accept_queue: VecDeque<SocketId>,
 }
 
 impl Socket {
+    /// Constructs a new socket with an allocated identifier and default ephemeral port.
     pub fn new(sock_type: SocketType) -> Self {
         let id = SocketId(NEXT_SOCKET_ID.fetch_add(1, Ordering::Relaxed));
         let local_port = NEXT_EPHEMERAL_PORT.fetch_add(1, Ordering::Relaxed);
@@ -69,7 +90,7 @@ impl Socket {
 /// Global thread-safe Socket Registry Table.
 pub static SOCKET_TABLE: Spinlock<BTreeMap<SocketId, Socket>> = Spinlock::new(BTreeMap::new());
 
-/// Creates a new socket of the specified type.
+/// Creates a new socket of the specified type and inserts it into the global registry.
 pub fn socket(sock_type: SocketType) -> Result<SocketId, &'static str> {
     let sock = Socket::new(sock_type);
     let id = sock.id;
@@ -96,7 +117,7 @@ pub fn listen(id: SocketId) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Accepts an incoming connection on a listening socket.
+/// Accepts an incoming connection on a listening socket, returning the child socket descriptor.
 pub fn accept(id: SocketId) -> Result<SocketId, &'static str> {
     for _ in 0..100 {
         super::poll();

@@ -1,11 +1,29 @@
 //! FAT32 Persistent Filesystem Driver (Phase 6 - M19 Filesystems).
 //!
-//! Implements the Microsoft FAT32 specification over any `BlockDevice`:
-//! - BIOS Parameter Block (BPB) and Extended BPB parsing.
-//! - File Allocation Table (FAT) cluster chain traversal, allocation, and linking.
-//! - Directory traversal (8.3 filenames with case-insensitive matching).
-//! - File and Directory `Inode` implementation (`read_at`, `write_at`, `lookup`, `read_dir`, `create`).
-//! - Full integration with the VFS mount table.
+//! # Architecture Overview
+//!
+//! This module implements the Microsoft File Allocation Table 32 (FAT32) standard
+//! over generic storage devices implementing the [`BlockDevice`] trait.
+//!
+//! ## FAT32 Layout:
+//! 1. **Reserved Sectors (Sector 0..ReservedCount)**:
+//!    - Sector 0: Volume Boot Record (VBR) / BIOS Parameter Block (BPB).
+//!    - Sector 1: FSInfo Sector.
+//! 2. **File Allocation Tables (FAT 1 and FAT 2)**:
+//!    - 32-bit entries (top 4 bits reserved, 28 bits cluster address).
+//!    - Clusters 0 and 1 are reserved. Valid clusters start at cluster 2.
+//!    - Free cluster: `0x00000000`.
+//!    - End of Chain (EOC): `>= 0x0FFFFFF8`.
+//! 3. **Data Region**:
+//!    - Arranged in contiguous clusters of `SectorsPerCluster` sectors.
+//!    - First data sector starts at `ReservedCount + (NumFATs * SectorsPerFAT)`.
+//!    - Root directory starts at cluster specified by `BPB.RootCluster` (typically 2).
+//!
+//! ## Features Implemented:
+//! - BPB validation and parameter extraction.
+//! - Cluster chain traversal, cluster allocation, and FAT table updating.
+//! - Directory entry traversal (8.3 uppercase short names).
+//! - Reading and writing files through VFS [`Inode`] operations.
 //!
 //! // TODO(fat32-lfn): Implement Microsoft VFAT Long File Name (LFN) entries (ATTR_LFN = 0x0F).
 //! // Currently, filenames are strictly constrained to 8.3 short format (e.g. `README.TXT`).
@@ -22,53 +40,86 @@ use crate::drivers::block::{BlockDevice, SECTOR_SIZE};
 use crate::fs::vfs::{DirEntry, FileStat, FileType, FileSystem, FsError, Inode};
 
 /// FAT32 Cluster Constants
+/// Minimum cluster number value indicating End-of-Chain (`0x0FFFFFF8`).
 const FAT32_EOC_MIN: u32 = 0x0FFF_FFF8;
+/// Standard End-of-Chain marker written to terminating cluster entries (`0x0FFFFFFF`).
 const FAT32_EOC: u32     = 0x0FFF_FFFF;
+/// Bitmask extracting valid 28-bit cluster indices (ignoring top 4 reserved bits).
 const FAT32_MASK: u32    = 0x0FFF_FFFF;
 
 /// Attributes in standard 32-byte FAT directory entries
+/// File is read-only.
 const ATTR_READ_ONLY: u8 = 0x01;
+/// File is hidden from normal directory listings.
 const ATTR_HIDDEN: u8    = 0x02;
+/// System file required by operating system.
 const ATTR_SYSTEM: u8    = 0x04;
+/// Entry represents the volume label rather than a file.
 const ATTR_VOLUME_ID: u8 = 0x08;
+/// Entry represents a sub-directory containing directory entries.
 const ATTR_DIRECTORY: u8 = 0x10;
+/// Archive bit (used by backup utilities).
 const ATTR_ARCHIVE: u8   = 0x20;
+/// Combination of attributes indicating a Long File Name (LFN) descriptor entry.
 const ATTR_LFN: u8       = 0x0F;
 
 /// Raw 32-byte directory entry layout on disk.
 #[repr(C, packed)]
 #[derive(Clone, Copy, Debug)]
 pub struct RawDirEntry {
+    /// 8-byte space-padded base filename.
     pub name: [u8; 8],
+    /// 3-byte space-padded file extension.
     pub ext: [u8; 3],
+    /// Attribute bitmask (`ATTR_*`).
     pub attr: u8,
+    /// Reserved for Windows NT.
     pub reserved: u8,
+    /// Millisecond timestamp of creation time (0..199).
     pub ctime_tenth: u8,
+    /// Creation time (2-second granularity).
     pub ctime: u16,
+    /// Creation date.
     pub cdate: u16,
+    /// Last access date.
     pub adate: u16,
+    /// High 16 bits of starting cluster number.
     pub cluster_high: u16,
+    /// Last modification time.
     pub mtime: u16,
+    /// Last modification date.
     pub mdate: u16,
+    /// Low 16 bits of starting cluster number.
     pub cluster_low: u16,
+    /// Logical file size in bytes (0 for directories).
     pub file_size: u32,
 }
 
-/// Parsed Boot Sector / BPB configuration.
+/// Parsed Boot Sector / BIOS Parameter Block (BPB) configuration.
 #[derive(Debug, Clone)]
 pub struct Fat32Bpb {
+    /// Number of bytes per disk sector (typically 512).
     pub bytes_per_sector: u16,
+    /// Number of sectors in a single allocation cluster (e.g., 8 = 4096 bytes).
     pub sectors_per_cluster: u8,
+    /// Number of reserved sectors preceding the first FAT table.
     pub reserved_sector_count: u16,
+    /// Number of FAT table copies (typically 2).
     pub num_fats: u8,
+    /// Total volume sectors count.
     pub total_sectors: u32,
+    /// Size of each FAT table in sectors.
     pub sectors_per_fat: u32,
+    /// Starting cluster number of the root directory (typically 2).
     pub root_cluster: u32,
+    /// First LBA sector of the data cluster region.
     pub data_start_sector: u64,
 }
 
 impl Fat32Bpb {
-    /// Parses and validates the FAT32 Boot Sector from the first 512 bytes of a disk.
+    /// Parses and validates the FAT32 Boot Sector from sector 0 of a disk.
+    ///
+    /// Verifies boot signatures (`0x55`, `0xAA`), sector sizes, and cluster parameters.
     pub fn parse(sector0: &[u8]) -> Result<Self, FsError> {
         if sector0.len() < 512 {
             return Err(FsError::InvalidInput);
@@ -120,14 +171,18 @@ impl Fat32Bpb {
 
 /// A mounted FAT32 Filesystem instance.
 pub struct Fat32FileSystem {
+    /// Underlying physical or virtual block storage device.
     pub block_dev: Arc<dyn BlockDevice>,
+    /// Parsed BIOS Parameter Block holding filesystem geometry.
     pub bpb: Fat32Bpb,
+    /// Atomic counter generating transient in-memory inode identifiers.
     inode_counter: AtomicUsize,
+    /// Global synchronization lock for mutating filesystem metadata.
     lock: Spinlock<()>,
 }
 
 impl Fat32FileSystem {
-    /// Mounts a FAT32 filesystem from a block device.
+    /// Mounts a FAT32 filesystem from a block device by reading and validating sector 0.
     pub fn new(block_dev: Arc<dyn BlockDevice>) -> Result<Arc<Self>, FsError> {
         let mut sector0 = [0u8; SECTOR_SIZE];
         block_dev.read_sector(0, &mut sector0).map_err(|_| FsError::IoError)?;
@@ -144,7 +199,7 @@ impl Fat32FileSystem {
         Ok(fs)
     }
 
-    /// Converts a cluster number (>= 2) into its corresponding starting LBA sector.
+    /// Converts a cluster index (>= 2) into its corresponding starting LBA sector number.
     pub fn cluster_to_sector(&self, cluster: u32) -> u64 {
         if cluster < 2 {
             return self.bpb.data_start_sector;
@@ -152,7 +207,9 @@ impl Fat32FileSystem {
         self.bpb.data_start_sector + (cluster as u64 - 2) * (self.bpb.sectors_per_cluster as u64)
     }
 
-    /// Reads the next cluster in the chain from the File Allocation Table (FAT).
+    /// Reads the next cluster pointer in the chain from the File Allocation Table (FAT).
+    ///
+    /// Returns `Ok(None)` if the cluster marks the End-of-Chain (`FAT32_EOC_MIN`).
     pub fn get_next_cluster(&self, cluster: u32) -> Result<Option<u32>, FsError> {
         let fat_offset = cluster as u64 * 4;
         let fat_sector = self.bpb.reserved_sector_count as u64 + (fat_offset / 512);
@@ -177,7 +234,7 @@ impl Fat32FileSystem {
         }
     }
 
-    /// Writes an entry into the File Allocation Table (FAT) across all FAT copies.
+    /// Writes an entry into the File Allocation Table (FAT) across all redundant FAT copies.
     pub fn set_fat_entry(&self, cluster: u32, next_cluster: u32) -> Result<(), FsError> {
         let fat_offset = cluster as u64 * 4;
         let byte_offset = (fat_offset % 512) as usize;
@@ -286,7 +343,9 @@ impl FileSystem for Fat32FileSystem {
 /// Location of a directory entry on disk so it can be updated when file size changes.
 #[derive(Debug, Clone, Copy)]
 pub struct DirEntryLocation {
+    /// Starting cluster of the directory containing this entry.
     pub dir_cluster: u32,
+    /// Byte offset within the directory's cluster chain where the 32-byte entry resides.
     pub entry_offset: usize,
 }
 

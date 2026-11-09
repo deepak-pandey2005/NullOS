@@ -1,3 +1,10 @@
+/**
+ * @file stdbool.h
+ * @brief NullOS Standard Boolean Definitions
+ *
+ * Defines the boolean type `bool` and boolean truth values `true` (1) and `false` (0).
+ */
+
 #ifndef _STDBOOL_H
 #define _STDBOOL_H
 

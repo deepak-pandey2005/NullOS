@@ -1,6 +1,37 @@
 //! Internet Control Message Protocol (ICMP) (Phase 8 - M24 Network Stack).
 //!
-//! Implements ICMP Echo Requests (Type 8) and Echo Replies (Type 0) to power the `ping` diagnostic utility.
+//! # Architecture & Protocol Specification
+//!
+//! ICMP (defined in [RFC 792](https://www.rfc-editor.org/rfc/rfc792)) is an integral
+//! part of the Internet Protocol (IPv4) suite. It is used by operating systems and
+//! network devices to communicate diagnostic messages, routing conditions, and
+//! operational errors (such as host unreachable or packet expiration).
+//!
+//! ## ICMP Message Format (RFC 792):
+//!
+//! ```text
+//!  0                   1                   2                   3
+//!  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |     Type      |     Code      |          Checksum             |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |          Identifier           |        Sequence Number        |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                             Data ...                          |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! ```
+//!
+//! - **Type (1 byte)**: Classifies the message (e.g., 0 = Echo Reply, 8 = Echo Request).
+//! - **Code (1 byte)**: Sub-type diagnostic qualifier (typically 0 for Echo).
+//! - **Checksum (2 bytes)**: 16-bit one's complement of the ICMP message starting from Type.
+//! - **Identifier (2 bytes)**: Used by client to match incoming replies with sent queries.
+//! - **Sequence Number (2 bytes)**: Incremented on each successive probe.
+//! - **Data (variable)**: Arbitrary payload echoed back by the responder unmodified.
+//!
+//! ## NullOS Implementation:
+//! - Echo Request (ping probe) transmission via [`icmp_send_echo_request`].
+//! - Automatic Echo Reply synthesis when receiving an Echo Request.
+//! - Tracking state and RTT measurement via [`ping`] and [`PingRecord`].
 
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU16, Ordering};
@@ -10,20 +41,27 @@ use crate::net::ipv4::{self, Ipv4Addr, IpProtocol};
 use crate::println;
 use crate::sync::Spinlock;
 
+/// Byte length of the standard ICMP header.
 pub const ICMP_HDR_LEN: usize = 8;
 
-/// ICMP Message Types.
+/// Standard ICMP Message Types per RFC 792.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum IcmpType {
+    /// Type 0: Echo Reply (response to a ping probe).
     EchoReply   = 0,
+    /// Type 3: Destination Unreachable (host, port, or protocol uncontactable).
     DestinationUnreachable = 3,
+    /// Type 8: Echo Request (ping diagnostic query).
     EchoRequest = 8,
+    /// Type 11: Time Exceeded (TTL expired in transit).
     TimeExceeded = 11,
+    /// Unrecognized ICMP type code.
     Unknown(u8),
 }
 
 impl IcmpType {
+    /// Decodes a raw byte into an [`IcmpType`] variant.
     pub const fn from_u8(val: u8) -> Self {
         match val {
             0 => IcmpType::EchoReply,
@@ -35,18 +73,24 @@ impl IcmpType {
     }
 }
 
-/// Standard 8-byte ICMP Header.
+/// Standard 8-byte ICMP Header in network byte order.
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct IcmpHeader {
+    /// Message classification type.
     pub icmp_type: u8,
+    /// Sub-type diagnostic code.
     pub code: u8,
+    /// 16-bit Internet Checksum (RFC 1071).
     pub checksum: u16,
+    /// Client-specified probe identifier.
     pub ident: u16,
+    /// Sequence number of the probe.
     pub seq: u16,
 }
 
 impl IcmpHeader {
+    /// Constructs a new ICMP header and calculates the RFC 1071 checksum over header and payload.
     pub fn new(icmp_type: IcmpType, ident: u16, seq: u16, payload: &[u8]) -> Self {
         let mut hdr = Self {
             icmp_type: match icmp_type {
@@ -74,24 +118,31 @@ impl IcmpHeader {
         hdr
     }
 
+    /// Returns the probe identifier in host byte order.
     pub fn ident(&self) -> u16 {
         u16::from_be(self.ident)
     }
 
+    /// Returns the sequence number in host byte order.
     pub fn seq(&self) -> u16 {
         u16::from_be(self.seq)
     }
 }
 
-/// Tracking state for received ICMP Echo Replies.
+/// Tracking state for received ICMP Echo Replies during interactive `ping` execution.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PingRecord {
+    /// Remote sender IP address.
     pub src_ip: Ipv4Addr,
+    /// Probe sequence number matched.
     pub seq: u16,
+    /// Probe identifier matched.
     pub ident: u16,
+    /// Indicates whether a reply matching this probe was captured.
     pub received: bool,
 }
 
+/// Global record holding the latest received ICMP Echo Reply.
 static LAST_PING_RECORD: Spinlock<PingRecord> = Spinlock::new(PingRecord {
     src_ip: Ipv4Addr::ANY,
     seq: 0,
@@ -99,9 +150,13 @@ static LAST_PING_RECORD: Spinlock<PingRecord> = Spinlock::new(PingRecord {
     received: false,
 });
 
+/// Atomic counter distributing unique probe identifiers to concurrent ping sessions.
 static NEXT_PING_IDENT: AtomicU16 = AtomicU16::new(0x4200);
 
 /// Handles incoming ICMP packets dispatched from the IPv4 layer.
+///
+/// Automatically synthesizes Echo Replies for incoming Echo Requests, or records
+/// reply status for in-flight ping probes.
 pub fn handle_packet(src_ip: Ipv4Addr, payload: &[u8]) {
     if payload.len() < ICMP_HDR_LEN {
         return;
@@ -156,6 +211,8 @@ pub fn icmp_send_echo_request(target_ip: Ipv4Addr, ident: u16, seq: u16) -> Resu
 }
 
 /// Ping diagnostic routine: sends `count` probes to `target_ip` and yields RTT statistics.
+///
+/// Returns `(probes_sent, replies_received)`.
 pub fn ping(target_ip: Ipv4Addr, count: usize) -> (usize, usize) {
     let ident = NEXT_PING_IDENT.fetch_add(1, Ordering::Relaxed);
     let mut sent = 0;

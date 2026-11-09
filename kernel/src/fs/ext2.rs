@@ -1,12 +1,29 @@
 //! ext2 Read-Only Filesystem Driver (Phase 6 - M19 Filesystems).
 //!
-//! Implements the Second Extended Filesystem (ext2) standard for Linux partition compatibility:
-//! - Superblock parsing and magic validation (`0xEF53`).
-//! - Block Group Descriptor Table parsing.
-//! - Inode table traversal (Root inode = 2).
-//! - Direct and indirect block pointer resolution.
-//! - Directory entry traversal and file content reading.
-//! - Integration with the VFS `FileSystem` and `Inode` traits.
+//! # Architecture Overview
+//!
+//! Implements the Linux Second Extended Filesystem (ext2) standard (Rev 0 and Rev 1)
+//! for mounting persistent Linux partitions in NullOS.
+//!
+//! ## ext2 On-Disk Geometry:
+//! 1. **Boot Record (Bytes 0..1024)**: Unused by ext2, reserved for x86 bootloaders.
+//! 2. **Superblock (Byte 1024..2048)**:
+//!    - Contains volume metadata: total blocks, total inodes, block size (`1024 << s_log_block_size`),
+//!      blocks per block group, inodes per block group, and magic signature (`0xEF53`).
+//! 3. **Block Group Descriptor Table (BGDT)**:
+//!    - Starts immediately after the superblock (block 2 if 1024-byte blocks, or block 1 if >1024).
+//!    - Each 32-byte descriptor points to block bitmap, inode bitmap, and inode table for that group.
+//! 4. **Inode Table**:
+//!    - Array of 128-byte (or `s_inode_size`) inode structures.
+//!    - Inode 2 is traditionally reserved as the root directory (`/`).
+//! 5. **Block Pointer Resolution**:
+//!    - Inodes contain 15 block pointers:
+//!      - `0..11`: Direct block pointers.
+//!      - `12`: Singly indirect block pointer.
+//!      - `13`: Doubly indirect block pointer.
+//!      - `14`: Triply indirect block pointer.
+//!
+//! Current driver provides read-only VFS integration.
 #![allow(dead_code)]
 
 use alloc::string::String;
@@ -15,38 +32,63 @@ use alloc::vec::Vec;
 use crate::drivers::block::{BlockDevice, SECTOR_SIZE};
 use crate::fs::vfs::{DirEntry, FileStat, FileType, FileSystem, FsError, Inode};
 
+/// Standard ext2 magic signature (`0xEF53`) located at offset 56 of the Superblock.
 pub const EXT2_MAGIC: u16 = 0xEF53;
 
-/// Inode type bits
+/// Inode mode bit indicating directory file type (`S_IFDIR`).
 const EXT2_S_IFDIR: u16 = 0x4000;
+/// Inode mode bit indicating regular file type (`S_IFREG`).
 const EXT2_S_IFREG: u16 = 0x8000;
 
 /// Ext2 On-Disk Superblock (located at byte offset 1024).
 #[repr(C, packed)]
 #[derive(Clone, Copy, Debug)]
 pub struct Ext2Superblock {
+    /// Total number of inodes across all block groups.
     pub s_inodes_count: u32,
+    /// Total number of blocks in the filesystem.
     pub s_blocks_count: u32,
+    /// Number of blocks reserved for the superuser.
     pub s_r_blocks_count: u32,
+    /// Total number of unallocated blocks.
     pub s_free_blocks_count: u32,
+    /// Total number of unallocated inodes.
     pub s_free_inodes_count: u32,
+    /// First data block number (0 for >1KB blocks, 1 for 1KB blocks).
     pub s_first_data_block: u32,
+    /// Block size indicator: `block_size = 1024 << s_log_block_size`.
     pub s_log_block_size: u32,
+    /// Fragment size indicator: `fragment_size = 1024 << s_log_frag_size`.
     pub s_log_frag_size: u32,
+    /// Number of blocks grouped per block group.
     pub s_blocks_per_group: u32,
+    /// Number of fragments grouped per block group.
     pub s_frags_per_group: u32,
+    /// Number of inodes allocated per block group.
     pub s_inodes_per_group: u32,
+    /// POSIX timestamp of last mount.
     pub s_mtime: u32,
+    /// POSIX timestamp of last write.
     pub s_wtime: u32,
+    /// Number of mounts since last consistency check.
     pub s_mnt_count: u16,
+    /// Maximum allowed mounts before forced consistency check.
     pub s_max_mnt_count: u16,
+    /// Magic signature (`EXT2_MAGIC = 0xEF53`).
     pub s_magic: u16,
+    /// Filesystem state flag (1 = cleanly unmounted, 2 = errors detected).
     pub s_state: u16,
+    /// Error handling behavior when errors detected.
     pub s_errors: u16,
+    /// Minor revision level.
     pub s_minor_rev_level: u16,
+    /// Timestamp of last check.
     pub s_lastcheck: u32,
+    /// Interval between automatic checks.
     pub s_checkinterval: u32,
+    /// Operating system that created the filesystem.
     pub s_creator_os: u32,
+    /// Revision level (0 = original, 1 = dynamic/extended superblock).
     pub s_rev_level: u32,
 }
 
@@ -54,52 +96,86 @@ pub struct Ext2Superblock {
 #[repr(C, packed)]
 #[derive(Clone, Copy, Debug)]
 pub struct Ext2GroupDesc {
+    /// Logical block number of the group's block allocation bitmap.
     pub bg_block_bitmap: u32,
+    /// Logical block number of the group's inode allocation bitmap.
     pub bg_inode_bitmap: u32,
+    /// Logical block number of the group's starting inode table block.
     pub bg_inode_table: u32,
+    /// Number of free blocks in this group.
     pub bg_free_blocks_count: u16,
+    /// Number of free inodes in this group.
     pub bg_free_inodes_count: u16,
+    /// Number of directories allocated in this group.
     pub bg_used_dirs_count: u16,
+    /// Alignment padding.
     pub bg_pad: u16,
+    /// Reserved space.
     pub bg_reserved: [u32; 3],
 }
 
-/// Ext2 Inode structure (128 bytes).
+/// Ext2 Inode structure (128 bytes in Rev 0).
 #[repr(C, packed)]
 #[derive(Clone, Copy, Debug)]
 pub struct Ext2Inode {
+    /// File type and POSIX access mode bits.
     pub i_mode: u16,
+    /// Owner user ID (low 16 bits).
     pub i_uid: u16,
+    /// File size in bytes (lower 32 bits).
     pub i_size: u32,
+    /// Last access timestamp.
     pub i_atime: u32,
+    /// Creation timestamp.
     pub i_ctime: u32,
+    /// Last modification timestamp.
     pub i_mtime: u32,
+    /// Deletion timestamp.
     pub i_dtime: u32,
+    /// Owner group ID (low 16 bits).
     pub i_gid: u16,
+    /// Hard link counter.
     pub i_links_count: u16,
+    /// 512-byte sector count reserved for this file.
     pub i_blocks: u32,
+    /// Inode behavior flags.
     pub i_flags: u32,
+    /// OS-dependent value 1.
     pub i_osd1: u32,
-    pub i_block: [u32; 15], // 0..11 direct, 12 single indirect, 13 double indirect, 14 triple indirect
+    /// Direct and indirect block pointers (0..11 direct, 12 singly, 13 doubly, 14 triply).
+    pub i_block: [u32; 15],
+    /// File version / NFS generation counter.
     pub i_generation: u32,
+    /// File Access Control List (ACL) block.
     pub i_file_acl: u32,
+    /// Directory ACL block.
     pub i_dir_acl: u32,
+    /// Fragment block address.
     pub i_faddr: u32,
+    /// OS-dependent value 2.
     pub i_osd2: [u32; 3],
 }
 
 /// A mounted Ext2 Filesystem instance.
 pub struct Ext2FileSystem {
+    /// Underlying storage block device.
     pub block_dev: Arc<dyn BlockDevice>,
+    /// Logical filesystem block size in bytes (e.g., 1024, 2048, 4096).
     pub block_size: usize,
+    /// Number of inodes allocated per block group.
     pub inodes_per_group: usize,
+    /// Number of blocks per block group.
     pub blocks_per_group: usize,
+    /// Size of each on-disk inode structure in bytes.
     pub inode_size: usize,
+    /// Starting block number of the Block Group Descriptor Table.
     pub group_desc_block: u32,
 }
 
 impl Ext2FileSystem {
     /// Attempts to probe and mount an ext2 filesystem from a block device.
+    ///
+    /// Reads the superblock at byte 1024, validates the magic signature, and parses geometry.
     pub fn new(block_dev: Arc<dyn BlockDevice>) -> Result<Arc<Self>, FsError> {
         // Read Superblock from byte 1024 (sectors 2 and 3)
         let mut sec2 = [0u8; SECTOR_SIZE];

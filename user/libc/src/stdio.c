@@ -1,3 +1,18 @@
+/**
+ * @file stdio.c
+ * @brief NullOS Standard I/O (Input/Output) Library Implementation
+ *
+ * This file provides the standard stream-oriented I/O facilities for NullOS user
+ * programs, including:
+ * - Pre-initialized standard streams: `stdin` (fd 0), `stdout` (fd 1), `stderr` (fd 2).
+ * - Character and string I/O: `putchar`, `getchar`, `puts`, `fputc`, `fgetc`, `fputs`.
+ * - Formatted output engine: `vsnprintf`, `snprintf`, `sprintf`, `printf`, supporting
+ *   integer base conversion (hex, decimal), width padding, '0' padding, pointers,
+ *   strings, characters, and length modifiers ('l', 'll').
+ * - Stream file management: `fopen`, `fclose`, `fread`, `fwrite`, `fseek`, `ftell`,
+ *   `fflush`, `feof`, and `ferror`.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -5,14 +20,30 @@
 #include <fcntl.h>
 #include <stdint.h>
 
+/** Static FILE object backing standard input (file descriptor 0). */
 static FILE _stdin_obj  = { .fd = STDIN_FILENO,  .flags = 0, .error = 0, .eof = 0 };
+
+/** Static FILE object backing standard output (file descriptor 1). */
 static FILE _stdout_obj = { .fd = STDOUT_FILENO, .flags = 0, .error = 0, .eof = 0 };
+
+/** Static FILE object backing standard error (file descriptor 2). */
 static FILE _stderr_obj = { .fd = STDERR_FILENO, .flags = 0, .error = 0, .eof = 0 };
 
+/** Global stream pointer for standard input. */
 FILE *stdin  = &_stdin_obj;
+
+/** Global stream pointer for standard output. */
 FILE *stdout = &_stdout_obj;
+
+/** Global stream pointer for standard error. */
 FILE *stderr = &_stderr_obj;
 
+/**
+ * @brief Writes a character to standard output.
+ *
+ * @param c The character (cast to unsigned char) to write.
+ * @return The character written as an unsigned char cast to int, or EOF on error.
+ */
 int putchar(int c) {
     unsigned char ch = (unsigned char)c;
     if (write(STDOUT_FILENO, &ch, 1) == 1) {
@@ -21,6 +52,12 @@ int putchar(int c) {
     return EOF;
 }
 
+/**
+ * @brief Writes a string and a trailing newline to standard output.
+ *
+ * @param s Null-terminated string to output.
+ * @return 0 on success, or negative on error.
+ */
 int puts(const char *s) {
     size_t len = strlen(s);
     write(STDOUT_FILENO, s, len);
@@ -28,6 +65,11 @@ int puts(const char *s) {
     return 0;
 }
 
+/**
+ * @brief Reads a single character from standard input.
+ *
+ * @return The character read as an unsigned char cast to int, or EOF on end-of-file or error.
+ */
 int getchar(void) {
     unsigned char ch;
     ssize_t n = read(STDIN_FILENO, &ch, 1);
@@ -37,6 +79,13 @@ int getchar(void) {
     return EOF;
 }
 
+/**
+ * @brief Writes a character to the specified file stream.
+ *
+ * @param c      Character to write.
+ * @param stream Target FILE stream pointer.
+ * @return The character written, or EOF on failure.
+ */
 int fputc(int c, FILE *stream) {
     if (!stream) return EOF;
     unsigned char ch = (unsigned char)c;
@@ -47,6 +96,12 @@ int fputc(int c, FILE *stream) {
     return EOF;
 }
 
+/**
+ * @brief Reads the next character from the specified file stream.
+ *
+ * @param stream Target FILE stream pointer.
+ * @return Character read as int, or EOF on end-of-file / read error.
+ */
 int fgetc(FILE *stream) {
     if (!stream) return EOF;
     unsigned char ch;
@@ -62,6 +117,13 @@ int fgetc(FILE *stream) {
     return EOF;
 }
 
+/**
+ * @brief Writes a string to the specified file stream without appending a newline.
+ *
+ * @param s      Null-terminated string.
+ * @param stream Target FILE stream.
+ * @return 0 on success, or EOF on error.
+ */
 int fputs(const char *s, FILE *stream) {
     if (!stream) return EOF;
     size_t len = strlen(s);
@@ -72,7 +134,20 @@ int fputs(const char *s, FILE *stream) {
     return EOF;
 }
 
-/* Helper to format an unsigned integer into a string buffer with given base */
+/**
+ * @brief Formats an unsigned 64-bit integer into a string buffer with given base and padding.
+ *
+ * Internal formatting helper for `vsnprintf`.
+ *
+ * @param buf       Output string buffer.
+ * @param max       Maximum capacity of buffer.
+ * @param val       Unsigned 64-bit value to convert.
+ * @param base      Radix base (typically 10 or 16).
+ * @param uppercase 1 for uppercase hex digits ("ABCDEF"), 0 for lowercase ("abcdef").
+ * @param min_width Minimum field width.
+ * @param pad_char  Padding character (' ' or '0').
+ * @return Number of characters written into `buf`.
+ */
 static int format_uint(char *buf, size_t max, uint64_t val, int base, int uppercase, int min_width, char pad_char) {
     char temp[65];
     int pos = 0;
@@ -101,6 +176,24 @@ static int format_uint(char *buf, size_t max, uint64_t val, int base, int upperc
     return written;
 }
 
+/**
+ * @brief Writes formatted output to a sized string buffer using a va_list.
+ *
+ * Handles format specifiers:
+ * - `%s`: Null-terminated string (with optional minimum width padding).
+ * - `%c`: Single character.
+ * - `%d`, `%i`: Signed decimal integer (with 'l' / 'll' length modifiers and width).
+ * - `%u`: Unsigned decimal integer.
+ * - `%x`, `%X`: Unsigned hexadecimal integer (lowercase / uppercase).
+ * - `%p`: Pointer address formatted as 0x0000... (16-char padded hex).
+ * - `%%`: Literal percent sign.
+ *
+ * @param str    Destination buffer.
+ * @param size   Maximum number of bytes to store in `str` (including null terminator).
+ * @param format Format control string.
+ * @param ap     Variable argument list pointer.
+ * @return Total number of characters that would have been written (excluding null terminator).
+ */
 int vsnprintf(char *str, size_t size, const char *format, __builtin_va_list ap) {
     if (!str && size > 0) {
         return -1;
@@ -248,6 +341,15 @@ int vsnprintf(char *str, size_t size, const char *format, __builtin_va_list ap) 
     return (int)written;
 }
 
+/**
+ * @brief Formats output and writes it to a fixed-size character buffer.
+ *
+ * @param str    Destination buffer.
+ * @param size   Capacity of buffer.
+ * @param format Format string.
+ * @param ...    Format arguments.
+ * @return Number of characters written (or would be written).
+ */
 int snprintf(char *str, size_t size, const char *format, ...) {
     __builtin_va_list ap;
     __builtin_va_start(ap, format);
@@ -256,10 +358,26 @@ int snprintf(char *str, size_t size, const char *format, ...) {
     return ret;
 }
 
+/**
+ * @brief Formats output to a string buffer using a va_list (unbounded).
+ *
+ * @param str    Destination buffer.
+ * @param format Format string.
+ * @param ap     Variable argument list.
+ * @return Number of characters written.
+ */
 int vsprintf(char *str, const char *format, __builtin_va_list ap) {
     return vsnprintf(str, (size_t)-1, format, ap);
 }
 
+/**
+ * @brief Formats output to an unbounded string buffer.
+ *
+ * @param str    Destination string buffer.
+ * @param format Format string.
+ * @param ...    Format arguments.
+ * @return Number of characters written.
+ */
 int sprintf(char *str, const char *format, ...) {
     __builtin_va_list ap;
     __builtin_va_start(ap, format);
@@ -268,6 +386,13 @@ int sprintf(char *str, const char *format, ...) {
     return ret;
 }
 
+/**
+ * @brief Formats output and writes directly to standard output via va_list.
+ *
+ * @param format Format string.
+ * @param ap     Variable argument list.
+ * @return Number of characters output.
+ */
 int vprintf(const char *format, __builtin_va_list ap) {
     char buf[1024];
     int len = vsnprintf(buf, sizeof(buf), format, ap);
@@ -278,6 +403,13 @@ int vprintf(const char *format, __builtin_va_list ap) {
     return len;
 }
 
+/**
+ * @brief Prints formatted output to standard output (STDOUT_FILENO).
+ *
+ * @param format Format control string.
+ * @param ...    Variable arguments matching format specifiers.
+ * @return Number of characters printed.
+ */
 int printf(const char *format, ...) {
     __builtin_va_list ap;
     __builtin_va_start(ap, format);
@@ -286,6 +418,16 @@ int printf(const char *format, ...) {
     return ret;
 }
 
+/**
+ * @brief Opens the file whose name is specified by `pathname` and associates a stream with it.
+ *
+ * Parses modes: "r", "w", "a", "r+", "w+". Allocates a heap `FILE` structure
+ * and opens the file descriptor via `open()`.
+ *
+ * @param pathname Path to file in VFS.
+ * @param mode     Access mode string ("r", "w", "a", etc.).
+ * @return Pointer to FILE stream object, or NULL on error.
+ */
 FILE *fopen(const char *pathname, const char *mode) {
     int flags = 0;
     if (strcmp(mode, "r") == 0) {
@@ -320,6 +462,15 @@ FILE *fopen(const char *pathname, const char *mode) {
     return stream;
 }
 
+/**
+ * @brief Closes a FILE stream and flushes any unwritten data.
+ *
+ * Closes the underlying file descriptor and frees the allocated `FILE` structure
+ * (unless stream is standard stdin, stdout, or stderr).
+ *
+ * @param stream FILE pointer to close.
+ * @return 0 on success, or EOF on error.
+ */
 int fclose(FILE *stream) {
     if (!stream) return EOF;
     int res = close(stream->fd);
@@ -329,6 +480,15 @@ int fclose(FILE *stream) {
     return res;
 }
 
+/**
+ * @brief Reads up to `nmemb` elements, each of size `size`, from stream into buffer `ptr`.
+ *
+ * @param ptr    Destination memory buffer.
+ * @param size   Size of each element in bytes.
+ * @param nmemb  Number of elements to read.
+ * @param stream Target FILE stream.
+ * @return Number of full elements successfully read.
+ */
 size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
     if (!stream || size == 0 || nmemb == 0) return 0;
     size_t total_bytes = size * nmemb;
@@ -341,6 +501,15 @@ size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
     return (size_t)bytes_read / size;
 }
 
+/**
+ * @brief Writes up to `nmemb` elements, each of size `size`, from buffer `ptr` to stream.
+ *
+ * @param ptr    Source memory buffer.
+ * @param size   Size of each element in bytes.
+ * @param nmemb  Number of elements to write.
+ * @param stream Target FILE stream.
+ * @return Number of full elements successfully written.
+ */
 size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
     if (!stream || size == 0 || nmemb == 0) return 0;
     size_t total_bytes = size * nmemb;
@@ -352,6 +521,14 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
     return (size_t)bytes_written / size;
 }
 
+/**
+ * @brief Sets the file position indicator for the stream.
+ *
+ * @param stream Target FILE stream.
+ * @param offset Byte offset.
+ * @param whence Position reference: SEEK_SET, SEEK_CUR, or SEEK_END.
+ * @return 0 on success, or -1 on error.
+ */
 int fseek(FILE *stream, long offset, int whence) {
     if (!stream) return -1;
     off_t res = lseek(stream->fd, (off_t)offset, whence);
@@ -363,20 +540,47 @@ int fseek(FILE *stream, long offset, int whence) {
     return 0;
 }
 
+/**
+ * @brief Obtains the current value of the file position indicator for the stream.
+ *
+ * @param stream Target FILE stream.
+ * @return Current byte offset in stream, or -1L on error.
+ */
 long ftell(FILE *stream) {
     if (!stream) return -1;
     return (long)lseek(stream->fd, 0, SEEK_CUR);
 }
 
+/**
+ * @brief Flushes any buffered unwritten data to the stream's file descriptor.
+ *
+ * In NullOS's direct-write libc implementation, writes are synchronous; thus
+ * fflush is a no-op returning 0.
+ *
+ * @param stream Target FILE stream.
+ * @return 0 on success.
+ */
 int fflush(FILE *stream) {
     (void)stream;
     return 0;
 }
 
+/**
+ * @brief Tests the end-of-file indicator for the stream.
+ *
+ * @param stream Target FILE stream.
+ * @return Non-zero if EOF indicator is set, 0 otherwise.
+ */
 int feof(FILE *stream) {
     return stream ? stream->eof : 0;
 }
 
+/**
+ * @brief Tests the error indicator for the stream.
+ *
+ * @param stream Target FILE stream.
+ * @return Non-zero if error indicator is set, 0 otherwise.
+ */
 int ferror(FILE *stream) {
     return stream ? stream->error : 0;
 }

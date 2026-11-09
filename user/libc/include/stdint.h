@@ -1,12 +1,23 @@
+/**
+ * @file stdint.h
+ * @brief NullOS Standard Exact-Width Integer Types and Numeric Limits
+ *
+ * This header defines exact-width integer types (`int8_t`, `int16_t`, `int32_t`,
+ * `int64_t`, and their unsigned counterparts), pointer-width integers (`intptr_t`,
+ * `uintptr_t`), maximum-width integers (`intmax_t`, `uintmax_t`), and their respective
+ * numeric range limits.
+ */
+
 #ifndef _STDINT_H
 #define _STDINT_H
 
-/* Exact-width integer types */
+/* Exact-width signed integer types */
 typedef signed char        int8_t;
 typedef short              int16_t;
 typedef int                int32_t;
 typedef long long          int64_t;
 
+/* Exact-width unsigned integer types */
 typedef unsigned char      uint8_t;
 typedef unsigned short     uint16_t;
 typedef unsigned int       uint32_t;

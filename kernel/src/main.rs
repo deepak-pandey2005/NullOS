@@ -1,3 +1,48 @@
+//! # NullOS Kernel Main Entry Point & Boot Sequencing (Phase 1 through Phase 14).
+//!
+//! # Architecture Overview
+//!
+//! The NullOS kernel is a 64-bit freestanding (`no_std`, `no_main`) micro/hybrid hobby
+//! operating system kernel written in Rust and x86_64 assembly.
+//!
+//! ## Control Transfer Protocol (UEFI Handover)
+//! 1. The UEFI firmware executes the NullOS UEFI bootloader (`bootloader/src/main.rs`).
+//! 2. The bootloader configures Graphics Output Protocol (GOP), queries the UEFI memory map,
+//!    loads the 64-bit ELF kernel binary (`kernel.elf`), and constructs a [`BootInfo`] block.
+//! 3. The bootloader calls `ExitBootServices()`, identity-maps initial physical memory,
+//!    switches to the kernel's PML4 page tables, and jumps to `kernel_main` at entry address.
+//!
+//! ## Initialization Dependency Order:
+//! - **Phase 1-2 (Hardware Early Bringup)**:
+//!   1. Serial Port (`COM1`, `0x3F8`): Low-level text logging output.
+//!   2. Framebuffer Console: Graphical text rendering via UEFI GOP.
+//!   3. GDT & TSS: Segment selectors and Task State Segment privilege stacks.
+//!   4. IDT & CPU Exceptions: Vectors 0..31 with assembly stubs and page fault handlers.
+//!   5. Modern CPU Features: `CR0.WP` (Write Protect), `EFER.NXE` (No-Execute), `CR4.OSFXSR/PGE`.
+//!   6. Fast Syscalls: `STAR`, `LSTAR`, `SFMASK` MSRs for `syscall`/`sysret` instructions.
+//!   7. Local APIC & Calibrated Timer: 8259 PIC disable, periodic timer interrupts.
+//! - **Phase 3 (Physical Memory Management)**:
+//!   8. Frame Allocator & Virtual Paging: UEFI memory map conversion, buddy/bitmap allocation, heap init.
+//! - **Phase 9 (Multiprocessing - SMP)**:
+//!   9. ACPI & MADT: CPU core enumeration and HPET timer discovery.
+//!   10. Application Processor (AP) Bootstrapping: SIPI-INIT-SIPI sequence with real-mode trampoline.
+//! - **Phase 10 (Kernel Security & Hardening)**:
+//!   11. Stack Canary & Guard Pages: Entropy seeding via RDTSC, address boundary validation.
+//! - **Phase 4-5 (Preemptive Multitasking & User Processes)**:
+//!   12. Task Scheduler & Threads: Preemptive Round-Robin scheduling, kernel threads, context switching.
+//! - **Phase 6 (Virtual File System & Storage)**:
+//!   13. In-memory RamFS & VFS: Mount root at `"/"`, `/dev/console`, `/dev/null`, `/dev/zero`.
+//!   14. PCI Bus Enumeration: Class and subclass scanning for hardware peripherals.
+//!   15. VirtIO Block Storage: Ring buffers, requests, and mounting FAT32/ext2 partitions.
+//! - **Phase 8 (TCP/IP Networking)**:
+//!   16. VirtIO Net & TCP/IP Stack: Ethernet II, ARP, IPv4, ICMP, UDP, TCP, and Sockets API.
+//! - **Phase 12 (Modern Peripherals & GUI)**:
+//!   17. USB 3.0 xHCI Controller: TRB rings, device slots, and HID keyboard/mouse decoding.
+//!   18. Intel HD Audio: CORB/RIRB rings, codec widget tree traversal, and PCM chime synthesis.
+//!   19. Desktop Compositor: Window Manager, 2D Canvas, wallpaper, taskbar, and interactive GUI loop.
+//! - **Phase 7 (Interactive Shell & Test Harness)**:
+//!   20. Automated test suite or interactive CLI shell prompt.
+
 #![no_std]
 #![no_main]
 
@@ -18,27 +63,43 @@ use arch::x86_64::{apic, gdt, idt};
 use bootinfo::BootInfo;
 use core::panic::PanicInfo;
 
+/// Primary kernel entry point invoked directly by the UEFI bootloader.
+///
+/// # Calling Convention & Safety
+/// - Declared with `#[unsafe(no_mangle)]` and `extern "C"` so the linker preserves
+///   the exact symbol name and standard System V AMD64 ABI.
+/// - Execution starts in 64-bit Long Mode with paging enabled and interrupts disabled (`cli`).
+/// - The `boot_info` pointer references a statically allocated structure in physical memory
+///   containing the GOP framebuffer pointer, UEFI memory map descriptor buffer, ACPI RSDP,
+///   and kernel command line arguments.
+///
+/// # Divergence
+/// This function returns `!` (never returns), concluding in an interactive shell loop or
+/// an infinite low-power idle halt loop (`hlt`).
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
+    // 1. Initialize serial port (COM1 0x3F8, 115200 baud) for debug output
     drivers::serial::init();
+
+    // 2. Initialize graphical framebuffer console font renderer
     drivers::console::init(&boot_info.framebuffer);
 
-    // Initialize Global Descriptor Table & Task State Segment (M4)
+    // 3. Initialize Global Descriptor Table & Task State Segment (M4)
     gdt::init();
 
-    // Initialize Interrupt Descriptor Table & CPU Exceptions (M5)
+    // 4. Initialize Interrupt Descriptor Table & CPU Exceptions (M5)
     idt::init();
 
-    // Initialize modern CPU features & security flags (CR0.WP, EFER.NXE, CR4.OSFXSR/PGE)
+    // 5. Initialize modern CPU features & security flags (CR0.WP, EFER.NXE, CR4.OSFXSR/PGE)
     arch::x86_64::cpu::init();
 
-    // Initialize Fast SYSCALL / SYSRET ABI & MSRs (Phase 5 - M13)
+    // 6. Initialize Fast SYSCALL / SYSRET ABI & MSRs (Phase 5 - M13)
     arch::x86_64::syscall::init();
 
-    // Initialize Local APIC & Timers (M6)
+    // 7. Initialize Local APIC & Timers (M6)
     apic::init();
 
-    // Enable CPU interrupts
+    // 8. Enable CPU hardware interrupts (sti)
     unsafe {
         core::arch::asm!("sti");
     }
@@ -170,7 +231,6 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     drivers::keyboard::init();
     drivers::keyboard::run_self_tests();
 
-
     // Verify Interactive Shell & CLI commands (Phase 7 - Userspace Shell)
     let cmdline_str = if boot_info.cmdline_addr != 0 && boot_info.cmdline_len > 0 {
         let slice = unsafe {
@@ -199,6 +259,7 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // Hand execution over to the interactive shell (with cooperative yield for background tasks)
     task::shell::interactive_loop();
 
+    // Fallback CPU low-power idle halt loop
     loop {
         unsafe {
             core::arch::asm!("hlt");
@@ -206,7 +267,9 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     }
 }
 
-/// Queries the QEMU fw_cfg port (0x510/0x511) to check if automated test mode was requested.
+/// Queries the QEMU fw_cfg port (`0x510`/`0x511`) to check if automated test mode was requested.
+///
+/// Checks for the presence of the `opt/test` key inside the QEMU firmware configuration directory.
 fn check_qemu_fw_cfg_test() -> bool {
     unsafe {
         // Select signature (0x0000)
@@ -245,6 +308,10 @@ fn check_qemu_fw_cfg_test() -> bool {
     }
 }
 
+/// Panic handler invoked when a runtime panic occurs in freestanding kernel code.
+///
+/// Logs the panic message, source code file, and line number to the serial port and
+/// graphical console, then halts the CPU indefinitely with interrupts disabled.
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     println!("[KERNEL PANIC] {}", info);
