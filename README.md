@@ -593,15 +593,15 @@ scripts\windows\run.bat --headless    # Run automated headless test suite
 # Phase 18 — Developer Experience
 
 ### M39 — NullOS SDK
-- [ ] NullOS headers
-- [ ] NullOS libc
-- [ ] Startup code
-- [ ] Linker scripts
-- [ ] Compiler configuration
-- [ ] SDK build system
-- [ ] Application templates
-- [ ] Debugging tools
-- [ ] Package format
+- [x] NullOS headers
+- [x] NullOS libc
+- [x] Startup code
+- [x] Linker scripts
+- [x] Compiler configuration
+- [x] SDK build system
+- [x] Application templates
+- [x] Debugging tools
+- [x] Package format
 
 ### M40 — Debugging & Observability
 - [ ] Kernel debugger
@@ -726,7 +726,7 @@ sudo ./scripts/create_bootable_usb.sh --device /dev/sdX
 - [x] M38
 
 ## Checkpoint 9 — Release
-- [ ] M39
+- [x] M39
 - [ ] M40
 - [ ] M41
 - [ ] M42

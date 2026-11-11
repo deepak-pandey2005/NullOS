@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""NullOS Binary Package Manager (.npkg) Tool (Phase 18 - M39)."""
+
+import argparse
+import os
+import struct
+import sys
+import zlib
+
+NPKG_MAGIC = b"NPKG"
+NPKG_FORMAT_VERSION = 1
+NPKG_HEADER_SIZE = 64
+NPKG_FLAG_EXEC_ELF = 1 << 0
+NPKG_FLAG_DYN_LIBC = 1 << 1
+HEADER_STRUCT = struct.Struct("<4sHH24s12sIQII")
+
+
+def encode_cstr(text: str, width: int) -> bytes:
+    raw = text.encode("utf-8")[: width - 1]
+    return raw.ljust(width, b"\x00")
+
+
+def pack_cmd(args: argparse.Namespace) -> int:
+    with open(args.input, "rb") as f:
+        payload = f.read()
+
+    if not payload.startswith(b"\x7fELF"):
+        print(f"nullos-pkg: warning: '{args.input}' does not start with ELF magic", file=sys.stderr)
+
+    flags = NPKG_FLAG_EXEC_ELF
+    if args.dynamic:
+        flags |= NPKG_FLAG_DYN_LIBC
+
+    crc = zlib.crc32(payload) & 0xFFFFFFFF
+    header = HEADER_STRUCT.pack(
+        NPKG_MAGIC,
+        NPKG_FORMAT_VERSION,
+        flags,
+        encode_cstr(args.name, 24),
+        encode_cstr(args.version, 12),
+        NPKG_HEADER_SIZE,
+        len(payload),
+        crc,
+        0,
+    )
+    assert len(header) == NPKG_HEADER_SIZE
+
+    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
+    with open(args.output, "wb") as f:
+        f.write(header)
+        f.write(payload)
+
+    print(
+        f"[NPKG] Packed '{args.name}' v{args.version} -> {args.output} "
+        f"(payload={len(payload)}B crc32={crc:#010x})"
+    )
+    return 0
+
+
+def parse_npkg(path: str):
+    with open(path, "rb") as f:
+        data = f.read()
+    if len(data) < NPKG_HEADER_SIZE:
+        raise ValueError("File smaller than 64-byte NPKG header")
+    magic, ver, flags, raw_name, raw_ver, hdr_size, payload_size, crc, reserved = (
+        HEADER_STRUCT.unpack_from(data, 0)
+    )
+    if magic != NPKG_MAGIC:
+        raise ValueError(f"Invalid magic {magic!r}, expected b'NPKG'")
+    payload = data[hdr_size : hdr_size + payload_size]
+    if len(payload) != payload_size:
+        raise ValueError(f"Truncated payload: expected {payload_size}, got {len(payload)}")
+    actual_crc = zlib.crc32(payload) & 0xFFFFFFFF
+    name = raw_name.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
+    pkg_ver = raw_ver.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
+    return {
+        "format_version": ver,
+        "flags": flags,
+        "name": name,
+        "version": pkg_ver,
+        "header_size": hdr_size,
+        "payload_size": payload_size,
+        "expected_crc32": crc,
+        "actual_crc32": actual_crc,
+        "reserved": reserved,
+        "is_elf": payload.startswith(b"\x7fELF"),
+    }
+
+
+def inspect_cmd(args: argparse.Namespace) -> int:
+    info = parse_npkg(args.package)
+    print(f"=== NullOS Package (.npkg) : {args.package} ===")
+    print(f"  Name           : {info['name']}")
+    print(f"  Version        : {info['version']}")
+    print(f"  Format Version : {info['format_version']} (header={info['header_size']}B)")
+    print(f"  Flags          : {info['flags']:#06x} (exec_elf={bool(info['flags'] & 1)}, dyn={bool(info['flags'] & 2)})")
+    print(f"  Payload Size   : {info['payload_size']} bytes (ELF={info['is_elf']})")
+    print(
+        f"  CRC-32         : {info['expected_crc32']:#010x} "
+        f"({'VALID' if info['expected_crc32'] == info['actual_crc32'] else 'CORRUPT'})"
+    )
+    return 0 if info["expected_crc32"] == info["actual_crc32"] else 1
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="nullos-pkg")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_pack = sub.add_parser("pack", help="Package a NullOS ELF binary into .npkg")
+    p_pack.add_argument("input")
+    p_pack.add_argument("output")
+    p_pack.add_argument("--name", required=True)
+    p_pack.add_argument("--version", default="1.0.0")
+    p_pack.add_argument("--dynamic", action="store_true")
+
+    p_insp = sub.add_parser("inspect", help="Inspect package metadata and CRC-32")
+    p_insp.add_argument("package")
+
+    p_ver = sub.add_parser("verify", help="Verify .npkg integrity")
+    p_ver.add_argument("package")
+
+    args = parser.parse_args()
+    if args.cmd == "pack":
+        return pack_cmd(args)
+    return inspect_cmd(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+

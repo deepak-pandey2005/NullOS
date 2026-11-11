@@ -59,6 +59,7 @@
 pub mod dynlink;
 pub mod elf;
 pub mod event;
+pub mod npkg;
 pub mod process;
 pub mod scheduler;
 pub mod shell;

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# NullOS SDK ELF & Binary Debugging Tool (Phase 18 - M39)
+# Inspects ELF64 x86_64 headers, W^X segment permissions, symbol tables, and disassembly.
+set -euo pipefail
+
+CMD="${1:-check}"
+TARGET="${2:-}"
+
+if [ -z "${TARGET}" ] || [ ! -f "${TARGET}" ]; then
+    echo "Usage: nullos-dbg <check|syms|disasm> <binary.elf>" >&2
+    exit 1
+fi
+
+case "${CMD}" in
+    check)
+        echo "=== NullOS ELF Diagnostics: ${TARGET} ==="
+        readelf -h "${TARGET}" | grep -E "Class:|Machine:|Type:|Entry point address:"
+        echo "  Program Headers:"
+        readelf -lW "${TARGET}" | grep -E "LOAD|INTERP" || true
+        # Check for RWE writable+executable violation
+        if readelf -lW "${TARGET}" | grep "LOAD" | grep -q "RWE"; then
+            echo "  [WARN] W^X Violation: Found RWE LOAD segment!" >&2
+            exit 1
+        fi
+        echo "  [OK] W^X Segment Permissions verified (no RWE LOAD segments)."
+        ;;
+    syms)
+        echo "=== Symbol Table: ${TARGET} ==="
+        nm -n "${TARGET}"
+        ;;
+    disasm)
+        echo "=== Disassembly (.text): ${TARGET} ==="
+        objdump -d -M intel "${TARGET}" | head -n 80
+        ;;
+    *)
+        echo "Unknown command '${CMD}' (expected: check|syms|disasm)" >&2
+        exit 1
+        ;;
+esac
+

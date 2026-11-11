@@ -486,6 +486,8 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str("  trace [N]            - Dump recent kernel tracepoints from circular ring buffer (M37)\n");
             out.push_str("  optstat              - Inspect NUMA, Paging Caps, FSGSBASE & Slab Optimizations (M38)\n");
             out.push_str("  optbench             - Run M38 Optimization Benchmarks & Regression Suite (M38)\n");
+            out.push_str("  sdk                  - Display NullOS SDK ABI, Sysroot & Toolchain Summary (M39)\n");
+            out.push_str("  pkg <inspect|run> <f>- Inspect/verify CRC-32 or execute a .npkg package (M39)\n");
             out.push_str("  test                 - Run comprehensive automated subsystem & shell tests\n");
             out.push_str("  gui                  - Launch Desktop Window Manager & Compositor demo (M30)\n");
             out.push_str("  mem                  - Display physical memory manager statistics\n");
@@ -1373,6 +1375,47 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             crate::perf::opt::bench_reg::run_benchmark_suite();
             (String::new(), 0)
         }
+        "sdk" => {
+            println!("=== NullOS User-Space SDK Environment (Phase 18 - M39) ===");
+            println!("  SDK Version    : 0.18.39-m39 (x86_64-nullos-elf)");
+            println!("  ABI Base       : 0x00400000 (4 KiB W^X LOAD segments, SysV AMD64)");
+            println!("  Runtime Startup: crt0.o (.init_array constructors, 16B aligned stack)");
+            println!("  Libraries      : libc.a (static) + libc.so (dynamic /lib/ld.so)");
+            println!("  Host Tools     : nullos-cc, nullos-sdk, nullos-dbg, nullos-pkg, sdk.mk");
+            println!("  Package Format : .npkg v1 (64B NPKG header + IEEE 802.3 CRC-32 + ELF)");
+            (String::new(), 0)
+        }
+        "pkg" => {
+            if args.len() < 2 {
+                return ("Usage: pkg <inspect|run> <path.npkg>\n".to_string(), 1);
+            }
+            let subcmd = args[0].as_str();
+            let resolved = resolve_path_with_pwd(&args[1]);
+            match VFS.open(&resolved, OpenFlags::READ_ONLY) {
+                Ok(file) => {
+                    let size = file.stat().size;
+                    let mut buf = vec![0u8; size];
+                    match file.read_at(0, &mut buf) {
+                        Ok(n) if n == size => match subcmd {
+                            "inspect" => match crate::task::npkg::parse_and_verify(&buf) {
+                                Ok(pkg) => {
+                                    crate::task::npkg::print_package_info(&pkg);
+                                    (String::new(), 0)
+                                }
+                                Err(e) => (alloc::format!("pkg inspect error: {}\n", e), 1),
+                            },
+                            "run" => match crate::task::npkg::execute_package(&buf) {
+                                Ok(status) => (alloc::format!("Package exited with status {}\n", status), status),
+                                Err(e) => (alloc::format!("pkg run error: {}\n", e), 1),
+                            },
+                            _ => ("Usage: pkg <inspect|run> <path.npkg>\n".to_string(), 1),
+                        },
+                        _ => (alloc::format!("pkg: failed reading '{}'\n", resolved), 1),
+                    }
+                }
+                Err(e) => (alloc::format!("pkg: cannot open '{}': {:?}\n", resolved, e), 1),
+            }
+        }
         unknown => {
             // Check PATH environment variable and current directory for executable binaries
             let mut candidates = Vec::new();
@@ -1884,7 +1927,15 @@ pub fn run_automated_tests() {
     crate::perf::opt::run_self_tests();
     execute_command("optstat");
 
-    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 & 17 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio, ACPI/Power, Dynamic Linking, Storage, High-Perf Networking, Kernel Profiling and Optimization tests passed successfully!");
+    println!("[SHELL] 31. Testing NullOS SDK Application, Runtime ABI & .npkg Package Format (M39)...");
+    execute_command("sdk");
+    crate::task::npkg::run_self_tests();
+    let insp_rc = execute_command("pkg inspect /disk/SDKDEMO.NPK");
+    assert_eq!(insp_rc, 0, "pkg inspect /disk/SDKDEMO.NPK must succeed");
+    let run_rc = execute_command("pkg run /disk/SDKDEMO.NPK");
+    assert_eq!(run_rc, 0, "pkg run /disk/SDKDEMO.NPK must execute and exit 0");
+
+    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 & 18 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio, ACPI/Power, Dynamic Linking, Storage, High-Perf Networking, Kernel Profiling, Optimization and SDK tests passed successfully!");
 }
 
 /// Interactive Shell Loop that listens on USB Keyboard, PS/2 Keyboard, and COM1 serial input

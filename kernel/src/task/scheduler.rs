@@ -105,7 +105,48 @@ pub fn spawn(name: &str, entry: fn(), priority: u8) -> ThreadId {
 }
 
 /// Voluntarily yields CPU execution to the next ready thread in the run queue.
+/// Interrupt-state guard that disables interrupts for the duration of a context-switch
+/// critical section (including lock release + `switch_threads` transition) and restores
+/// the caller's original `RFLAGS.IF` on drop.
+struct IrqRestoreGuard(bool);
+
+impl IrqRestoreGuard {
+    #[inline]
+    fn disable() -> Self {
+        let was_enabled = crate::sync::are_interrupts_enabled();
+        crate::sync::disable_interrupts();
+        Self(was_enabled)
+    }
+}
+
+impl Drop for IrqRestoreGuard {
+    #[inline]
+    fn drop(&mut self) {
+        if self.0 {
+            crate::sync::enable_interrupts();
+        }
+    }
+}
+
+/// Programs per-thread hardware state (`TSS.rsp0`, syscall stack pointer, and `IA32_FS_BASE`)
+/// for the incoming `next` thread before switching stacks.
+#[inline]
+fn activate_thread_hardware_state(next: &Thread) {
+    crate::arch::x86_64::gdt::set_tss_rsp0(next.stack.top());
+    crate::arch::x86_64::syscall::set_kernel_rsp(next.stack.top());
+    unsafe {
+        crate::arch::x86_64::syscall::write_msr(
+            crate::arch::x86_64::syscall::IA32_FS_BASE_MSR,
+            next.fs_base,
+        );
+    }
+}
+
 pub fn yield_now() {
+    // Keep interrupts disabled across BOTH releasing `SCHEDULER` and `switch_threads` so a
+    // timer IRQ cannot preempt after `sched.current` changed while still on `prev`'s stack.
+    let _irq = IrqRestoreGuard::disable();
+
     let (prev_rsp_ptr, next_rsp) = {
         let mut guard = SCHEDULER.lock();
         let sched = match guard.as_mut() {
@@ -143,14 +184,7 @@ pub fn yield_now() {
             core::ptr::null_mut()
         };
 
-        crate::arch::x86_64::gdt::set_tss_rsp0(next.stack.top());
-        crate::arch::x86_64::syscall::set_kernel_rsp(next.stack.top());
-        unsafe {
-            crate::arch::x86_64::syscall::write_msr(
-                crate::arch::x86_64::syscall::IA32_FS_BASE_MSR,
-                next.fs_base,
-            );
-        }
+        activate_thread_hardware_state(&next);
         sched.current = Some(next);
 
         (prev_rsp_ptr, next_rsp)
@@ -219,14 +253,7 @@ pub fn timer_tick(current_tick: u64) {
             core::ptr::null_mut()
         };
 
-        crate::arch::x86_64::gdt::set_tss_rsp0(next.stack.top());
-        crate::arch::x86_64::syscall::set_kernel_rsp(next.stack.top());
-        unsafe {
-            crate::arch::x86_64::syscall::write_msr(
-                crate::arch::x86_64::syscall::IA32_FS_BASE_MSR,
-                next.fs_base,
-            );
-        }
+        activate_thread_hardware_state(&next);
         sched.current = Some(next);
 
         (prev_rsp_ptr, next_rsp)
@@ -245,6 +272,8 @@ pub fn sleep(ticks: u64) {
     let current_tick = crate::arch::x86_64::apic::get_ticks();
     let wake_tick = current_tick + ticks;
 
+    let _irq = IrqRestoreGuard::disable();
+
     let (prev_rsp_ptr, next_rsp) = {
         let mut guard = SCHEDULER.lock();
         let sched = match guard.as_mut() {
@@ -255,8 +284,9 @@ pub fn sleep(ticks: u64) {
         let mut next = match sched.ready_queue.pop_front() {
             Some(t) => t,
             None => {
-                // No other threads ready to run, spin-wait
+                // No other threads ready to run; re-enable interrupts for APIC timer ticks.
                 drop(guard);
+                drop(_irq);
                 crate::arch::x86_64::apic::sleep(ticks);
                 return;
             }
@@ -272,14 +302,7 @@ pub fn sleep(ticks: u64) {
         let next_rsp = next.rsp;
         sched.sleeping_queue.push(current);
         let prev_rsp_ptr = &mut sched.sleeping_queue.last_mut().unwrap().rsp as *mut u64;
-        crate::arch::x86_64::gdt::set_tss_rsp0(next.stack.top());
-        crate::arch::x86_64::syscall::set_kernel_rsp(next.stack.top());
-        unsafe {
-            crate::arch::x86_64::syscall::write_msr(
-                crate::arch::x86_64::syscall::IA32_FS_BASE_MSR,
-                next.fs_base,
-            );
-        }
+        activate_thread_hardware_state(&next);
         sched.current = Some(next);
 
         (prev_rsp_ptr, next_rsp)
@@ -294,6 +317,8 @@ pub fn sleep(ticks: u64) {
 /// Blocks the current thread, transitioning it to ThreadState::Blocked,
 /// and immediately context switches to the next ready thread.
 pub fn block_current_thread() {
+    let _irq = IrqRestoreGuard::disable();
+
     let (prev_rsp_ptr, next_rsp) = {
         let mut guard = SCHEDULER.lock();
         let sched = match guard.as_mut() {
@@ -328,14 +353,7 @@ pub fn block_current_thread() {
         sched.total_switches += 1;
         let next_rsp = next.rsp;
 
-        crate::arch::x86_64::gdt::set_tss_rsp0(next.stack.top());
-        crate::arch::x86_64::syscall::set_kernel_rsp(next.stack.top());
-        unsafe {
-            crate::arch::x86_64::syscall::write_msr(
-                crate::arch::x86_64::syscall::IA32_FS_BASE_MSR,
-                next.fs_base,
-            );
-        }
+        activate_thread_hardware_state(&next);
         sched.current = Some(next);
 
         (prev_rsp_ptr, next_rsp)
@@ -391,6 +409,7 @@ pub fn spawn_user(
 
 /// Terminates the current thread cleanly.
 pub fn exit() -> ! {
+    crate::sync::disable_interrupts();
     let next_rsp = {
         let mut guard = SCHEDULER.lock();
         let sched = guard.as_mut().expect("Scheduler not active");
@@ -406,14 +425,7 @@ pub fn exit() -> ! {
         if let Some(mut next) = sched.ready_queue.pop_front() {
             next.state = ThreadState::Running;
             let rsp = next.rsp;
-            crate::arch::x86_64::gdt::set_tss_rsp0(next.stack.top());
-            crate::arch::x86_64::syscall::set_kernel_rsp(next.stack.top());
-            unsafe {
-                crate::arch::x86_64::syscall::write_msr(
-                    crate::arch::x86_64::syscall::IA32_FS_BASE_MSR,
-                    next.fs_base,
-                );
-            }
+            activate_thread_hardware_state(&next);
             sched.current = Some(next);
             sched.total_switches += 1;
             rsp
@@ -423,6 +435,7 @@ pub fn exit() -> ! {
     };
 
     if next_rsp != 0 {
+        crate::perf::pmu::record_sw_ctx_switch();
         let mut dummy: u64 = 0;
         unsafe {
             switch_threads(&mut dummy as *mut u64, next_rsp);

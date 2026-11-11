@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# NullOS SDK Compiler Driver (Phase 18 - M39)
+# Wraps GCC + LD with NullOS Ring 3 ABI flags, sysroot includes, startup code, and linker scripts.
+set -euo pipefail
+
+BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SDK_ROOT="$(cd "${BIN_DIR}/.." && pwd)"
+NULLOS_ROOT="$(cd "${SDK_ROOT}/.." && pwd)"
+
+SYSROOT="${SDK_ROOT}/sysroot"
+LIBC_INC="${NULLOS_ROOT}/user/libc/include"
+SDK_INC="${SDK_ROOT}/include"
+CRT0_OBJ="${SYSROOT}/lib/crt0.o"
+LIBC_A="${SYSROOT}/lib/libc.a"
+LIBC_SO="${SYSROOT}/lib/libc.so"
+LD_STATIC="${SDK_ROOT}/ld/nullos-app.ld"
+LD_DYN="${SDK_ROOT}/ld/nullos-dyn.ld"
+
+# Auto-refresh sysroot if missing
+if [ ! -f "${CRT0_OBJ}" ] || [ ! -f "${LIBC_A}" ]; then
+    "${BIN_DIR}/nullos-sdk" sysroot >/dev/null
+fi
+
+CC="${CC:-gcc}"
+LD="${LD:-ld}"
+
+COMPILE_ONLY=0
+DYNAMIC_MODE=0
+OUT_FILE="a.out"
+SRCS=()
+EXTRA_CFLAGS=()
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -c)
+            COMPILE_ONLY=1
+            shift
+            ;;
+        --dynamic|-shared)
+            DYNAMIC_MODE=1
+            shift
+            ;;
+        -o)
+            OUT_FILE="$2"
+            shift 2
+            ;;
+        -I*|-D*|-O*|-W*|-g|-std=*)
+            EXTRA_CFLAGS+=("$1")
+            shift
+            ;;
+        *)
+            SRCS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+if [ ${#SRCS[@]} -eq 0 ]; then
+    echo "nullos-cc: error: no input files" >&2
+    exit 1
+fi
+
+COMMON_CFLAGS=(
+    -Wall -Wextra -O2
+    -march=x86-64 -mtune=generic
+    -nostdlib -fno-builtin -fno-stack-protector -mno-red-zone -mcmodel=small
+    -I"${SDK_INC}" -I"${LIBC_INC}"
+)
+
+if [ ${DYNAMIC_MODE} -eq 1 ]; then
+    COMMON_CFLAGS+=(-fPIC)
+fi
+
+if [ ${COMPILE_ONLY} -eq 1 ]; then
+    exec "${CC}" "${COMMON_CFLAGS[@]}" "${EXTRA_CFLAGS[@]}" -c "${SRCS[@]}" -o "${OUT_FILE}"
+fi
+
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "${TMP_DIR}"' EXIT
+OBJS=()
+IDX=0
+for src in "${SRCS[@]}"; do
+    case "${src}" in
+        *.o|*.a)
+            OBJS+=("${src}")
+            ;;
+        *)
+            obj="${TMP_DIR}/unit_${IDX}.o"
+            "${CC}" "${COMMON_CFLAGS[@]}" "${EXTRA_CFLAGS[@]}" -c "${src}" -o "${obj}"
+            OBJS+=("${obj}")
+            IDX=$((IDX + 1))
+            ;;
+    esac
+done
+
+if [ ${DYNAMIC_MODE} -eq 1 ]; then
+    "${LD}" -m elf_x86_64 -dynamic-linker /lib/ld.so -T "${LD_DYN}" "${CRT0_OBJ}" "${OBJS[@]}" "${LIBC_SO}" -o "${OUT_FILE}"
+else
+    "${LD}" -m elf_x86_64 -static -nostdlib -T "${LD_STATIC}" "${CRT0_OBJ}" "${OBJS[@]}" "${LIBC_A}" -o "${OUT_FILE}"
+fi
+

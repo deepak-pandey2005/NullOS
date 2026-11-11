@@ -7,7 +7,7 @@ CFLAGS = -Wall -Wextra -O2 -march=x86-64 -mtune=generic -nostdlib -fno-builtin -
 ASFLAGS = --64
 
 BUILD_DIR = build
-SRCS = string.c stdio.c stdlib.c unistd.c syscall.c pthread.c semaphore.c dlfcn.c
+SRCS = string.c stdio.c stdlib.c unistd.c syscall.c pthread.c semaphore.c dlfcn.c errno.c
 OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
 PIC_OBJS = $(patsubst %.c,$(BUILD_DIR)/pic/%.o,$(SRCS))
 

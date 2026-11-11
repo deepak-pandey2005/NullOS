@@ -10,6 +10,9 @@ cargo build --manifest-path "${ROOT_DIR}/bootloader/Cargo.toml" --target x86_64-
 echo "==> Building Userspace Libc and Binaries..."
 make -C "${ROOT_DIR}/user"
 
+echo "==> Building NullOS SDK Sysroot & Demo Package..."
+"${ROOT_DIR}/sdk/bin/nullos-sdk" check
+
 echo "==> Building Kernel (x86_64-unknown-none)..."
 cargo build --manifest-path "${ROOT_DIR}/kernel/Cargo.toml" --target x86_64-unknown-none
 
@@ -94,6 +97,14 @@ fi
 if [ -f "${ROOT_DIR}/user/build/bin/dyn_hello.elf" ]; then
     mcopy -o -i "${DATA_DISK_IMG}" "${ROOT_DIR}/user/build/bin/dyn_hello.elf" ::DYN_HELLO.ELF
     echo "==> Copied DYN_HELLO.ELF to FAT32 data disk."
+fi
+if [ -f "${ROOT_DIR}/sdk/examples/sdk_demo/build/sdk_demo.elf" ]; then
+    mcopy -o -i "${DATA_DISK_IMG}" "${ROOT_DIR}/sdk/examples/sdk_demo/build/sdk_demo.elf" ::SDK_DEMO.ELF
+    echo "==> Copied SDK_DEMO.ELF to FAT32 data disk."
+fi
+if [ -f "${ROOT_DIR}/sdk/examples/sdk_demo/build/sdk_demo.npkg" ]; then
+    mcopy -o -i "${DATA_DISK_IMG}" "${ROOT_DIR}/sdk/examples/sdk_demo/build/sdk_demo.npkg" ::SDKDEMO.NPK
+    echo "==> Copied SDKDEMO.NPK to FAT32 data disk."
 fi
 
 # 4. Create an 8MB NVMe disk image if not present

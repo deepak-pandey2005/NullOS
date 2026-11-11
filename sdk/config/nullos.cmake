@@ -1,0 +1,10 @@
+# NullOS Official CMake Toolchain File (Phase 18 - M39)
+set(CMAKE_SYSTEM_NAME NullOS)
+set(CMAKE_SYSTEM_PROCESSOR x86_64)
+
+get_filename_component(NULLOS_SDK_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+
+set(CMAKE_C_COMPILER "${NULLOS_SDK_ROOT}/bin/nullos-cc")
+set(CMAKE_C_FLAGS_INIT "-O2 -Wall -Wextra")
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+
