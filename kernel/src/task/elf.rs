@@ -118,15 +118,11 @@ pub struct LoadedUserElf {
     pub total_memory_size: u64,
 }
 
-/// Parses and loads a 64-bit ELF user binary into the active user address space.
+/// Parses and validates ELF64 user executable headers and Program Header bounds without mapping pages.
 ///
-/// # Parameters
-/// - `elf_data`: Raw byte slice containing the complete ELF executable file image.
-///
-/// # Returns
-/// - `Ok(LoadedUserElf)` containing entry point and boundary metadata.
-/// - `Err(&'static str)` on format invalidation or mapping failure.
-pub fn load_user_elf(elf_data: &[u8]) -> Result<LoadedUserElf, &'static str> {
+/// Uses overflow-safe arithmetic (`checked_mul`/`checked_add`) so corrupted or fuzzed ELF files
+/// are rejected cleanly with `Err(...)` instead of panicking or overflowing buffer bounds.
+pub fn validate_user_elf_headers(elf_data: &[u8]) -> Result<Elf64Header, &'static str> {
     if elf_data.len() < core::mem::size_of::<Elf64Header>() {
         return Err("ELF file too small for 64-bit header");
     }
@@ -150,13 +146,65 @@ pub fn load_user_elf(elf_data: &[u8]) -> Result<LoadedUserElf, &'static str> {
         return Err("Unsupported ELF object type (must be ET_EXEC or ET_DYN)");
     }
 
-    let ph_offset = header.e_phoff as usize;
+    let ph_offset = usize::try_from(header.e_phoff).map_err(|_| "ELF phoff overflow")?;
     let ph_count = header.e_phnum as usize;
     let ph_size = header.e_phentsize as usize;
 
-    if ph_offset + ph_count * ph_size > elf_data.len() {
+    if ph_count > 0 && ph_size < core::mem::size_of::<Elf64ProgramHeader>() {
+        return Err("Invalid ELF program header entry size");
+    }
+    let ph_table_bytes = ph_count
+        .checked_mul(ph_size)
+        .ok_or("ELF program header table size overflow")?;
+    let ph_table_end = ph_offset
+        .checked_add(ph_table_bytes)
+        .ok_or("ELF program header table end overflow")?;
+    if ph_table_end > elf_data.len() {
         return Err("ELF program header table exceeds file bounds");
     }
+
+    for i in 0..ph_count {
+        let entry_offset = ph_offset + i * ph_size;
+        let ph_ptr = unsafe { elf_data.as_ptr().add(entry_offset) as *const Elf64ProgramHeader };
+        let ph = unsafe { ptr::read_unaligned(ph_ptr) };
+        if ph.p_type == PT_LOAD && ph.p_memsz > 0 {
+            if ph.p_vaddr >= 0x0000_8000_0000_0000 {
+                return Err("User ELF segment attempted mapping into kernel address space");
+            }
+            if ph.p_filesz > ph.p_memsz {
+                return Err("ELF segment file size exceeds memory size");
+            }
+            let _ = ph
+                .p_vaddr
+                .checked_add(ph.p_memsz)
+                .ok_or("ELF segment virtual span overflow")?;
+            let seg_off = usize::try_from(ph.p_offset).map_err(|_| "ELF segment offset overflow")?;
+            let seg_filesz = usize::try_from(ph.p_filesz).map_err(|_| "ELF segment filesz overflow")?;
+            let seg_end = seg_off
+                .checked_add(seg_filesz)
+                .ok_or("ELF segment file span overflow")?;
+            if seg_end > elf_data.len() {
+                return Err("ELF segment payload exceeds file bounds");
+            }
+        }
+    }
+
+    Ok(header)
+}
+
+/// Parses and loads a 64-bit ELF user binary into the active user address space.
+///
+/// # Parameters
+/// - `elf_data`: Raw byte slice containing the complete ELF executable file image.
+///
+/// # Returns
+/// - `Ok(LoadedUserElf)` containing entry point and boundary metadata.
+/// - `Err(&'static str)` on format invalidation or mapping failure.
+pub fn load_user_elf(elf_data: &[u8]) -> Result<LoadedUserElf, &'static str> {
+    let header = validate_user_elf_headers(elf_data)?;
+    let ph_offset = header.e_phoff as usize;
+    let ph_count = header.e_phnum as usize;
+    let ph_size = header.e_phentsize as usize;
 
     let mut min_vaddr = u64::MAX;
     let mut max_vaddr = 0u64;

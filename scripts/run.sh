@@ -213,12 +213,19 @@ if [[ "${MODE}" == "headless" ]]; then
             TEST_PASSED=true
             break
         fi
+        if grep -q "\[KERNEL PANIC\]" "${SERIAL_LOG}" 2>/dev/null; then
+            sleep 0.5
+            echo "ERROR: Kernel panic detected during headless test run!" >&2
+            break
+        fi
         if ! kill -0 "${QEMU_PID}" 2>/dev/null; then
             break
         fi
     done
     
     kill "${QEMU_PID}" 2>/dev/null || true
+    sleep 0.2
+    kill -9 "${QEMU_PID}" 2>/dev/null || true
     wait "${QEMU_PID}" 2>/dev/null || true
     rm -f "${TEST_DISK}" "${TEST_DATA}" "${TEST_NVME}"
     

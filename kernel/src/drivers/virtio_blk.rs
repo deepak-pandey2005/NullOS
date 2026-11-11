@@ -237,6 +237,8 @@ pub struct VirtIoBlockDevice {
     _base_frame: PhysFrame,
     /// Number of contiguous physical frames allocated.
     _num_frames: usize,
+    /// Dedicated identity-mapped 4 KiB physical bounce page for header, status, and 512-byte sector DMA.
+    dma_frame: PhysFrame,
     /// Pointer to the descriptor table.
     desc_table: *mut VirtqDesc,
     /// Pointer to the available ring.
@@ -330,12 +332,16 @@ impl VirtIoBlockDevice {
             let cap_high = inl(io_base + VIRTIO_REG_DEVICE_CONFIG + 4);
             let capacity_sectors = ((cap_high as u64) << 32) | (cap_low as u64);
 
+            let dma_frame = memory::alloc_frame().ok_or(BlockError::DeviceBusy)?;
+            core::ptr::write_bytes(dma_frame.start_address().as_u64() as *mut u8, 0, PAGE_SIZE_4K as usize);
+
             Ok(Self {
                 io_base,
                 capacity_sectors,
                 queue_size: q_size,
                 _base_frame: base_frame,
                 _num_frames: num_frames,
+                dma_frame,
                 desc_table,
                 avail_ring,
                 used_ring,
@@ -345,27 +351,37 @@ impl VirtIoBlockDevice {
     }
 
     /// Submits a block request (Read or Write) through the Virtqueue ring buffer and polls for completion.
+    ///
+    /// Uses the device's dedicated identity-mapped physical `dma_frame` bounce page so callers can
+    /// safely pass buffers living in non-identity kernel heap memory (`Vec`) or arbitrary thread stacks.
     fn submit_request(
         &self,
         req_type: u32,
         sector: u64,
-        buffer_phys: u64,
-        is_write: bool,
+        write_data: Option<&[u8]>,
+        read_out: Option<&mut [u8]>,
     ) -> Result<(), BlockError> {
         let mut last_used = self.last_used_idx.lock();
 
-        // Statically allocate local request header and status byte
-        let req_header = VirtIoBlkReqHeader {
-            req_type,
-            reserved: 0,
-            sector,
-        };
-        let status_byte: u8 = 0xFF;
-
-        let req_header_phys = &req_header as *const _ as u64;
-        let status_byte_phys = &status_byte as *const _ as u64;
+        let dma_base = self.dma_frame.start_address().as_u64();
+        let req_header_phys = dma_base;
+        let status_byte_phys = dma_base + 32;
+        let data_buf_phys = dma_base + 64;
+        let is_write = write_data.is_some();
 
         unsafe {
+            let hdr_ptr = req_header_phys as *mut VirtIoBlkReqHeader;
+            hdr_ptr.write(VirtIoBlkReqHeader {
+                req_type,
+                reserved: 0,
+                sector,
+            });
+            let status_ptr = status_byte_phys as *mut u8;
+            status_ptr.write_volatile(0xFF);
+            if let Some(src) = write_data {
+                core::ptr::copy_nonoverlapping(src.as_ptr(), data_buf_phys as *mut u8, SECTOR_SIZE);
+            }
+
             let desc = self.desc_table;
             let avail = &mut *self.avail_ring;
 
@@ -377,9 +393,7 @@ impl VirtIoBlockDevice {
                 next: 1,
             };
 
-            // Descriptor 1: Data Buffer (512 bytes)
-            // If disk write: device reads from buffer (flags = NEXT).
-            // If disk read: device writes to buffer (flags = NEXT | WRITE).
+            // Descriptor 1: Data Buffer (512 bytes) in physical bounce page
             let buf_flags = if is_write {
                 VIRTQ_DESC_F_NEXT
             } else {
@@ -387,7 +401,7 @@ impl VirtIoBlockDevice {
             };
 
             (*desc.add(1)) = VirtqDesc {
-                addr: buffer_phys,
+                addr: data_buf_phys,
                 len: SECTOR_SIZE as u32,
                 flags: buf_flags,
                 next: 2,
@@ -438,9 +452,19 @@ impl VirtIoBlockDevice {
 
             fence(Ordering::SeqCst);
 
-            // Validate status response from device
-            match status_byte {
-                VIRTIO_BLK_S_OK => Ok(()),
+            // Copy DMA read result out of physical bounce page if request succeeded
+            let status_val = status_ptr.read_volatile();
+            match status_val {
+                VIRTIO_BLK_S_OK => {
+                    if let Some(dst) = read_out {
+                        core::ptr::copy_nonoverlapping(
+                            data_buf_phys as *const u8,
+                            dst.as_mut_ptr(),
+                            SECTOR_SIZE,
+                        );
+                    }
+                    Ok(())
+                }
                 VIRTIO_BLK_S_IOERR => Err(BlockError::IoError),
                 VIRTIO_BLK_S_UNSUPP => Err(BlockError::Unsupported),
                 _ => Err(BlockError::IoError),
@@ -466,8 +490,7 @@ impl BlockDevice for VirtIoBlockDevice {
             return Err(BlockError::BufferTooSmall);
         }
 
-        let buffer_phys = buf.as_mut_ptr() as u64;
-        self.submit_request(VIRTIO_BLK_T_IN, sector, buffer_phys, false)
+        self.submit_request(VIRTIO_BLK_T_IN, sector, None, Some(buf))
     }
 
     fn write_sector(&self, sector: u64, buf: &[u8]) -> Result<(), BlockError> {
@@ -478,8 +501,7 @@ impl BlockDevice for VirtIoBlockDevice {
             return Err(BlockError::BufferTooSmall);
         }
 
-        let buffer_phys = buf.as_ptr() as u64;
-        self.submit_request(VIRTIO_BLK_T_OUT, sector, buffer_phys, true)
+        self.submit_request(VIRTIO_BLK_T_OUT, sector, Some(buf), None)
     }
 }
 

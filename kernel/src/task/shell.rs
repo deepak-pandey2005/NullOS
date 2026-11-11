@@ -1432,6 +1432,16 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             }
             crate::debug::debugger::dispatch_shell_command(&full_args)
         }
+        "reliability" | "rel" => {
+            let sub = args.first().map(|s| s.as_str()).unwrap_or("status");
+            if sub == "status" {
+                (crate::reliability::format_status(), 0)
+            } else {
+                let count_arg = args.get(1).and_then(|s| s.parse::<usize>().ok());
+                let (msg, ok) = crate::reliability::run_suite(sub, count_arg);
+                (msg, if ok { 0 } else { 1 })
+            }
+        }
         unknown => {
             // Check PATH environment variable and current directory for executable binaries
             let mut candidates = Vec::new();
@@ -1971,7 +1981,11 @@ pub fn run_automated_tests() {
     assert_eq!(execute_command("cat /etc/nullos-release"), 0, "cat /etc/nullos-release must succeed");
     assert_eq!(execute_command("pkg inspect /pkg/sdk_demo.npkg"), 0, "pkg inspect /pkg/sdk_demo.npkg must succeed");
 
-    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 & 19 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio, ACPI/Power, Dynamic Linking, Storage, High-Perf Networking, Kernel Profiling, Optimization, SDK, Debugging and Distribution tests passed successfully!");
+    println!("[SHELL] 34. Testing Kernel Reliability, Unit, Integration, FS, Net, SMP, Stress, MemCorruption, Fuzzing & Soak Stability (M42)...");
+    crate::reliability::run_all();
+    assert_eq!(execute_command("reliability status"), 0, "reliability status must succeed");
+
+    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 & 19 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio, ACPI/Power, Dynamic Linking, Storage, High-Perf Networking, Kernel Profiling, Optimization, SDK, Debugging, Distribution and Reliability tests passed successfully!");
 }
 
 /// Interactive Shell Loop that listens on USB Keyboard, PS/2 Keyboard, and COM1 serial input

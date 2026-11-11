@@ -57,6 +57,7 @@ mod ipc;
 mod memory;
 mod net;
 mod perf;
+mod reliability;
 mod security;
 mod storage;
 mod sync;
@@ -180,6 +181,9 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
 
     // Initialize Phase 18 M40 Debugging & Observability (Symbolizer, Klog, Lockdep)
     debug::init();
+
+    // Initialize Phase 19 M42 Reliability & Stability Suite
+    reliability::init();
 
     // Initialize ACPI Subsystem & MADT CPU Enumeration (Phase 9 - M25 SMP)
     arch::x86_64::acpi::init(boot_info.acpi_rsdp);

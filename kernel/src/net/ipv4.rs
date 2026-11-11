@@ -700,6 +700,18 @@ pub fn send_ipv4_packet(dst_ip: Ipv4Addr, protocol: IpProtocol, payload: &[u8]) 
     let config = *super::INTERFACE_CONFIG.lock();
     let src_ip  = config.ip;
 
+    // Short-circuit local loopback destinations (127.0.0.0/8 or self IP) directly to the
+    // local transport protocol handler instead of transmitting out the NIC toward the gateway.
+    if dst_ip.is_loopback() || dst_ip == src_ip {
+        let loopback_src = if dst_ip.is_loopback() { dst_ip } else { src_ip };
+        match protocol {
+            IpProtocol::Udp => super::udp::handle_packet(loopback_src, payload),
+            IpProtocol::Tcp => super::tcp::handle_packet(loopback_src, payload),
+            _ => {}
+        }
+        return Ok(());
+    }
+
     // Determine target IP for ARP resolution (direct host if on same subnet, or gateway router)
     // If the destination is on the same subnet, ARP for it directly.
     // If the destination is on a different network, ARP for the gateway.

@@ -633,16 +633,16 @@ scripts\windows\run.bat --headless    # Run automated headless test suite
 - [x] Installation documentation (`docs/INSTALLATION.md`)
 
 ### M42 — Reliability
-- [ ] Kernel unit tests
-- [ ] Integration tests
-- [ ] Filesystem tests
-- [ ] Network tests
-- [ ] SMP tests
-- [ ] Stress tests
-- [ ] Memory corruption tests
-- [ ] Fuzzing
-- [ ] Long-running stability tests
-- [ ] CI regression tests
+- [x] Kernel unit tests (`reliability::unit_tests` — PMM, O(1) runqueue, SlabPool, TAR, CRC-32, Spinlock)
+- [x] Integration tests (`reliability::fuzz_soak::run_integration_tests` — VFS + NPKG + ELF + Lockdep + Klog)
+- [x] Filesystem tests (`reliability::fs_net_tests::run_fs_tests` — RamFS & FAT32 persistence + VirtIO DMA bounce fix)
+- [x] Network tests (`reliability::fs_net_tests::run_net_tests` — IPv4, RFC 1071, Ethernet, ARP & UDP loopback)
+- [x] SMP tests (`reliability::smp_stress_mem::run_smp_tests` — multi-thread atomic & spinlock convergence)
+- [x] Stress tests (`reliability::smp_stress_mem::run_stress_tests` — heap storms, `/tmp` churn & thread burst)
+- [x] Memory corruption tests (`reliability::smp_stress_mem::run_mem_corruption_tests` — redzones, stack canaries, W^X & usercopy)
+- [x] Fuzzing (`reliability::fuzz_soak::run_fuzz_tests` — deterministic PRNG corpus across ELF, TAR, Net & VFS)
+- [x] Long-running stability tests (`reliability::fuzz_soak::run_soak_tests` / `reliability soak [N]`)
+- [x] CI regression tests (`scripts/ci_regression.sh` & `.github/workflows/ci.yml`)
 
 ---
 
@@ -729,4 +729,4 @@ sudo ./scripts/create_bootable_usb.sh --device /dev/sdX
 - [x] M39
 - [x] M40
 - [x] M41
-- [ ] M42
+- [x] M42

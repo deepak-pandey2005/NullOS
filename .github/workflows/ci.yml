@@ -20,7 +20,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             qemu-system-x86 \
+            qemu-system-arm \
             ovmf \
+            qemu-efi-aarch64 \
             mtools \
             parted \
             dosfstools \
@@ -31,7 +33,7 @@ jobs:
         uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
-          targets: x86_64-unknown-none, x86_64-unknown-uefi
+          targets: x86_64-unknown-none, x86_64-unknown-uefi, aarch64-unknown-uefi
 
       - name: Configure KVM acceleration
         run: |
@@ -51,14 +53,8 @@ jobs:
             echo "Hardware KVM acceleration not functional on runner, falling back to multi-threaded QEMU TCG"
           fi
 
-      - name: Cargo Check Workspace
-        run: cargo check --workspace
-
-      - name: Build Bootloader, Libc, Kernel & Disk Images
-        run: ./scripts/build.sh
-
-      - name: Run Headless QEMU Automated Verification
-        run: ./scripts/run.sh --headless
+      - name: Run Full CI Regression Suite (M41 + M42)
+        run: ./scripts/ci_regression.sh
 
       - name: Upload Serial Test Log
         if: always()
