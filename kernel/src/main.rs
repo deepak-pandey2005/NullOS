@@ -49,6 +49,7 @@
 extern crate alloc;
 
 mod arch;
+mod debug;
 mod drivers;
 mod fs;
 mod graphics;
@@ -167,6 +168,9 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // Initialize Physical Memory Manager (Phase 3 - M7, M8, M9)
     memory::init(boot_info);
     memory::run_self_tests();
+
+    // Initialize Phase 18 M40 Debugging & Observability (Symbolizer, Klog, Lockdep)
+    debug::init();
 
     // Initialize ACPI Subsystem & MADT CPU Enumeration (Phase 9 - M25 SMP)
     arch::x86_64::acpi::init(boot_info.acpi_rsdp);
@@ -330,6 +334,8 @@ fn check_qemu_fw_cfg_test() -> bool {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     println!("[KERNEL PANIC] {}", info);
+    let dump = debug::crash::record_panic(info);
+    println!("{}", dump.format_report());
     loop {
         unsafe {
             core::arch::asm!("cli; hlt");

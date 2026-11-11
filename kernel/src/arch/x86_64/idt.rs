@@ -197,6 +197,12 @@ pub extern "C" fn exception_handler(ctx: &ExceptionContext) {
     };
 
     let is_user = (ctx.cs & 3) == 3;
+    if !is_user && ctx.vector == 3 && crate::debug::debugger::handle_debug_trap(ctx) {
+        return;
+    }
+
+    let dump = crate::debug::crash::record_exception(ctx, name);
+
     crate::println!();
     if is_user {
         crate::println!("------------------------------------------------");
@@ -244,6 +250,9 @@ pub extern "C" fn exception_handler(ctx: &ExceptionContext) {
     if is_user {
         crate::println!("------------------------------------------------");
     } else {
+        for line in &dump.backtrace {
+            crate::println!("{}", line);
+        }
         crate::println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
     }
 

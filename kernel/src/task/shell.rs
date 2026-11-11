@@ -488,6 +488,9 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str("  optbench             - Run M38 Optimization Benchmarks & Regression Suite (M38)\n");
             out.push_str("  sdk                  - Display NullOS SDK ABI, Sysroot & Toolchain Summary (M39)\n");
             out.push_str("  pkg <inspect|run> <f>- Inspect/verify CRC-32 or execute a .npkg package (M39)\n");
+            out.push_str("  dbg / kdbg [subcmd]  - Kernel debugger: regs, bt, sym, mem, v2p, heap, klog, trace, locks, crash, bp (M40)\n");
+            out.push_str("  bt / sym / klog      - Quick aliases for stack backtrace, symbolizer & structured logs (M40)\n");
+            out.push_str("  lockdep / crashdump  - Inspect deadlock dependency graph & crash dump history (M40)\n");
             out.push_str("  test                 - Run comprehensive automated subsystem & shell tests\n");
             out.push_str("  gui                  - Launch Desktop Window Manager & Compositor demo (M30)\n");
             out.push_str("  mem                  - Display physical memory manager statistics\n");
@@ -1416,6 +1419,19 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
                 Err(e) => (alloc::format!("pkg: cannot open '{}': {:?}\n", resolved, e), 1),
             }
         }
+        "dbg" | "kdbg" => {
+            let arg_strs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+            crate::debug::debugger::dispatch_shell_command(&arg_strs)
+        }
+        "bt" | "sym" | "klog" | "lockdep" | "crashdump" => {
+            let sub = if cmd == "crashdump" { "crash" } else if cmd == "lockdep" { "locks" } else { cmd };
+            let mut full_args = Vec::with_capacity(args.len() + 1);
+            full_args.push(sub);
+            for a in args {
+                full_args.push(a.as_str());
+            }
+            crate::debug::debugger::dispatch_shell_command(&full_args)
+        }
         unknown => {
             // Check PATH environment variable and current directory for executable binaries
             let mut candidates = Vec::new();
@@ -1935,7 +1951,17 @@ pub fn run_automated_tests() {
     let run_rc = execute_command("pkg run /disk/SDKDEMO.NPK");
     assert_eq!(run_rc, 0, "pkg run /disk/SDKDEMO.NPK must execute and exit 0");
 
-    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 & 18 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio, ACPI/Power, Dynamic Linking, Storage, High-Perf Networking, Kernel Profiling, Optimization and SDK tests passed successfully!");
+    println!("[SHELL] 32. Testing Kernel Debugger, Symbolizer, Unwinder, Klog, MemDiag & Lockdep (M40)...");
+    crate::debug::run_self_tests();
+    assert_eq!(execute_command("dbg regs"), 0, "dbg regs must succeed");
+    assert_eq!(execute_command("dbg bt"), 0, "dbg bt must succeed");
+    assert_eq!(execute_command("dbg sym timer_handler"), 0, "dbg sym must resolve KSYM entries");
+    assert_eq!(execute_command("dbg heap"), 0, "dbg heap must succeed");
+    assert_eq!(execute_command("dbg klog info"), 0, "dbg klog must succeed");
+    assert_eq!(execute_command("dbg locks"), 0, "dbg locks must succeed");
+    assert_eq!(execute_command("dbg crash"), 0, "dbg crash must display recorded snapshots");
+
+    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 & 18 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio, ACPI/Power, Dynamic Linking, Storage, High-Perf Networking, Kernel Profiling, Optimization, SDK and Debugging tests passed successfully!");
 }
 
 /// Interactive Shell Loop that listens on USB Keyboard, PS/2 Keyboard, and COM1 serial input

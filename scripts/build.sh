@@ -107,6 +107,37 @@ if [ -f "${ROOT_DIR}/sdk/examples/sdk_demo/build/sdk_demo.npkg" ]; then
     echo "==> Copied SDKDEMO.NPK to FAT32 data disk."
 fi
 
+# Generate compact KSYM v1 binary symbol table for M40 Kernel Symbolizer (/disk/KERNEL.SYM)
+KSYM_FILE="${BUILD_DIR}/kernel.ksym"
+python3 - "${ESP_DIR}/kernel.elf" "${KSYM_FILE}" <<'PYEOF'
+import struct, subprocess, sys
+elf_path, out_path = sys.argv[1], sys.argv[2]
+nm = subprocess.check_output(["nm", "-n", "-S", "--defined-only", elf_path], text=True)
+entries = []
+for line in nm.splitlines():
+    parts = line.split()
+    if len(parts) == 4:
+        addr_s, size_s, kind, name = parts
+        size = int(size_s, 16)
+    elif len(parts) == 3:
+        addr_s, kind, name = parts
+        size = 0
+    else:
+        continue
+    if kind not in ("T", "t", "W", "w"):
+        continue
+    addr = int(addr_s, 16)
+    nb = name.encode("utf-8", "ignore")[:240]
+    entries.append((addr, size, nb))
+with open(out_path, "wb") as f:
+    f.write(struct.pack("<4sIII", b"KSYM", 1, len(entries), 0))
+    for addr, size, nb in entries:
+        f.write(struct.pack("<QQH", addr, size, len(nb)))
+        f.write(nb)
+PYEOF
+mcopy -o -i "${DATA_DISK_IMG}" "${KSYM_FILE}" ::KERNEL.SYM
+echo "==> Generated and copied KERNEL.SYM to FAT32 data disk."
+
 # 4. Create an 8MB NVMe disk image if not present
 NVME_DISK_IMG="${BUILD_DIR}/nvme.img"
 if [ ! -f "${NVME_DISK_IMG}" ]; then

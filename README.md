@@ -604,16 +604,16 @@ scripts\windows\run.bat --headless    # Run automated headless test suite
 - [x] Package format
 
 ### M40 — Debugging & Observability
-- [ ] Kernel debugger
-- [ ] Crash dumps
-- [ ] Stack unwinding
-- [ ] Symbolizer
-- [ ] Kernel logs
-- [ ] Structured logging
-- [ ] Trace buffers
-- [ ] Memory diagnostics
-- [ ] Deadlock detection
-- [ ] Debug shell
+- [x] Kernel debugger
+- [x] Crash dumps
+- [x] Stack unwinding
+- [x] Symbolizer
+- [x] Kernel logs
+- [x] Structured logging
+- [x] Trace buffers
+- [x] Memory diagnostics
+- [x] Deadlock detection
+- [x] Debug shell
 
 ---
 
@@ -727,6 +727,6 @@ sudo ./scripts/create_bootable_usb.sh --device /dev/sdX
 
 ## Checkpoint 9 — Release
 - [x] M39
-- [ ] M40
+- [x] M40
 - [ ] M41
 - [ ] M42
