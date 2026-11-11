@@ -81,6 +81,7 @@ pub mod arp;
 pub mod ethernet;
 pub mod icmp;
 pub mod ipv4;
+pub mod perf;
 pub mod socket;
 pub mod tcp;
 pub mod udp;
@@ -251,6 +252,7 @@ pub fn init() {
     println!("[NET]   Gateway: {}", config.gateway);
     println!("[NET]   DNS:     {}", config.dns);
     println!("[NET] TCP/IP Protocol Layers active: Ethernet, ARP, IPv4, ICMP, UDP, TCP.");
+    perf::init();
 }
 
 /// **Polls** the VirtIO network hardware for incoming packets and routes each
@@ -281,15 +283,9 @@ pub fn init() {
 /// bytes + 14-byte header = 1514 bytes) with a small safety margin.  Jumbo
 /// frames (> 1500 byte payload) are not supported.
 pub fn poll() {
-    // 1536 = 1500 (MTU) + 14 (Ethernet header) + 22 (safety margin for VLAN tags etc.)
-    let mut rx_buf = [0u8; 1536];
-    while let Ok(Some(len)) = virtio_net::receive(&mut rx_buf) {
-        // Discard runt frames that cannot contain a complete Ethernet II header.
-        // A valid Ethernet II header is exactly 14 bytes: 6 (dst MAC) + 6 (src MAC) + 2 (EtherType).
-        if len >= 14 {
-            ethernet::handle_packet(&rx_buf[..len]);
-        }
-    }
+    // Route VirtIO RX polling through the Phase 16 NAPI adaptive budgeted poller,
+    // RSS multiqueue steering, and zero-copy pooled NetBuf ring.
+    perf::polling::GLOBAL_NAPI_POLLER.poll(perf::polling::DEFAULT_NAPI_BUDGET);
 }
 
 /// **Runs automated verification self-tests** covering every layer of the

@@ -479,6 +479,8 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str("  nvme                 - List detected NVMe PCIe controllers and namespaces (M35)\n");
             out.push_str("  storage / cache      - Inspect Block/Page Cache, I/O Scheduler & WAL Journal (M35)\n");
             out.push_str("  diskbench            - Run cycle-accurate Storage Subsystem benchmarks (M35)\n");
+            out.push_str("  netperf              - Inspect Buffer Pool, NAPI Poller, Batching & RSS Queues (M36)\n");
+            out.push_str("  netbench             - Run cycle-accurate High-Performance Networking benchmarks (M36)\n");
             out.push_str("  test                 - Run comprehensive automated subsystem & shell tests\n");
             out.push_str("  gui                  - Launch Desktop Window Manager & Compositor demo (M30)\n");
             out.push_str("  mem                  - Display physical memory manager statistics\n");
@@ -1337,6 +1339,14 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             crate::storage::bench::run_benchmarks();
             (String::new(), 0)
         }
+        "netperf" => {
+            crate::net::perf::print_status();
+            (String::new(), 0)
+        }
+        "netbench" => {
+            crate::net::perf::bench::run_benchmarks();
+            (String::new(), 0)
+        }
         unknown => {
             // Check PATH environment variable and current directory for executable binaries
             let mut candidates = Vec::new();
@@ -1832,7 +1842,12 @@ pub fn run_automated_tests() {
     crate::storage::run_self_tests();
     execute_command("storage");
 
-    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12, 13, 14 & 15 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio, ACPI/Power, Dynamic Linking and Advanced Storage tests passed successfully!");
+    println!("[SHELL] 28. Testing High-Performance Networking, RSS Multiqueue, NAPI Polling, Zero-Copy, Batching & TCP Opt (M36)...");
+    execute_command("netperf");
+    crate::net::perf::run_self_tests();
+    execute_command("netperf");
+
+    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12, 13, 14, 15 & 16 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio, ACPI/Power, Dynamic Linking, Storage and High-Perf Networking tests passed successfully!");
 }
 
 /// Interactive Shell Loop that listens on USB Keyboard, PS/2 Keyboard, and COM1 serial input

@@ -550,14 +550,14 @@ scripts\windows\run.bat --headless    # Run automated headless test suite
 # Phase 16 — Advanced Networking
 
 ### M36 — High-Performance Networking
-- [ ] Multiqueue networking
-- [ ] RSS
-- [ ] Network polling
-- [ ] Zero-copy networking
-- [ ] Packet batching
-- [ ] Network buffer pools
-- [ ] TCP optimization
-- [ ] Network performance benchmarks
+- [x] Multiqueue networking
+- [x] RSS
+- [x] Network polling
+- [x] Zero-copy networking
+- [x] Packet batching
+- [x] Network buffer pools
+- [x] TCP optimization
+- [x] Network performance benchmarks
 
 ---
 
@@ -721,7 +721,7 @@ sudo ./scripts/create_bootable_usb.sh --device /dev/sdX
 
 ## Checkpoint 8 — High-Performance OS
 - [x] M35
-- [ ] M36
+- [x] M36
 - [ ] M37
 - [ ] M38
 
