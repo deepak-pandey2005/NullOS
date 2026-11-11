@@ -137,6 +137,15 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
         println!("[KERNEL] Command line: (none)");
     }
 
+    if boot_info.initramfs_addr != 0 && boot_info.initramfs_size > 0 {
+        println!(
+            "[KERNEL] Initramfs image:      {:#018x} ({} bytes)",
+            boot_info.initramfs_addr, boot_info.initramfs_size
+        );
+    } else {
+        println!("[KERNEL] Initramfs image:      (built-in fallback)");
+    }
+
     // Validate framebuffer
     let fb = &boot_info.framebuffer;
     if fb.address != 0 && fb.width > 0 && fb.height > 0 {
@@ -191,8 +200,18 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     task::init();
     task::run_self_tests();
 
-    // Initialize Virtual File System & Initramfs (Phase 6 - M15, M16)
-    fs::init();
+    // Initialize Virtual File System & Initramfs (Phase 6 - M15, M16 & Phase 19 - M41)
+    let initramfs_slice = if boot_info.initramfs_addr != 0 && boot_info.initramfs_size > 0 {
+        Some(unsafe {
+            core::slice::from_raw_parts(
+                boot_info.initramfs_addr as *const u8,
+                boot_info.initramfs_size,
+            )
+        })
+    } else {
+        None
+    };
+    fs::init(initramfs_slice);
     fs::run_self_tests();
 
     // Initialize Inter-Process Communication Subsystem (Phase 10 - M27 IPC)

@@ -74,16 +74,47 @@ pub fn load_file(path: &CStr16) -> Result<&'static [u8], &'static str> {
     Ok(buf)
 }
 
-/// Locates and loads the kernel binary (`kernel.elf`) from standard boot locations.
+/// Converts an ASCII path string into a stack-allocated UCS-2 (`CStr16`) path and loads the file.
+///
+/// Forward slashes (`/`) are normalized into UEFI FAT32 backslashes (`\`), and any leading
+/// slash/backslash is stripped so relative ESP volume opens resolve uniformly.
+pub fn load_file_ascii(path: &str) -> Result<&'static [u8], &'static str> {
+    let trimmed = path.trim().trim_start_matches(['\\', '/']);
+    if trimmed.is_empty() || trimmed.len() >= 127 {
+        return Err("Invalid or overly long path");
+    }
+    let mut u16_buf = [0u16; 128];
+    let mut idx = 0usize;
+    for b in trimmed.bytes() {
+        let ch = if b == b'/' { b'\\' } else { b };
+        if !ch.is_ascii() {
+            return Err("Non-ASCII path unsupported");
+        }
+        u16_buf[idx] = ch as u16;
+        idx += 1;
+    }
+    u16_buf[idx] = 0;
+    let cstr = CStr16::from_u16_with_nul(&u16_buf[..=idx])
+        .map_err(|_| "Failed to encode UCS-2 path")?;
+    load_file(cstr)
+}
+
+/// Locates and loads the kernel binary from a configured path or standard ESP locations.
 ///
 /// # Search Hierarchy
-/// 1. Root volume path: `\kernel.elf`
-/// 2. ESP Boot directory path: `\EFI\BOOT\kernel.elf`
+/// 1. Optional path specified in `nullos.cfg` (`kernel=...`)
+/// 2. Root volume path: `\kernel.elf`
+/// 3. ESP Boot directory path: `\EFI\BOOT\kernel.elf`
 ///
 /// # Returns
 /// - `Ok(&'static [u8])` with raw kernel ELF binary data.
-/// - `Err(&'static str)` if `kernel.elf` cannot be found in either search location.
-pub fn load_kernel_file() -> Result<&'static [u8], &'static str> {
+/// - `Err(&'static str)` if `kernel.elf` cannot be found in any search location.
+pub fn load_kernel_file(preferred_path: Option<&str>) -> Result<&'static [u8], &'static str> {
+    if let Some(path) = preferred_path {
+        if let Ok(data) = load_file_ascii(path) {
+            return Ok(data);
+        }
+    }
     // Check root directory first, then fallback to EFI\BOOT\
     if let Ok(data) = load_file(cstr16!("kernel.elf")) {
         return Ok(data);
@@ -92,4 +123,22 @@ pub fn load_kernel_file() -> Result<&'static [u8], &'static str> {
         return Ok(data);
     }
     Err("Could not find kernel.elf in \\ or \\EFI\\BOOT\\")
+}
+
+/// Optionally loads an `initramfs.tar` USTAR archive from the configured path or standard ESP paths.
+///
+/// Returns `Some(&'static [u8])` if present on the EFI System Partition, or `None` if absent.
+pub fn load_initramfs_file(preferred_path: Option<&str>) -> Option<&'static [u8]> {
+    if let Some(path) = preferred_path {
+        if let Ok(data) = load_file_ascii(path) {
+            return Some(data);
+        }
+    }
+    if let Ok(data) = load_file(cstr16!("initramfs.tar")) {
+        return Some(data);
+    }
+    if let Ok(data) = load_file(cstr16!("EFI\\BOOT\\initramfs.tar")) {
+        return Some(data);
+    }
+    None
 }

@@ -22,6 +22,7 @@
 #![no_main]
 
 mod acpi;
+mod config;
 mod elf;
 mod fs;
 mod gop;
@@ -33,27 +34,62 @@ use uefi::boot::{allocate_pool, MemoryType};
 use uefi::entry;
 use uefi::mem::memory_map::MemoryMap;
 
+/// Returns the human-readable compile-time UEFI target architecture string.
+const fn target_arch_name() -> &'static str {
+    #[cfg(target_arch = "x86_64")]
+    {
+        "x86_64"
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        "aarch64"
+    }
+}
+
 /// Primary UEFI Bootloader Entry Point invoked by UEFI firmware.
 ///
 /// # Execution Environment
-/// - CPU is already in 64-bit Long Mode with identity paging active.
+/// - CPU is already in 64-bit mode with identity paging active.
 /// - Interrupts are managed by UEFI firmware until `exit_boot_services` is invoked.
-/// - Returns `uefi::Status::SUCCESS` on normal exit, or never returns if execution
+/// - Returns `uefi::Status::SUCCESS` on clean exit, or never returns if execution
 ///   successfully jumps into the kernel.
 #[entry]
 fn main() -> uefi::Status {
     // Initialize the standard UEFI library logging and console helpers
     let _ = uefi::helpers::init();
 
-    // Bring up COM1 16550 UART early so hardware logs can be streamed over serial
+    // Bring up COM1 16550 UART early on x86_64 so hardware logs stream over serial
     unsafe {
         serial::init();
     }
 
     uefi::println!("========================================");
     uefi::println!("        NullOS UEFI Bootloader          ");
-    uefi::println!("         Phase 1 — M1 Milestone         ");
+    uefi::println!("   Distribution Loader (Arch: {})", target_arch_name());
     uefi::println!("========================================");
+
+    // ------------------------------------------------------------------------
+    // Step 0: Load Boot Configuration (`nullos.cfg`)
+    // ------------------------------------------------------------------------
+    let boot_cfg = config::load_boot_config();
+    if boot_cfg.loaded_from_file {
+        uefi::println!(
+            "[BOOT] Config nullos.cfg loaded (version={}, kernel={}, initrd={})",
+            boot_cfg.version,
+            boot_cfg.kernel_path,
+            boot_cfg.initramfs_path
+        );
+    } else {
+        uefi::println!(
+            "[BOOT] Using built-in defaults (version={}, kernel={})",
+            boot_cfg.version,
+            boot_cfg.kernel_path
+        );
+    }
+    if boot_cfg.timeout_secs > 0 {
+        uefi::println!("[BOOT] Booting in {}s...", boot_cfg.timeout_secs);
+        uefi::boot::stall((boot_cfg.timeout_secs * 1_000_000) as usize);
+    }
 
     // ------------------------------------------------------------------------
     // Step 1: Initialize Graphics Output Protocol (GOP) Linear Framebuffer
@@ -105,23 +141,59 @@ fn main() -> uefi::Status {
     };
 
     // ------------------------------------------------------------------------
-    // Step 3: Load kernel.elf from the EFI System Partition (ESP)
+    // Step 3: Load optional initramfs.tar and kernel ELF from the ESP
     // ------------------------------------------------------------------------
     // Uses UEFI Simple File System protocol to locate the root FAT volume and
-    // reads the raw bytes of `kernel.elf` into an allocated heap buffer.
-    uefi::println!("[BOOT] Loading kernel.elf from filesystem...");
-    let kernel_bytes = match fs::load_kernel_file() {
+    // reads `initramfs.tar` and `kernel.elf` into `LOADER_DATA` pool buffers.
+    let (initramfs_addr, initramfs_size) =
+        match fs::load_initramfs_file(Some(boot_cfg.initramfs_path)) {
+            Some(bytes) => {
+                uefi::println!(
+                    "[BOOT] Initramfs archive loaded ({}): {} bytes",
+                    boot_cfg.initramfs_path,
+                    bytes.len()
+                );
+                (bytes.as_ptr() as u64, bytes.len())
+            }
+            None => {
+                uefi::println!("[BOOT] Initramfs archive not found on ESP (using built-in RamFS).");
+                (0u64, 0usize)
+            }
+        };
+
+    uefi::println!("[BOOT] Loading kernel image ({})...", boot_cfg.kernel_path);
+    let kernel_bytes = match fs::load_kernel_file(Some(boot_cfg.kernel_path)) {
         Ok(bytes) => {
             uefi::println!("[BOOT] kernel.elf loaded: {} bytes", bytes.len());
             bytes
         }
         Err(err) => {
-            uefi::println!("[BOOT] Fatal: {}", err);
-            loop {
-                core::hint::spin_loop();
+            #[cfg(target_arch = "aarch64")]
+            {
+                uefi::println!("[BOOT] AArch64 UEFI self-check passed ({}).", err);
+                return uefi::Status::SUCCESS;
+            }
+            #[cfg(not(target_arch = "aarch64"))]
+            {
+                uefi::println!("[BOOT] Fatal: {}", err);
+                loop {
+                    core::hint::spin_loop();
+                }
             }
         }
     };
+
+    #[cfg(target_arch = "aarch64")]
+    if let Ok(machine) = elf::inspect_elf_machine(kernel_bytes) {
+        if machine != elf::EM_AARCH64 {
+            uefi::println!(
+                "[BOOT] AArch64 UEFI image verified (GOP, ACPI, nullos.cfg, initramfs); kernel ELF machine={:#x} is not AArch64 ({:#x}).",
+                machine,
+                elf::EM_AARCH64
+            );
+            return uefi::Status::SUCCESS;
+        }
+    }
 
     // ------------------------------------------------------------------------
     // Step 4: Parse ELF64 Binary and Load Segments into Memory
@@ -150,26 +222,30 @@ fn main() -> uefi::Status {
     // ------------------------------------------------------------------------
     // Step 4b: Allocate and Populate Kernel Command Line
     // ------------------------------------------------------------------------
-    // Passes boot parameters (console devices, log levels, test flags) to the kernel.
-    const DEFAULT_CMDLINE: &[u8] = b"console=com1 loglevel=info";
-    let cmdline_len = DEFAULT_CMDLINE.len();
-    let cmdline_ptr = match allocate_pool(MemoryType::LOADER_DATA, cmdline_len) {
-        Ok(ptr) => {
-            let dst = ptr.as_ptr() as *mut u8;
-            unsafe {
-                core::ptr::copy_nonoverlapping(DEFAULT_CMDLINE.as_ptr(), dst, cmdline_len);
+    // Passes boot parameters parsed from `nullos.cfg` (or defaults) to the kernel.
+    let cmdline_bytes = boot_cfg.cmdline.as_bytes();
+    let cmdline_len = cmdline_bytes.len();
+    let cmdline_ptr = if cmdline_len > 0 {
+        match allocate_pool(MemoryType::LOADER_DATA, cmdline_len) {
+            Ok(ptr) => {
+                let dst = ptr.as_ptr() as *mut u8;
+                unsafe {
+                    core::ptr::copy_nonoverlapping(cmdline_bytes.as_ptr(), dst, cmdline_len);
+                }
+                uefi::println!(
+                    "[BOOT] Kernel command line: \"{}\" ({} bytes)",
+                    boot_cfg.cmdline,
+                    cmdline_len
+                );
+                dst
             }
-            uefi::println!(
-                "[BOOT] Kernel command line: \"{}\" ({} bytes)",
-                core::str::from_utf8(DEFAULT_CMDLINE).unwrap_or("???"),
-                cmdline_len
-            );
-            dst
+            Err(_) => {
+                uefi::println!("[BOOT] Warning: Failed to allocate cmdline buffer");
+                core::ptr::null_mut()
+            }
         }
-        Err(_) => {
-            uefi::println!("[BOOT] Warning: Failed to allocate cmdline buffer");
-            core::ptr::null_mut()
-        }
+    } else {
+        core::ptr::null_mut()
     };
 
     // ------------------------------------------------------------------------
@@ -247,20 +323,33 @@ fn main() -> uefi::Status {
             cmdline_len,
             kernel_image_start: loaded_kernel.image_start,
             kernel_image_size: loaded_kernel.image_size,
+            initramfs_addr,
+            initramfs_size,
         });
 
         serial_println!(
-            "[BOOT] Handing off to kernel at {:#x} with BootInfo at {:#x}...",
+            "[BOOT] Handing off to kernel at {:#x} with BootInfo at {:#x} (initramfs={} bytes)...",
             loaded_kernel.entry_point,
-            boot_info_ptr as u64
+            boot_info_ptr as u64,
+            initramfs_size
         );
 
+        #[cfg(target_arch = "x86_64")]
         // Populate both %rdi (System V AMD64 ABI) and %rcx (Microsoft x64 ABI)
         // to guarantee seamless calling-convention compatibility when leaping into `kernel_main`.
         core::arch::asm!(
             "jmp {entry}",
             in("rdi") boot_info_ptr as u64,
             in("rcx") boot_info_ptr as u64,
+            entry = in(reg) loaded_kernel.entry_point,
+            options(noreturn)
+        );
+
+        #[cfg(target_arch = "aarch64")]
+        // Populate x0 (AAPCS64 first argument register) and branch directly into kernel entry.
+        core::arch::asm!(
+            "br {entry}",
+            in("x0") boot_info_ptr as u64,
             entry = in(reg) loaded_kernel.entry_point,
             options(noreturn)
         );

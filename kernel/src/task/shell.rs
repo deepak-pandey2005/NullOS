@@ -1961,7 +1961,17 @@ pub fn run_automated_tests() {
     assert_eq!(execute_command("dbg locks"), 0, "dbg locks must succeed");
     assert_eq!(execute_command("dbg crash"), 0, "dbg crash must display recorded snapshots");
 
-    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 & 18 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio, ACPI/Power, Dynamic Linking, Storage, High-Perf Networking, Kernel Profiling, Optimization, SDK and Debugging tests passed successfully!");
+    println!("[SHELL] 33. Testing Bootable Distribution Initramfs, Userspace & Release Metadata (M41)...");
+    assert!(VFS.resolve_path("/etc/nullos-release").is_ok(), "initramfs must populate /etc/nullos-release");
+    assert!(VFS.resolve_path("/bin/hello.elf").is_ok(), "initramfs must populate /bin/hello.elf");
+    assert!(VFS.resolve_path("/bin/cat.elf").is_ok(), "initramfs must populate /bin/cat.elf");
+    assert!(VFS.resolve_path("/bin/threads.elf").is_ok(), "initramfs must populate /bin/threads.elf");
+    assert!(VFS.resolve_path("/lib/libc.so").is_ok(), "initramfs must populate /lib/libc.so");
+    assert!(VFS.resolve_path("/pkg/sdk_demo.npkg").is_ok(), "initramfs must populate /pkg/sdk_demo.npkg");
+    assert_eq!(execute_command("cat /etc/nullos-release"), 0, "cat /etc/nullos-release must succeed");
+    assert_eq!(execute_command("pkg inspect /pkg/sdk_demo.npkg"), 0, "pkg inspect /pkg/sdk_demo.npkg must succeed");
+
+    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 & 19 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio, ACPI/Power, Dynamic Linking, Storage, High-Perf Networking, Kernel Profiling, Optimization, SDK, Debugging and Distribution tests passed successfully!");
 }
 
 /// Interactive Shell Loop that listens on USB Keyboard, PS/2 Keyboard, and COM1 serial input

@@ -181,6 +181,14 @@ pub fn init(boot_info: &'static BootInfo) {
         );
     }
 
+    // e2. Bootloader-loaded USTAR initramfs archive
+    if boot_info.initramfs_addr != 0 && boot_info.initramfs_size > 0 {
+        allocator.reserve_range(
+            PhysAddr::new(boot_info.initramfs_addr),
+            boot_info.initramfs_size as u64,
+        );
+    }
+
     // f. Framebuffer MMIO (if within physical memory limit)
     if boot_info.framebuffer.address != 0 && boot_info.framebuffer.address < max_phys_addr {
         allocator.reserve_range(

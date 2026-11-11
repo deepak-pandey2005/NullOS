@@ -431,11 +431,18 @@ impl RamFs {
     }
 
     /// Recursively populates directories and files from a parsed TAR archive.
-    #[allow(dead_code)]
-    pub fn populate_from_tar(&self, archive: &TarArchive) {
+    ///
+    /// Normalizes leading slashes and `.` path components so POSIX USTAR archives
+    /// packed relative to a staging directory (`./bin/...` or `bin/...`) map directly
+    /// under `/bin/...`, `/lib/...`, `/etc/...`, and `/pkg/...`.
+    pub fn populate_from_tar(&self, archive: &TarArchive) -> usize {
+        let mut unpacked_entries = 0usize;
         for entry in TarArchive::new(archive.data) {
             let path = entry.name.trim_start_matches('/');
-            let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+            let segments: Vec<&str> = path
+                .split('/')
+                .filter(|s| !s.is_empty() && *s != ".")
+                .collect();
             if segments.is_empty() {
                 continue;
             }
@@ -460,6 +467,7 @@ impl RamFs {
                 TarType::NormalFile => {
                     let file = Arc::new(RamFile::new(entry.data, entry.mode));
                     current_dir.insert_child(leaf_name, file);
+                    unpacked_entries += 1;
                 }
                 TarType::Directory => {
                     if current_dir.get_dir(leaf_name).is_none() {
@@ -470,6 +478,7 @@ impl RamFs {
                 _ => {}
             }
         }
+        unpacked_entries
     }
 }
 

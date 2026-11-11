@@ -26,7 +26,10 @@ use core::fmt;
 /// 6. Asserts Request-To-Send (RTS) and Data-Terminal-Ready (DTR) lines (`MCR = 0x0B`).
 ///
 /// # Safety
-/// Performs raw I/O port instructions (`outb`) to legacy PC ports `0x3F8..0x3FD`.
+/// Performs raw I/O port instructions (`outb`) to legacy PC ports `0x3F8..0x3FD` on `x86_64`.
+/// On non-x86 architectures (such as `aarch64`), COM port I/O instructions do not exist,
+/// so serial output relies cleanly on UEFI `ConOut` firmware protocols instead.
+#[cfg(target_arch = "x86_64")]
 pub unsafe fn init() {
     unsafe {
         // Step 1: Disable UART interrupts for clean polling operation
@@ -50,10 +53,15 @@ pub unsafe fn init() {
     }
 }
 
+/// No-op early UART initializer on architectures without x86 port-mapped COM1 I/O.
+#[cfg(not(target_arch = "x86_64"))]
+pub unsafe fn init() {}
+
 /// Transmits a single byte over COM1, blocking until the transmitter FIFO is ready.
 ///
 /// Polls Line Status Register (LSR at `0x3FD`) until bit 5 (Transmitter Holding
 /// Register Empty - THRE) is asserted before writing the byte to port `0x3F8`.
+#[cfg(target_arch = "x86_64")]
 pub fn write_byte(b: u8) {
     unsafe {
         let mut status: u8;
@@ -66,6 +74,10 @@ pub fn write_byte(b: u8) {
         core::arch::asm!("out dx, al", in("dx") 0x3F8u16, in("al") b, options(nomem, nostack));
     }
 }
+
+/// Safe no-op byte transmitter on non-x86 architectures after `ExitBootServices`.
+#[cfg(not(target_arch = "x86_64"))]
+pub fn write_byte(_b: u8) {}
 
 /// Transmits a string slice over COM1 with automatic CRLF (`\r\n`) normalization.
 pub fn write_str(s: &str) {

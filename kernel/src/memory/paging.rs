@@ -615,6 +615,15 @@ pub fn init(boot_info: &'static BootInfo) {
         .expect("Failed to map cmdline buffer");
     }
 
+    if boot_info.initramfs_addr != 0 && boot_info.initramfs_size > 0 {
+        kpt.identity_map_range(
+            PhysAddr::new(boot_info.initramfs_addr),
+            boot_info.initramfs_size as u64,
+            PageTableFlags::PRESENT,
+        )
+        .expect("Failed to map initramfs buffer");
+    }
+
     // e. Framebuffer MMIO (with Cache-Disable / Write-Through)
     if boot_info.framebuffer.address != 0 && boot_info.framebuffer.size > 0 {
         kpt.identity_map_range(

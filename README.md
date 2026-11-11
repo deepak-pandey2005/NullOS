@@ -620,17 +620,17 @@ scripts\windows\run.bat --headless    # Run automated headless test suite
 # Phase 19 — Release
 
 ### M41 — Bootable NullOS Distribution
-- [ ] x86_64 UEFI image
-- [ ] AArch64 UEFI image
-- [ ] FAT32 ESP
-- [ ] Kernel image
-- [ ] Initramfs
-- [ ] Userspace
-- [ ] Boot configuration
-- [ ] QEMU testing
-- [ ] Real hardware testing
-- [ ] Release build
-- [ ] Installation documentation
+- [x] x86_64 UEFI image (`BOOTX64.EFI` + GPT bootable image)
+- [x] AArch64 UEFI image (`BOOTAA64.EFI` verified under QEMU AAVMF; kernel HAL remains x86_64)
+- [x] FAT32 ESP (62 MiB `NULLOS_ESP` GPT partition layout)
+- [x] Kernel image (`kernel.elf` debug/release + `KERNEL.SYM`)
+- [x] Initramfs (`initramfs.tar` USTAR archive unpacked into `/` by RamFS)
+- [x] Userspace (`hello.elf`, `cat.elf`, `threads.elf`, `async_test.elf`, `dyn_test.elf`, `dyn_hello.elf`, `libc.so`, `sdk_demo.elf`, `sdk_demo.npkg`)
+- [x] Boot configuration (`nullos.cfg` parsed by UEFI bootloader)
+- [x] QEMU testing (x86_64 OVMF debug/release tests 1–33 + AArch64 AAVMF UEFI smoke test)
+- [ ] Real hardware testing (USB flasher & `--verify` ready in `scripts/create_bootable_usb.sh`; physical bare-metal boot pending host USB hardware)
+- [x] Release build (`scripts/release.sh` -> `build/release/` + `SHA256SUMS` + `RELEASE_MANIFEST.txt`)
+- [x] Installation documentation (`docs/INSTALLATION.md`)
 
 ### M42 — Reliability
 - [ ] Kernel unit tests
@@ -728,5 +728,5 @@ sudo ./scripts/create_bootable_usb.sh --device /dev/sdX
 ## Checkpoint 9 — Release
 - [x] M39
 - [x] M40
-- [ ] M41
+- [x] M41
 - [ ] M42

@@ -19,7 +19,12 @@ pub const ELFCLASS64: u8 = 2;
 pub const ELFDATA2LSB: u8 = 1;
 
 /// ELF Machine Architecture: Advanced Micro Devices x86-64 (`EM_X86_64` = `0x3E`).
+#[allow(dead_code)]
 pub const EM_X86_64: u16 = 0x3E;
+
+/// ELF Machine Architecture: ARM 64-bit / AArch64 (`EM_AARCH64` = `0xB7`).
+#[allow(dead_code)]
+pub const EM_AARCH64: u16 = 0xB7;
 
 /// ELF Object Type: Standard static executable (`ET_EXEC` = 2).
 pub const ET_EXEC: u16 = 2;
@@ -101,13 +106,36 @@ pub struct LoadedKernel {
     pub image_size: u64,
 }
 
+/// Reads the ELF64 header from a raw byte slice and returns its `e_machine` target ID.
+///
+/// Validates ELF magic bytes, 64-bit class (`ELFCLASS64`), and little-endian encoding.
+#[allow(dead_code)]
+pub fn inspect_elf_machine(elf_data: &[u8]) -> Result<u16, &'static str> {
+    if elf_data.len() < core::mem::size_of::<Elf64Header>() {
+        return Err("ELF file too small for header");
+    }
+    let header_ptr = elf_data.as_ptr() as *const Elf64Header;
+    let header = unsafe { ptr::read_unaligned(header_ptr) };
+
+    if header.e_ident[0..4] != ELF_MAGIC {
+        return Err("Invalid ELF magic");
+    }
+    if header.e_ident[4] != ELFCLASS64 {
+        return Err("Not a 64-bit ELF");
+    }
+    if header.e_ident[5] != ELFDATA2LSB {
+        return Err("Not little-endian ELF");
+    }
+    Ok(header.e_machine)
+}
+
 /// Parses an ELF64 binary and maps all loadable segments (`PT_LOAD`) into memory.
 ///
 /// # Validation Steps
 /// 1. Verifies that the buffer contains at least 64 bytes for `Elf64Header`.
 /// 2. Validates the 4-byte ELF Magic sequence (`0x7F 'E' 'L' 'F'`).
 /// 3. Confirms 64-bit architecture (`ELFCLASS64`) and little-endian encoding (`ELFDATA2LSB`).
-/// 4. Confirms AMD x86-64 target architecture (`EM_X86_64`).
+/// 4. Confirms host target machine architecture (`EM_X86_64` on x86_64, `EM_AARCH64` on aarch64).
 /// 5. Verifies object type is either `ET_EXEC` or `ET_DYN`.
 ///
 /// # Segment Loading Algorithm
@@ -143,9 +171,14 @@ pub fn load_elf(elf_data: &[u8]) -> Result<LoadedKernel, &'static str> {
         return Err("Not little-endian ELF");
     }
 
-    // Step 4: Validate x86_64 machine type
+    // Step 4: Validate architecture machine type matching active UEFI build target
+    #[cfg(target_arch = "x86_64")]
     if header.e_machine != EM_X86_64 {
         return Err("Not an x86_64 ELF");
+    }
+    #[cfg(target_arch = "aarch64")]
+    if header.e_machine != EM_AARCH64 {
+        return Err("Not an AArch64 ELF");
     }
 
     // Step 5: Validate supported executable object types

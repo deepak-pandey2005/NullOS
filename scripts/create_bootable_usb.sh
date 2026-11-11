@@ -31,29 +31,50 @@ print_banner() {
 }
 
 print_help() {
-    echo "Usage: sudo $0 [OPTIONS]"
+    echo "Usage: $0 [OPTIONS]"
     echo
     echo "Options:"
-    echo "  -d, --device <dev>   Target device (e.g., /dev/sdb or sdb)"
+    echo "  -d, --device <dev>   Target device (e.g., /dev/sdb or sdb) [requires sudo]"
+    echo "  -i, --image <path>   Custom GPT disk image path (default: build/disk.img)"
+    echo "  -r, --release        Use release distribution image (build/release/nullos-0.1.0-x86_64.img)"
+    echo "  -v, --verify         Verify GPT partition table and FAT32 ESP files (non-destructive)"
     echo "  -b, --build          Rebuild bootloader and kernel before flashing"
     echo "  -y, --yes            Skip confirmation prompt (CAUTION)"
     echo "  -h, --help           Display this help guide"
     echo
     echo "Examples:"
-    echo "  sudo $0                     # Interactive drive selection"
-    echo "  sudo $0 --device /dev/sdc   # Flash to /dev/sdc with confirmation"
-    echo "  sudo $0 -b -d sdc           # Rebuild and flash to /dev/sdc"
+    echo "  $0 --verify                          # Verify GPT + FAT32 ESP contents"
+    echo "  $0 --verify --release                # Verify release distribution image"
+    echo "  sudo $0                              # Interactive drive selection"
+    echo "  sudo $0 --release --device /dev/sdc  # Flash release image to /dev/sdc"
+    echo "  sudo $0 -b -d sdc                    # Rebuild and flash to /dev/sdc"
 }
 
 TARGET_DEV=""
+CUSTOM_IMG=""
+USE_RELEASE=0
+VERIFY_ONLY=0
 REBUILD=0
 AUTO_CONFIRM=0
+ORIG_ARGS=("$@")
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -d|--device)
             TARGET_DEV="$2"
             shift 2
+            ;;
+        -i|--image)
+            CUSTOM_IMG="$2"
+            shift 2
+            ;;
+        -r|--release)
+            USE_RELEASE=1
+            shift
+            ;;
+        -v|--verify)
+            VERIFY_ONLY=1
+            shift
             ;;
         -b|--build)
             REBUILD=1
@@ -76,26 +97,71 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ -n "${CUSTOM_IMG}" ]]; then
+    DISK_IMG="${CUSTOM_IMG}"
+elif [[ "${USE_RELEASE}" -eq 1 ]]; then
+    DISK_IMG="${BUILD_DIR}/release/nullos-0.1.0-x86_64.img"
+fi
+
+verify_image_layout() {
+    local img="$1"
+    if [[ ! -f "${img}" ]]; then
+        echo -e "${RED}[ERROR] Image not found: ${img}${NC}"
+        exit 1
+    fi
+    echo -e "${BLUE}[*] Verifying GPT partition table in ${img}...${NC}"
+    parted -s "${img}" unit MiB print
+
+    echo -e "${BLUE}[*] Verifying FAT32 ESP contents (partition @ 1MiB)...${NC}"
+    mdir -i "${img}@@1M" ::
+    mdir -i "${img}@@1M" ::/EFI/BOOT
+
+    local missing=0
+    for req in "::/EFI/BOOT/BOOTX64.EFI" "::/EFI/BOOT/BOOTAA64.EFI" "::/kernel.elf" "::/initramfs.tar" "::/nullos.cfg" "::/startup.nsh"; do
+        if ! mdir -i "${img}@@1M" "${req}" >/dev/null 2>&1; then
+            echo -e "${RED}[ERROR] Missing required ESP file: ${req}${NC}"
+            missing=1
+        fi
+    done
+    if [[ "${missing}" -ne 0 ]]; then
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] Hardware USB boot image verified: GPT + FAT32 ESP + dual-arch UEFI + kernel + initramfs + nullos.cfg.${NC}"
+}
+
 print_banner
+
+if [[ "${VERIFY_ONLY}" -eq 1 ]]; then
+    if [[ "${REBUILD}" -eq 1 ]]; then
+        if [[ "${USE_RELEASE}" -eq 1 ]]; then
+            "${ROOT_DIR}/scripts/release.sh"
+        else
+            "${ROOT_DIR}/scripts/build.sh"
+        fi
+    fi
+    verify_image_layout "${DISK_IMG}"
+    exit 0
+fi
 
 # 1. Require root privileges for raw device operations
 if [[ $EUID -ne 0 ]]; then
     echo -e "${YELLOW}[!] This script requires root permissions to write to block devices.${NC}"
     echo -e "${YELLOW}[!] Re-running with sudo...${NC}"
-    exec sudo "$0" "$@"
+    exec sudo "$0" "${ORIG_ARGS[@]}"
 fi
 
 # 2. Rebuild binaries and disk image if requested or missing
 if [[ $REBUILD -eq 1 || ! -f "${DISK_IMG}" ]]; then
     echo -e "${BLUE}[*] Building NullOS UEFI Bootloader, Kernel, and GPT Disk Image...${NC}"
-    "${ROOT_DIR}/scripts/build.sh"
+    if [[ "${USE_RELEASE}" -eq 1 ]]; then
+        "${ROOT_DIR}/scripts/release.sh"
+    else
+        "${ROOT_DIR}/scripts/build.sh"
+    fi
     echo
 fi
 
-if [[ ! -f "${DISK_IMG}" ]]; then
-    echo -e "${RED}[ERROR] Disk image not found at ${DISK_IMG}. Please run ./scripts/build.sh first.${NC}"
-    exit 1
-fi
+verify_image_layout "${DISK_IMG}"
 
 # 3. Detect and list storage devices
 echo -e "${CYAN}${BOLD}Detected Storage Devices:${NC}"

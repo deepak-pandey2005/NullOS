@@ -45,12 +45,14 @@ use self::vfs::{OpenFlags, VFS};
 ///    - `/dev/null`: Data sink that discards writes and returns EOF on reads.
 ///    - `/dev/zero`: Infinite stream of zero bytes on reads.
 ///    - System directories: `/dev`, `/bin`, `/lib`, `/etc`, `/tmp`, `/disk`, `/mnt`.
-/// 3. Registers and mounts the instantiated RamFS at the root mountpoint `"/"`.
+/// 3. If an external USTAR `initramfs.tar` image was loaded by the UEFI bootloader,
+///    unpacks all packaged userspace binaries, libraries, and config files into `"/"`.
+/// 4. Registers and mounts the instantiated RamFS at the root mountpoint `"/"`.
 ///
 /// # Panics / Errors
 /// If the root filesystem fails to mount into the VFS, an error is logged to the console
 /// and the system proceeds in a degraded state without a valid root hierarchy.
-pub fn init() {
+pub fn init(initramfs_data: Option<&[u8]>) {
     println!();
     println!("----------------------------------------");
     println!(" [FS] Initializing Filesystems & VFS    ");
@@ -61,6 +63,20 @@ pub fn init() {
     // Pre-populate standard directory structures and devices
     ramfs.populate_defaults();
 
+    // Overlay external USTAR initramfs payload if passed by the UEFI bootloader
+    let mut unpacked_count = 0usize;
+    if let Some(archive_bytes) = initramfs_data {
+        if !archive_bytes.is_empty() {
+            let archive = TarArchive::new(archive_bytes);
+            unpacked_count = ramfs.populate_from_tar(&archive);
+            println!(
+                "[FS] Unpacked {} files from UEFI-loaded initramfs.tar ({} bytes).",
+                unpacked_count,
+                archive_bytes.len()
+            );
+        }
+    }
+
     // Mount RamFS as root ("/") in the global VFS mount table
     if let Err(e) = VFS.mount("/", ramfs) {
         println!("[FS] Failed to mount root filesystem: {:?}", e);
@@ -68,7 +84,10 @@ pub fn init() {
     }
 
     println!("[FS] Virtual File System (VFS) active.");
-    println!("[FS] Mounted RamFS initramfs at \"/\".");
+    println!(
+        "[FS] Mounted RamFS initramfs at \"/\" (external_entries={}).",
+        unpacked_count
+    );
     println!("[FS] Initialized standard device nodes: /dev/console, /dev/null, /dev/zero.");
 }
 
