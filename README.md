@@ -536,14 +536,14 @@ scripts\windows\run.bat --headless    # Run automated headless test suite
 # Phase 15 — Advanced Storage
 
 ### M35 — Storage Subsystem
-- [ ] Page cache
-- [ ] Write-back cache
-- [ ] Block cache
-- [ ] I/O scheduler
-- [ ] Asynchronous block I/O
-- [ ] Journaling
-- [ ] NVMe driver
-- [ ] Storage benchmarking
+- [x] Page cache
+- [x] Write-back cache
+- [x] Block cache
+- [x] I/O scheduler
+- [x] Asynchronous block I/O
+- [x] Journaling
+- [x] NVMe driver
+- [x] Storage benchmarking
 
 ---
 
@@ -720,7 +720,7 @@ sudo ./scripts/create_bootable_usb.sh --device /dev/sdX
 - [x] M34
 
 ## Checkpoint 8 — High-Performance OS
-- [ ] M35
+- [x] M35
 - [ ] M36
 - [ ] M37
 - [ ] M38

@@ -476,6 +476,9 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str("  reboot               - Reboot machine via ACPI RESET_REG, 8042, or PCI (M33)\n");
             out.push_str("  ldd <path>           - Inspect ELF dynamic library dependencies & relocations (M34)\n");
             out.push_str("  libs                 - Display loaded dynamic shared libraries & base addresses (M34)\n");
+            out.push_str("  nvme                 - List detected NVMe PCIe controllers and namespaces (M35)\n");
+            out.push_str("  storage / cache      - Inspect Block/Page Cache, I/O Scheduler & WAL Journal (M35)\n");
+            out.push_str("  diskbench            - Run cycle-accurate Storage Subsystem benchmarks (M35)\n");
             out.push_str("  test                 - Run comprehensive automated subsystem & shell tests\n");
             out.push_str("  gui                  - Launch Desktop Window Manager & Compositor demo (M30)\n");
             out.push_str("  mem                  - Display physical memory manager statistics\n");
@@ -1307,6 +1310,33 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
                 Err(e) => (alloc::format!("exec: cannot open '{}': {:?}\n", resolved, e), 1),
             }
         }
+        "nvme" => {
+            let ctrls = crate::drivers::nvme::controllers();
+            if ctrls.is_empty() {
+                ("No NVMe PCIe controllers detected.\n".to_string(), 0)
+            } else {
+                let mut out = String::from("Detected NVMe PCIe Storage Controllers:\n");
+                for (idx, c) in ctrls.iter().enumerate() {
+                    out.push_str(&alloc::format!(
+                        "  [nvme{}] PCI {:02x}:{:02x}.{} | NVMe {}.{} | Model: \"{}\" | Serial: \"{}\" | FW: \"{}\"\n",
+                        idx, c.pci_bus, c.pci_dev, c.pci_func, c.version_major, c.version_minor, c.model, c.serial, c.firmware
+                    ));
+                    out.push_str(&alloc::format!(
+                        "          Queue Depth: {} | Doorbell Stride: {}B | Namespaces: {} | NS1: {} x {}B\n",
+                        c.max_queue_entries, c.doorbell_stride, c.namespaces, c.ns1_sectors, c.ns1_sector_size
+                    ));
+                }
+                (out, 0)
+            }
+        }
+        "storage" | "cache" => {
+            crate::storage::print_status();
+            (String::new(), 0)
+        }
+        "diskbench" => {
+            crate::storage::bench::run_benchmarks();
+            (String::new(), 0)
+        }
         unknown => {
             // Check PATH environment variable and current directory for executable binaries
             let mut candidates = Vec::new();
@@ -1796,7 +1826,13 @@ pub fn run_automated_tests() {
     }
     execute_command("libs");
 
-    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12, 13 & 14 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio, ACPI/Power and Dynamic Linking tests passed successfully!");
+    println!("[SHELL] 27. Testing Advanced Storage Subsystem, Caches, I/O Scheduler, Async I/O, Journal & NVMe (M35)...");
+    execute_command("nvme");
+    execute_command("storage");
+    crate::storage::run_self_tests();
+    execute_command("storage");
+
+    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12, 13, 14 & 15 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio, ACPI/Power, Dynamic Linking and Advanced Storage tests passed successfully!");
 }
 
 /// Interactive Shell Loop that listens on USB Keyboard, PS/2 Keyboard, and COM1 serial input

@@ -82,6 +82,38 @@ pub trait BlockDevice: Send + Sync {
     fn flush(&self) -> Result<(), BlockError> {
         Ok(())
     }
+
+    /// Reads multiple contiguous sectors starting at `start_sector` into `buf`.
+    ///
+    /// Default implementation loops sector-by-sector; drivers may override this
+    /// for multi-block DMA batching.
+    fn read_sectors(&self, start_sector: u64, count: usize, buf: &mut [u8]) -> Result<(), BlockError> {
+        let sec_size = self.sector_size();
+        if buf.len() < count * sec_size {
+            return Err(BlockError::BufferTooSmall);
+        }
+        for i in 0..count {
+            let offset = i * sec_size;
+            self.read_sector(start_sector + i as u64, &mut buf[offset..offset + sec_size])?;
+        }
+        Ok(())
+    }
+
+    /// Writes multiple contiguous sectors starting at `start_sector` from `buf`.
+    ///
+    /// Default implementation loops sector-by-sector; drivers may override this
+    /// for multi-block DMA batching.
+    fn write_sectors(&self, start_sector: u64, count: usize, buf: &[u8]) -> Result<(), BlockError> {
+        let sec_size = self.sector_size();
+        if buf.len() < count * sec_size {
+            return Err(BlockError::BufferTooSmall);
+        }
+        for i in 0..count {
+            let offset = i * sec_size;
+            self.write_sector(start_sector + i as u64, &buf[offset..offset + sec_size])?;
+        }
+        Ok(())
+    }
 }
 
 /// Global thread-safe registry of discovered and initialized block devices.
@@ -97,4 +129,24 @@ pub fn register_block_device(device: Arc<dyn BlockDevice>) {
 /// Returns the primary registered block device, if any is available.
 pub fn primary_device() -> Option<Arc<dyn BlockDevice>> {
     BLOCK_DEVICES.lock().first().cloned()
+}
+
+/// Looks up a registered block device by its name (e.g., `"virtio0"`, `"nvme0n1"`).
+pub fn get_device(name: &str) -> Option<Arc<dyn BlockDevice>> {
+    BLOCK_DEVICES
+        .lock()
+        .iter()
+        .find(|d| d.name() == name)
+        .cloned()
+}
+
+/// Returns a snapshot vector of all registered block devices.
+pub fn all_devices() -> Vec<Arc<dyn BlockDevice>> {
+    BLOCK_DEVICES.lock().clone()
+}
+
+/// Returns the total number of registered block devices.
+#[allow(dead_code)]
+pub fn device_count() -> usize {
+    BLOCK_DEVICES.lock().len()
 }

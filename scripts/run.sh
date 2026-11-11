@@ -9,6 +9,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 DISK_IMG="${ROOT_DIR}/build/disk.img"
 DATA_DISK_IMG="${ROOT_DIR}/build/data.img"
+NVME_DISK_IMG="${ROOT_DIR}/build/nvme.img"
 SERIAL_LOG="${ROOT_DIR}/build/serial.log"
 rm -f "${SERIAL_LOG}"
 
@@ -58,6 +59,8 @@ QEMU_ARGS=(
     -bios "${OVMF_PATH}"
     -drive "format=raw,file=${DISK_IMG}"
     -drive "format=raw,file=${DATA_DISK_IMG},if=virtio"
+    -drive "if=none,id=nvmedrv,format=raw,file=${NVME_DISK_IMG}"
+    -device nvme,serial=NULLOS-NVME-01,drive=nvmedrv
     -serial stdio
     -no-reboot
 )
@@ -66,8 +69,10 @@ if [[ "${1:-}" == "--headless" || "${1:-}" == "--test" ]]; then
     echo "==> Running QEMU in headless test mode..."
     TEST_DISK="${ROOT_DIR}/build/test_disk.img"
     TEST_DATA="${ROOT_DIR}/build/test_data.img"
+    TEST_NVME="${ROOT_DIR}/build/test_nvme.img"
     cp "${DISK_IMG}" "${TEST_DISK}"
     cp "${DATA_DISK_IMG}" "${TEST_DATA}"
+    cp "${NVME_DISK_IMG}" "${TEST_NVME}"
 
     HEADLESS_ARGS=(
         -machine q35
@@ -85,6 +90,8 @@ if [[ "${1:-}" == "--headless" || "${1:-}" == "--test" ]]; then
         -bios "${OVMF_PATH}"
         -drive "format=raw,file=${TEST_DISK}"
         -drive "format=raw,file=${TEST_DATA},if=virtio"
+        -drive "if=none,id=nvmedrv,format=raw,file=${TEST_NVME}"
+        -device nvme,serial=NULLOS-NVME-01,drive=nvmedrv
         -serial stdio
         -no-reboot
         -display none
@@ -111,7 +118,7 @@ if [[ "${1:-}" == "--headless" || "${1:-}" == "--test" ]]; then
     
     kill "${QEMU_PID}" 2>/dev/null || true
     wait "${QEMU_PID}" 2>/dev/null || true
-    rm -f "${TEST_DISK}" "${TEST_DATA}"
+    rm -f "${TEST_DISK}" "${TEST_DATA}" "${TEST_NVME}"
     
     echo "==> Serial Log:"
     if [ -f "${SERIAL_LOG}" ]; then

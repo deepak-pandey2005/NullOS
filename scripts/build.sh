@@ -96,4 +96,11 @@ if [ -f "${ROOT_DIR}/user/build/bin/dyn_hello.elf" ]; then
     echo "==> Copied DYN_HELLO.ELF to FAT32 data disk."
 fi
 
+# 4. Create an 8MB NVMe disk image if not present
+NVME_DISK_IMG="${BUILD_DIR}/nvme.img"
+if [ ! -f "${NVME_DISK_IMG}" ]; then
+    truncate -s 8M "${NVME_DISK_IMG}"
+    echo "==> Created 8MB NVMe backing image at ${NVME_DISK_IMG}"
+fi
+
 

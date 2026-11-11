@@ -7,6 +7,7 @@
 //! - **[`keyboard`]**: PS/2 keyboard controller driver with scancode set 1 decoding and modifier tracking.
 //! - **[`pci`]**: PCI configuration space mechanism #1 and device bus enumeration.
 //! - **[`block`]**: Abstract [`block::BlockDevice`] trait interface for persistent storage.
+//! - **[`nvme`]**: PCIe Non-Volatile Memory Express (NVMe) storage controller driver.
 //! - **[`virtio_blk`]**: VirtIO modern PCI block storage driver implementing the BlockDevice trait.
 //! - **[`virtio_net`]**: VirtIO modern PCI network adapter driver with transmit/receive virtqueues.
 //! - **[`usb`]**: Extensible Host Controller Interface (USB 3.0 xHCI) and USB HID mouse/keyboard drivers.
@@ -16,6 +17,7 @@ pub mod audio;
 pub mod block;
 pub mod console;
 pub mod keyboard;
+pub mod nvme;
 pub mod pci;
 pub mod serial;
 pub mod usb;

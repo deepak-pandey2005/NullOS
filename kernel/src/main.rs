@@ -56,6 +56,7 @@ mod ipc;
 mod memory;
 mod net;
 mod security;
+mod storage;
 mod sync;
 mod task;
 
@@ -210,6 +211,13 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // If no VirtIO disk is detected, the kernel boots using the in-memory RamFS ('/').
     drivers::virtio_blk::init();
     drivers::virtio_blk::run_self_tests();
+
+    // Initialize PCIe NVMe Storage Controller Driver (Phase 15 - M35)
+    drivers::nvme::init();
+    drivers::nvme::run_self_tests();
+
+    // Initialize Advanced Storage Subsystem (Block/Page Cache, I/O Scheduler, Async I/O, WAL Journal)
+    storage::init();
 
     // Mount Persistent Block Storage Filesystems (Phase 6 - M19 Filesystems)
     fs::mount_block_devices();
