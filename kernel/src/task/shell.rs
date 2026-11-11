@@ -481,6 +481,9 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str("  diskbench            - Run cycle-accurate Storage Subsystem benchmarks (M35)\n");
             out.push_str("  netperf              - Inspect Buffer Pool, NAPI Poller, Batching & RSS Queues (M36)\n");
             out.push_str("  netbench             - Run cycle-accurate High-Performance Networking benchmarks (M36)\n");
+            out.push_str("  perfstat             - Inspect TSC, PMU, Latencies, Lock Contention & CPU Util (M37)\n");
+            out.push_str("  kbench               - Run Memory Alloc & Thread Context-Switch benchmarks (M37)\n");
+            out.push_str("  trace [N]            - Dump recent kernel tracepoints from circular ring buffer (M37)\n");
             out.push_str("  test                 - Run comprehensive automated subsystem & shell tests\n");
             out.push_str("  gui                  - Launch Desktop Window Manager & Compositor demo (M30)\n");
             out.push_str("  mem                  - Display physical memory manager statistics\n");
@@ -1347,6 +1350,19 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             crate::net::perf::bench::run_benchmarks();
             (String::new(), 0)
         }
+        "perfstat" => {
+            crate::perf::print_status();
+            (String::new(), 0)
+        }
+        "kbench" | "perfbench" => {
+            crate::perf::bench::run_benchmarks();
+            (String::new(), 0)
+        }
+        "trace" => {
+            let count = args.get(1).and_then(|s| s.parse::<usize>().ok()).unwrap_or(16);
+            crate::perf::trace::dump_recent(count);
+            (String::new(), 0)
+        }
         unknown => {
             // Check PATH environment variable and current directory for executable binaries
             let mut candidates = Vec::new();
@@ -1847,7 +1863,13 @@ pub fn run_automated_tests() {
     crate::net::perf::run_self_tests();
     execute_command("netperf");
 
-    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12, 13, 14, 15 & 16 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio, ACPI/Power, Dynamic Linking, Storage and High-Perf Networking tests passed successfully!");
+    println!("[SHELL] 29. Testing Kernel Profiling, TSC/PMU, Tracepoints, Latency Histograms, Lock Contention & Benchmarks (M37)...");
+    execute_command("perfstat");
+    crate::perf::run_self_tests();
+    execute_command("trace 8");
+    execute_command("perfstat");
+
+    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 & 17 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio, ACPI/Power, Dynamic Linking, Storage, High-Perf Networking and Kernel Profiling tests passed successfully!");
 }
 
 /// Interactive Shell Loop that listens on USB Keyboard, PS/2 Keyboard, and COM1 serial input

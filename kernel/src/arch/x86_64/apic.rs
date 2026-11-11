@@ -122,6 +122,12 @@ unsafe fn write_lapic(offset: usize, value: u32) {
     }
 }
 
+/// Returns the hardware Local APIC ID (`0..255`) of the currently executing CPU core.
+#[inline]
+pub fn current_apic_id() -> u8 {
+    unsafe { ((read_lapic(LAPIC_ID) >> 24) & 0xFF) as u8 }
+}
+
 /// Signals End of Interrupt (EOI) to the Local APIC.
 ///
 /// Must be written at the conclusion of every hardware interrupt service routine

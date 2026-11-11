@@ -564,18 +564,18 @@ scripts\windows\run.bat --headless    # Run automated headless test suite
 # Phase 17 — Performance Engineering
 
 ### M37 — Kernel Profiling
-- [ ] TSC support
-- [ ] Cycle counters
-- [ ] CPU performance counters
-- [ ] Kernel tracing
-- [ ] Tracepoints
-- [ ] Scheduler latency measurement
-- [ ] Syscall latency measurement
-- [ ] Interrupt latency measurement
-- [ ] Memory allocation benchmarks
-- [ ] Context-switch benchmarks
-- [ ] Lock contention measurement
-- [ ] CPU utilization metrics
+- [x] TSC support
+- [x] Cycle counters
+- [x] CPU performance counters
+- [x] Kernel tracing
+- [x] Tracepoints
+- [x] Scheduler latency measurement
+- [x] Syscall latency measurement
+- [x] Interrupt latency measurement
+- [x] Memory allocation benchmarks
+- [x] Context-switch benchmarks
+- [x] Lock contention measurement
+- [x] CPU utilization metrics
 
 ### M38 — Kernel Optimization
 - [ ] Scheduler optimization
@@ -722,7 +722,7 @@ sudo ./scripts/create_bootable_usb.sh --device /dev/sdX
 ## Checkpoint 8 — High-Performance OS
 - [x] M35
 - [x] M36
-- [ ] M37
+- [x] M37
 - [ ] M38
 
 ## Checkpoint 9 — Release

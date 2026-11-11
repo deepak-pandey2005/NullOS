@@ -55,6 +55,7 @@ mod graphics;
 mod ipc;
 mod memory;
 mod net;
+mod perf;
 mod security;
 mod storage;
 mod sync;
@@ -159,6 +160,9 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // Test timer interrupt & sleep primitive
     apic::sleep(10);
     println!("[KERNEL] APIC Timer verified: {} ticks recorded.", apic::get_ticks());
+
+    // Initialize Phase 17 M37 Kernel Profiling (TSC calibration, PMU & Tracepoints)
+    perf::init();
 
     // Initialize Physical Memory Manager (Phase 3 - M7, M8, M9)
     memory::init(boot_info);

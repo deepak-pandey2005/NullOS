@@ -156,6 +156,7 @@ pub fn yield_now() {
         (prev_rsp_ptr, next_rsp)
     };
 
+    crate::perf::pmu::record_sw_ctx_switch();
     // Perform context switch outside the spinlock to avoid holding locks across stack swap
     unsafe {
         switch_threads(prev_rsp_ptr, next_rsp);
@@ -164,6 +165,7 @@ pub fn yield_now() {
 
 /// Called on every periodic APIC timer interrupt to service sleep queues and preempt threads.
 pub fn timer_tick(current_tick: u64) {
+    let tick_start = crate::perf::tsc::read_tsc();
     let (prev_rsp_ptr, next_rsp) = {
         let mut guard = SCHEDULER.lock();
         let sched = match guard.as_mut() {
@@ -230,6 +232,9 @@ pub fn timer_tick(current_tick: u64) {
         (prev_rsp_ptr, next_rsp)
     };
 
+    let tick_elapsed = crate::perf::tsc::read_tsc().saturating_sub(tick_start);
+    crate::perf::latency::SCHED_TICK_LATENCY.record(tick_elapsed);
+    crate::perf::pmu::record_sw_ctx_switch();
     unsafe {
         switch_threads(prev_rsp_ptr, next_rsp);
     }
@@ -280,6 +285,7 @@ pub fn sleep(ticks: u64) {
         (prev_rsp_ptr, next_rsp)
     };
 
+    crate::perf::pmu::record_sw_ctx_switch();
     unsafe {
         switch_threads(prev_rsp_ptr, next_rsp);
     }
@@ -335,6 +341,7 @@ pub fn block_current_thread() {
         (prev_rsp_ptr, next_rsp)
     };
 
+    crate::perf::pmu::record_sw_ctx_switch();
     unsafe {
         switch_threads(prev_rsp_ptr, next_rsp);
     }

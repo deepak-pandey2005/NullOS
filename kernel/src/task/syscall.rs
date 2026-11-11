@@ -196,9 +196,32 @@ pub fn sys_mmap(addr: u64, len: usize, prot: u64, _flags: u64) -> u64 {
     start_vaddr
 }
 
-/// Common Rust System Call Dispatcher invoked from `syscall_entry` in `syscall.S`.
+/// Profiled Common Rust System Call Dispatcher invoked from `syscall_entry` in `syscall.S`.
 #[unsafe(no_mangle)]
 pub extern "C" fn syscall_dispatcher(
+    num: u64,
+    a1: u64,
+    a2: u64,
+    a3: u64,
+    a4: u64,
+    a5: u64,
+) -> u64 {
+    let t0 = crate::perf::tsc::read_tsc();
+    crate::perf::pmu::record_sw_syscall();
+    let ret = syscall_dispatcher_inner(num, a1, a2, a3, a4, a5);
+    let elapsed = crate::perf::tsc::read_tsc().saturating_sub(t0);
+    crate::perf::latency::SYSCALL_LATENCY.record(elapsed);
+    crate::tracepoint!(
+        crate::perf::trace::TraceCategory::Syscall,
+        crate::perf::trace::event_id::SYSCALL_EXIT,
+        0,
+        num,
+        elapsed
+    );
+    ret
+}
+
+fn syscall_dispatcher_inner(
     num: u64,
     a1: u64,
     a2: u64,

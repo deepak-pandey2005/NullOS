@@ -155,10 +155,14 @@ unsafe extern "C" {
 /// and sends an End-Of-Interrupt (EOI) acknowledgment to the local APIC.
 #[unsafe(no_mangle)]
 pub extern "C" fn timer_handler() {
+    let t0 = crate::perf::tsc::read_tsc();
+    crate::perf::pmu::record_sw_irq();
     super::apic::on_timer_tick();
     super::apic::end_of_interrupt();
     let ticks = super::apic::get_ticks();
     crate::task::timer_tick(ticks);
+    let elapsed = crate::perf::tsc::read_tsc().saturating_sub(t0);
+    crate::perf::latency::record_timer_irq(t0, elapsed);
 }
 
 /// Central Rust exception dispatcher invoked by common assembly stubs.
