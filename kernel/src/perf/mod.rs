@@ -13,6 +13,7 @@
 
 pub mod bench;
 pub mod latency;
+pub mod opt;
 pub mod pmu;
 pub mod trace;
 pub mod tsc;

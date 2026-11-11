@@ -484,6 +484,8 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             out.push_str("  perfstat             - Inspect TSC, PMU, Latencies, Lock Contention & CPU Util (M37)\n");
             out.push_str("  kbench               - Run Memory Alloc & Thread Context-Switch benchmarks (M37)\n");
             out.push_str("  trace [N]            - Dump recent kernel tracepoints from circular ring buffer (M37)\n");
+            out.push_str("  optstat              - Inspect NUMA, Paging Caps, FSGSBASE & Slab Optimizations (M38)\n");
+            out.push_str("  optbench             - Run M38 Optimization Benchmarks & Regression Suite (M38)\n");
             out.push_str("  test                 - Run comprehensive automated subsystem & shell tests\n");
             out.push_str("  gui                  - Launch Desktop Window Manager & Compositor demo (M30)\n");
             out.push_str("  mem                  - Display physical memory manager statistics\n");
@@ -1363,6 +1365,14 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             crate::perf::trace::dump_recent(count);
             (String::new(), 0)
         }
+        "optstat" => {
+            crate::perf::opt::print_status();
+            (String::new(), 0)
+        }
+        "optbench" => {
+            crate::perf::opt::bench_reg::run_benchmark_suite();
+            (String::new(), 0)
+        }
         unknown => {
             // Check PATH environment variable and current directory for executable binaries
             let mut candidates = Vec::new();
@@ -1869,7 +1879,12 @@ pub fn run_automated_tests() {
     execute_command("trace 8");
     execute_command("perfstat");
 
-    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 & 17 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio, ACPI/Power, Dynamic Linking, Storage, High-Perf Networking and Kernel Profiling tests passed successfully!");
+    println!("[SHELL] 30. Testing Kernel Optimization, O(1) Sched, Slab/Magazine Alloc, Page-Table Opt, Locks, NUMA & Regression Suite (M38)...");
+    execute_command("optstat");
+    crate::perf::opt::run_self_tests();
+    execute_command("optstat");
+
+    println!("[SHELL] All Phase 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 & 17 Shell, Network, SMP, Security, IPC, Threads, Async, Graphics, Audio, ACPI/Power, Dynamic Linking, Storage, High-Perf Networking, Kernel Profiling and Optimization tests passed successfully!");
 }
 
 /// Interactive Shell Loop that listens on USB Keyboard, PS/2 Keyboard, and COM1 serial input

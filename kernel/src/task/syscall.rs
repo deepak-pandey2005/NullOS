@@ -135,6 +135,7 @@ pub fn current_pid() -> super::process::ProcessId {
 /// Sets the currently active user ProcessId.
 pub fn set_current_pid(pid: u64) {
     CURRENT_PID.store(pid, Ordering::SeqCst);
+    crate::perf::opt::syscall_opt::update_cached_pid(pid);
 }
 
 /// POSIX-compatible stat structure matching user/libc/include/sys/stat.h.
@@ -208,7 +209,13 @@ pub extern "C" fn syscall_dispatcher(
 ) -> u64 {
     let t0 = crate::perf::tsc::read_tsc();
     crate::perf::pmu::record_sw_syscall();
-    let ret = syscall_dispatcher_inner(num, a1, a2, a3, a4, a5);
+    let ret = if num == SYS_GETPID {
+        crate::perf::opt::syscall_opt::FAST_SYSCALL_TABLE
+            .try_dispatch(num, a1, a2, a3)
+            .unwrap_or_else(|| syscall_dispatcher_inner(num, a1, a2, a3, a4, a5))
+    } else {
+        syscall_dispatcher_inner(num, a1, a2, a3, a4, a5)
+    };
     let elapsed = crate::perf::tsc::read_tsc().saturating_sub(t0);
     crate::perf::latency::SYSCALL_LATENCY.record(elapsed);
     crate::tracepoint!(

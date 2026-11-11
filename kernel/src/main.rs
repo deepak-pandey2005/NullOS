@@ -176,6 +176,9 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     arch::x86_64::smp::init();
     arch::x86_64::smp::run_self_tests();
 
+    // Initialize Phase 17 M38 Kernel Optimizations (NUMA SRAT/SLIT, FSGSBASE, Slab caches)
+    perf::opt::init();
+
     // Initialize Kernel Hardening & Security Subsystem (Phase 10 - M26)
     security::init_canary();
     security::run_self_tests();

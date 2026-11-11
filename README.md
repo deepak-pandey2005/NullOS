@@ -578,15 +578,15 @@ scripts\windows\run.bat --headless    # Run automated headless test suite
 - [x] CPU utilization metrics
 
 ### M38 — Kernel Optimization
-- [ ] Scheduler optimization
-- [ ] Memory allocator optimization
-- [ ] Page-table optimization
-- [ ] Syscall optimization
-- [ ] Lock optimization
-- [ ] Cache-aware data structures
-- [ ] NUMA awareness
-- [ ] Benchmark suite
-- [ ] Regression testing
+- [x] Scheduler optimization
+- [x] Memory allocator optimization
+- [x] Page-table optimization
+- [x] Syscall optimization
+- [x] Lock optimization
+- [x] Cache-aware data structures
+- [x] NUMA awareness
+- [x] Benchmark suite
+- [x] Regression testing
 
 ---
 
@@ -723,7 +723,7 @@ sudo ./scripts/create_bootable_usb.sh --device /dev/sdX
 - [x] M35
 - [x] M36
 - [x] M37
-- [ ] M38
+- [x] M38
 
 ## Checkpoint 9 — Release
 - [ ] M39
