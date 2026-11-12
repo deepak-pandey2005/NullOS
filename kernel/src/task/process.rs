@@ -212,7 +212,7 @@ pub fn exit_process(pid: ProcessId, exit_code: i32) {
             proc.exit_code = Some(exit_code);
         }
     }
-    crate::graphics::cleanup_user_windows(pid.0);
+    crate::graphics::fb_release(pid.0);
 }
 
 /// Terminates a process by PID with a given signal / exit code.

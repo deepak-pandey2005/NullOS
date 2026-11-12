@@ -16,8 +16,11 @@
 //! +------------+       b_to_a Ring Buffer (8 KiB)       +------------+
 //! ```
 
+use alloc::collections::{BTreeMap, VecDeque};
+use alloc::string::String;
 use alloc::sync::Arc;
-use crate::fs::vfs::FsError;
+use alloc::vec::Vec;
+use crate::fs::vfs::{DirEntry, FileStat, FileType, FsError, Inode, POLLIN, POLLOUT};
 use crate::ipc::pipe::PipeBuffer;
 use crate::sync::Spinlock;
 
@@ -54,6 +57,83 @@ impl UnixSocket {
     pub fn available(&self) -> usize {
         self.rx_buf.lock().available()
     }
+}
+
+impl Inode for UnixSocket {
+    fn stat(&self) -> FileStat {
+        FileStat {
+            inode_num: 0,
+            file_type: FileType::CharDevice,
+            size: self.available(),
+            mode: 0o666,
+        }
+    }
+
+    fn read_at(&self, _offset: usize, buf: &mut [u8]) -> Result<usize, FsError> {
+        self.recv(buf)
+    }
+
+    fn write_at(&self, _offset: usize, buf: &[u8]) -> Result<usize, FsError> {
+        self.send(buf)
+    }
+
+    fn lookup(&self, _name: &str) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotADirectory)
+    }
+
+    fn read_dir(&self) -> Result<Vec<DirEntry>, FsError> {
+        Err(FsError::NotADirectory)
+    }
+
+    fn create(&self, _name: &str, _file_type: FileType) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotADirectory)
+    }
+
+    fn poll(&self) -> u32 {
+        let mut mask = 0u32;
+        if self.rx_buf.lock().available() > 0 {
+            mask |= POLLIN;
+        }
+        let tx = self.tx_buf.lock();
+        if tx.available() < DEFAULT_UNIX_SOCKET_CAPACITY {
+            mask |= POLLOUT;
+        }
+        mask
+    }
+}
+
+static UNIX_LISTENERS: Spinlock<BTreeMap<String, VecDeque<UnixSocket>>> =
+    Spinlock::new(BTreeMap::new());
+
+/// Registers a named `AF_UNIX` listener endpoint (e.g. `/tmp/compositor.sock`).
+pub fn unix_listen(path: &str) -> Result<(), FsError> {
+    if path.is_empty() {
+        return Err(FsError::InvalidInput);
+    }
+    let mut listeners = UNIX_LISTENERS.lock();
+    listeners.entry(String::from(path)).or_insert_with(VecDeque::new);
+    Ok(())
+}
+
+/// Accepts the next pending client connection on `path` (non-blocking).
+pub fn unix_accept(path: &str) -> Result<Option<Arc<UnixSocket>>, FsError> {
+    let mut listeners = UNIX_LISTENERS.lock();
+    let queue = listeners.get_mut(path).ok_or(FsError::NotFound)?;
+    Ok(queue.pop_front().map(Arc::new))
+}
+
+/// Connects to a listening `AF_UNIX` endpoint at `path`, returning the client socket.
+pub fn unix_connect(path: &str) -> Result<Arc<UnixSocket>, FsError> {
+    let mut listeners = UNIX_LISTENERS.lock();
+    let queue = listeners.get_mut(path).ok_or(FsError::NotFound)?;
+    let (server_end, client_end) = socketpair();
+    queue.push_back(server_end);
+    Ok(Arc::new(client_end))
+}
+
+/// Removes a named `AF_UNIX` listener endpoint.
+pub fn unix_close_listener(path: &str) {
+    UNIX_LISTENERS.lock().remove(path);
 }
 
 /// Creates a connected pair of bidirectional Unix domain sockets conforming to `socketpair(2)`.

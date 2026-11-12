@@ -1165,23 +1165,28 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
         "gui" | "wm" => {
             let mut out = String::new();
             if args.first().map(|s| s.as_str()) == Some("--status") {
-                let wm_lock = crate::graphics::wm::WINDOW_MANAGER.lock();
-                if let Some(ref wm) = *wm_lock {
-                    out.push_str("NullOS Desktop Window Manager & Compositor (M30):\n");
-                    out.push_str(&alloc::format!("  Resolution:     {}x{} (stride: {})\n", wm.screen_width, wm.screen_height, wm.hw_stride));
-                    out.push_str(&alloc::format!("  Framebuffer:    {:#018x}\n", wm.hw_address));
-                    out.push_str(&alloc::format!("  Active Windows: {}\n", wm.windows.len()));
-                    out.push_str("  Compositing:    Double-Buffered Backbuffer\n");
-                    out.push_str("  Status:         Operational\n");
+                if let Some(info) = crate::graphics::get_fb_info() {
+                    out.push_str("NullOS Linux-Style Display & Input Subsystem (fbdev + evdev):\n");
+                    out.push_str(&alloc::format!("  Resolution:  {}x{} (stride: {}, {} bpp)\n", info.width, info.height, info.stride, info.bpp));
+                    out.push_str("  Compositor:  Ring 3 Userspace (/bin/compositor.elf)\n");
+                    out.push_str("  IPC / SHM:   AF_UNIX (/tmp/compositor.sock) + SysV SHM\n");
                 } else {
-                    out.push_str("Window Manager is not initialized (no GOP framebuffer).\n");
+                    out.push_str("Framebuffer device is not initialized (no GOP framebuffer).\n");
                 }
-            } else if args.first().map(|s| s.as_str()) == Some("--test") {
-                crate::graphics::launch_demo();
-                out.push_str("[GUI] Launched demo windows (test mode).\n");
             } else {
-                crate::graphics::run_compositor();
-                out.push_str("[GUI] Exited Desktop Compositor. Returned to text shell.\n");
+                if let Ok(inode) = crate::fs::vfs::VFS.resolve_path("/bin/compositor.elf") {
+                    let size = inode.stat().size;
+                    let mut buf = alloc::vec![0u8; size];
+                    if let Ok(n) = inode.read_at(0, &mut buf) {
+                        buf.truncate(n);
+                        let code = crate::task::execute_user_elf("compositor", &buf).unwrap_or(-1);
+                        out.push_str(&alloc::format!("[GUI] Ring 3 compositor exited with code {}.\n", code));
+                    } else {
+                        out.push_str("[GUI] Failed to read /bin/compositor.elf.\n");
+                    }
+                } else {
+                    out.push_str("[GUI] /bin/compositor.elf not found in VFS.\n");
+                }
             }
             (out, 0)
         }
@@ -1848,77 +1853,35 @@ pub fn run_automated_tests() {
         execute_command("exec /disk/ASYNC.ELF");
     }
 
-    println!("[SHELL] 22. Testing 2D Graphics Canvas & Desktop Window Manager (M30)...");
+    println!("[SHELL] 22. Testing Linux-Style Framebuffer, Input, SHM & Named AF_UNIX IPC (M30)...");
     {
-        use crate::graphics::canvas::Canvas;
-        use crate::graphics::color::Color;
-        let mut test_canvas = Canvas::new(100, 100, 100);
-        test_canvas.clear(Color::BLACK);
-        assert_eq!(test_canvas.get_pixel(0, 0), Color::BLACK);
-
-        test_canvas.set_pixel(10, 10, Color::RED);
-        assert_eq!(test_canvas.get_pixel(10, 10), Color::RED);
-
-        test_canvas.draw_line(0, 0, 99, 99, Color::WHITE);
-        assert_eq!(test_canvas.get_pixel(50, 50), Color::WHITE);
-
-        test_canvas.fill_rect(20, 20, 10, 10, Color::GREEN);
-        assert_eq!(test_canvas.get_pixel(25, 25), Color::GREEN);
-
-        test_canvas.draw_circle(50, 50, 20, Color::BLUE);
-        test_canvas.draw_string(5, 5, "Hi", Color::YELLOW, None);
-
-        let mut wm_lock = crate::graphics::wm::WINDOW_MANAGER.lock();
-        if let Some(ref mut wm) = *wm_lock {
-            let win_id = wm.create_window("Unit Test Window", 10, 10, 80, 60);
-            assert_eq!(wm.windows.len(), 1);
-            assert_eq!(wm.focused_window, Some(win_id));
-
-            // Test mouse drag interaction via event handler
-            wm.handle_event(crate::graphics::event::InputEvent::MouseDown {
-                button: crate::graphics::event::MouseButton::Left,
-                x: 20,
-                y: 15,
-            });
-            assert!(wm.dragging.is_some());
-
-            wm.handle_event(crate::graphics::event::InputEvent::MouseMove {
-                x: 30,
-                y: 25,
-                dx: 10,
-                dy: 10,
-            });
-            assert_eq!(wm.windows[0].x, 20);
-
-            wm.handle_event(crate::graphics::event::InputEvent::MouseUp {
-                button: crate::graphics::event::MouseButton::Left,
-                x: 30,
-                y: 25,
-            });
-            assert!(wm.dragging.is_none());
-
-            wm.render_desktop();
-            wm.minimize_window(win_id);
-            assert!(wm.windows[0].minimized);
-            wm.bring_to_front(win_id);
-            assert!(!wm.windows[0].minimized);
-            wm.toggle_maximize_window(win_id);
-            assert!(wm.windows[0].maximized);
-            wm.toggle_maximize_window(win_id);
-            assert!(!wm.windows[0].maximized);
-            wm.close_window(win_id);
-            assert_eq!(wm.windows.len(), 0);
+        if let Some(info) = crate::graphics::get_fb_info() {
+            assert!(info.width > 0 && info.height > 0);
         }
-        drop(wm_lock);
-        // Test Ring 3 GUI surface & event bridge
-        if let Some(u_id) = crate::graphics::user_create_window(999, "Ring3 Test", 80, 60) {
-            let pixels = alloc::vec![0xFF336699u32; 80 * 60];
-            assert!(crate::graphics::user_present_window(999, u_id, &pixels));
-            assert!(crate::graphics::user_close_window(999, u_id));
-        }
+        crate::graphics::event::INPUT_QUEUE.push(crate::graphics::event::InputEvent::MouseMove {
+            x: 120,
+            y: 90,
+            dx: 5,
+            dy: -3,
+        });
+        let raw = crate::graphics::event::poll_raw_input().expect("Expected queued raw input event");
+        assert_eq!(raw.kind, crate::graphics::event::RAW_INPUT_MOUSE_MOVE);
+        assert_eq!(raw.x, 120);
+        assert_eq!(raw.y, 90);
+
+        // Test named AF_UNIX listener -> connect -> accept -> send/recv
+        crate::ipc::unix_socket::unix_listen("/tmp/test_comp.sock").unwrap();
+        let client = crate::ipc::unix_socket::unix_connect("/tmp/test_comp.sock").unwrap();
+        let server = crate::ipc::unix_socket::unix_accept("/tmp/test_comp.sock").unwrap().unwrap();
+        assert_eq!(client.send(b"hello_wayland").unwrap(), 13);
+        let mut rbuf = [0u8; 32];
+        let n = server.recv(&mut rbuf).unwrap();
+        assert_eq!(&rbuf[..n], b"hello_wayland");
+        crate::ipc::unix_socket::unix_close_listener("/tmp/test_comp.sock");
+
+        // Verify /bin/compositor.elf is present in initramfs
+        assert!(crate::fs::vfs::VFS.resolve_path("/bin/compositor.elf").is_ok());
     }
-    // Launch interactive demo showcase on screen
-    crate::graphics::launch_demo();
 
     println!("[SHELL] 23. Testing USB 3.0 xHCI Controller & HID Input Subsystems (M31)...");
     execute_command("usb");

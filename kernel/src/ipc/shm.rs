@@ -166,6 +166,22 @@ pub fn shmat(id: ShmId, address_space: &mut AddressSpace, vaddr: VirtAddr) -> Re
     SHM_REGISTRY.lock().attach(id, address_space, vaddr)
 }
 
+/// Attaches a shared memory segment to the currently active page table at `vaddr` and returns its size.
+pub fn shmat_current(id: ShmId, vaddr: VirtAddr) -> Result<usize, &'static str> {
+    let mut reg = SHM_REGISTRY.lock();
+    let seg = reg.segments.get_mut(&id).ok_or("Invalid SHM ID")?;
+    let flags = PageTableFlags::PRESENT
+        | PageTableFlags::WRITABLE
+        | PageTableFlags::USER_ACCESSIBLE
+        | PageTableFlags::NO_EXECUTE;
+    for (i, frame) in seg.frames.iter().enumerate() {
+        let page = Page::containing_address(VirtAddr::new(vaddr.as_u64() + (i as u64) * PAGE_SIZE_4K));
+        paging::map_page(page, *frame, flags)?;
+    }
+    seg.attachments += 1;
+    Ok(seg.size)
+}
+
 /// Returns diagnostic status of all active shared memory regions.
 pub fn shm_list() -> Vec<ShmInfo> {
     SHM_REGISTRY.lock().list()

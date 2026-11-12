@@ -1,42 +1,7 @@
-//! Mouse Cursor State & Rendering Engine.
-//!
-//! Features:
-//! - Sub-pixel mouse position tracking with screen boundary clamping.
-//! - Anti-aliased high-contrast cursor sprite with transparency.
-//! - PS/2 3-byte auxiliary packet decoder.
+//! Mouse Position Tracking & PS/2 Packet Decoder.
 
-use crate::graphics::canvas::Canvas;
-use crate::graphics::color::Color;
 use crate::graphics::event::{InputEvent, MouseButton, INPUT_QUEUE};
 use crate::sync::Spinlock;
-
-/// 12x18 Arrow cursor sprite bitmap definition.
-/// '.' = Transparent
-/// 'X' = Black Border (#000000)
-/// 'W' = White Interior (#FFFFFF)
-const CURSOR_WIDTH: usize = 12;
-const CURSOR_HEIGHT: usize = 18;
-
-const CURSOR_SPRITE: [&str; CURSOR_HEIGHT] = [
-    "X...........",
-    "XX..........",
-    "XWX.........",
-    "XWWX........",
-    "XWWWX.......",
-    "XWWWWX......",
-    "XWWWWWX.....",
-    "XWWWWWWX....",
-    "XWWWWWWWX...",
-    "XWWWWWWWWX..",
-    "XWWWWWXXXXX.",
-    "XWWXWWX.....",
-    "XWX.XWWX....",
-    "XX..XWWX....",
-    "X....XWWX...",
-    ".....XWWX...",
-    "......XX....",
-    "............",
-];
 
 /// Global mouse device state.
 pub struct MouseState {
@@ -187,32 +152,6 @@ impl MouseState {
                     x: self.x,
                     y: self.y,
                 });
-            }
-        }
-    }
-
-    /// Renders the mouse cursor arrow onto the target canvas at current (x, y).
-    pub fn render(&self, canvas: &mut Canvas) {
-        let origin_x = self.x;
-        let origin_y = self.y;
-
-        for (row_idx, row_str) in CURSOR_SPRITE.iter().enumerate() {
-            let py = origin_y + row_idx as isize;
-            if py < 0 || py >= canvas.height as isize {
-                continue;
-            }
-
-            for (col_idx, ch) in row_str.chars().enumerate() {
-                let px = origin_x + col_idx as isize;
-                if px < 0 || px >= canvas.width as isize {
-                    continue;
-                }
-
-                match ch {
-                    'X' => canvas.set_pixel(px as usize, py as usize, Color::BLACK),
-                    'W' => canvas.set_pixel(px as usize, py as usize, Color::WHITE),
-                    _ => {}
-                }
             }
         }
     }

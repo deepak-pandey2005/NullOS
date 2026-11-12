@@ -101,14 +101,26 @@ pub const SYS_DLOPEN: u64 = 300;
 pub const SYS_DLSYM: u64 = 301;
 /// Dynamic linker dlclose syscall number (302).
 pub const SYS_DLCLOSE: u64 = 302;
-/// GUI compositor: create user window (`title_ptr`, `title_len`, `width`, `height`) -> `win_id`.
-pub const SYS_GUI_CREATE_WINDOW: u64 = 310;
-/// GUI compositor: present ARGB pixel buffer (`win_id`, `buf_ptr`, `buf_bytes`) -> `0`.
-pub const SYS_GUI_PRESENT: u64 = 311;
-/// GUI compositor: poll next `GuiUserEvent` (`win_id`, `out_event_ptr`) -> `1 | 0`.
-pub const SYS_GUI_POLL_EVENT: u64 = 312;
-/// GUI compositor: close user window (`win_id`) -> `0`.
-pub const SYS_GUI_CLOSE_WINDOW: u64 = 313;
+/// SysV shared memory get/create (29): `(key, size, create)` -> `shm_id`.
+pub const SYS_SHMGET: u64 = 29;
+/// SysV shared memory attach (30): `(shm_id, out_size_ptr)` -> `user_vaddr`.
+pub const SYS_SHMAT: u64 = 30;
+/// Linux-style fbdev: query framebuffer geometry (320): `(out_fb_info_ptr)` -> `0`.
+pub const SYS_FB_INFO: u64 = 320;
+/// Linux-style fbdev: acquire & map linear framebuffer into Ring 3 (321): `(out_fb_info_ptr)` -> `fb_vaddr`.
+pub const SYS_FB_MAP: u64 = 321;
+/// Linux-style fbdev: release framebuffer ownership & restore text console (322).
+pub const SYS_FB_RELEASE: u64 = 322;
+/// Linux-style evdev: poll next raw input event (323): `(out_raw_event_ptr)` -> `1 | 0`.
+pub const SYS_INPUT_POLL: u64 = 323;
+/// Named AF_UNIX socket listen (324): `(path_ptr, path_len)` -> `0`.
+pub const SYS_UNIX_LISTEN: u64 = 324;
+/// Named AF_UNIX socket accept (325): `(path_ptr, path_len)` -> `fd` or `-11` (`-EAGAIN`).
+pub const SYS_UNIX_ACCEPT: u64 = 325;
+/// Named AF_UNIX socket connect (326): `(path_ptr, path_len)` -> `fd`.
+pub const SYS_UNIX_CONNECT: u64 = 326;
+/// Spawn a Ring 3 ELF from VFS in a background thread (327): `(path_ptr, path_len)` -> `0`.
+pub const SYS_SPAWN: u64 = 327;
 
 /// Sets Thread Local Storage (TLS) register `%gs` base address.
 pub const ARCH_SET_GS: u64 = 0x1001;
@@ -1241,60 +1253,104 @@ fn syscall_dispatcher_inner(
                 Err(_) => (-1i64) as u64,
             }
         }
-        // SYS_GUI_CREATE_WINDOW (310): (title_ptr, title_len, width, height) -> win_id
-        SYS_GUI_CREATE_WINDOW => {
-            let title_ptr = a1 as *const u8;
-            let title_len = (a2 as usize).min(64);
-            let width = a3 as usize;
-            let height = a4 as usize;
-            if title_ptr.is_null() || title_len == 0 {
-                return (-22i64) as u64;
-            }
-            let mut title_buf = [0u8; 64];
-            if crate::security::copy_from_user(&mut title_buf[..title_len], title_ptr).is_err() {
-                return (-14i64) as u64;
-            }
-            let title = core::str::from_utf8(&title_buf[..title_len]).unwrap_or("App");
-            let pid = current_pid().0;
-            match crate::graphics::user_create_window(pid, title, width, height) {
-                Some(id) => id as u64,
-                None => (-12i64) as u64,
+        // SYS_SHMGET (29): (key, size, create) -> shm_id
+        SYS_SHMGET => {
+            let key = a1;
+            let size = a2 as usize;
+            let create = a3 != 0;
+            match crate::ipc::shm::shmget(key, size, create) {
+                Ok(id) => id.0,
+                Err(_) => (-22i64) as u64,
             }
         }
-        // SYS_GUI_PRESENT (311): (win_id, buf_ptr, buf_bytes) -> 0
-        SYS_GUI_PRESENT => {
-            let win_id = a1 as u32;
-            let buf_ptr = a2 as *const u8;
-            let buf_bytes = a3 as usize;
-            if buf_ptr.is_null() || buf_bytes == 0 || (buf_bytes % 4) != 0 || buf_bytes > 16 * 1024 * 1024 {
-                return (-22i64) as u64;
-            }
-            let mut kbuf = alloc::vec![0u8; buf_bytes];
-            if crate::security::copy_from_user(&mut kbuf, buf_ptr).is_err() {
-                return (-14i64) as u64;
-            }
-            let pixel_count = buf_bytes / 4;
-            let pixels: &[u32] = unsafe { core::slice::from_raw_parts(kbuf.as_ptr() as *const u32, pixel_count) };
-            let pid = current_pid().0;
-            if crate::graphics::user_present_window(pid, win_id, pixels) {
-                0
-            } else {
-                (-22i64) as u64
+        // SYS_SHMAT (30): (shm_id, out_size_ptr) -> user_vaddr
+        SYS_SHMAT => {
+            let id = crate::ipc::shm::ShmId(a1);
+            let out_size_ptr = a2 as *mut usize;
+            let size = {
+                let reg = crate::ipc::shm::SHM_REGISTRY.lock();
+                match reg.list().into_iter().find(|s| s.id == id.0) {
+                    Some(info) => info.size,
+                    None => return (-22i64) as u64,
+                }
+            };
+            let vaddr_u64 = NEXT_USER_MMAP_VADDR.fetch_add(size as u64, Ordering::SeqCst);
+            match crate::ipc::shm::shmat_current(id, VirtAddr::new(vaddr_u64)) {
+                Ok(mapped_size) => {
+                    if !out_size_ptr.is_null() {
+                        let bytes = unsafe {
+                            core::slice::from_raw_parts(
+                                (&mapped_size as *const usize) as *const u8,
+                                core::mem::size_of::<usize>(),
+                            )
+                        };
+                        let _ = crate::security::copy_to_user(out_size_ptr as *mut u8, bytes);
+                    }
+                    vaddr_u64
+                }
+                Err(_) => (-12i64) as u64,
             }
         }
-        // SYS_GUI_POLL_EVENT (312): (win_id, out_event_ptr) -> 1 (event) | 0 (empty)
-        SYS_GUI_POLL_EVENT => {
-            let win_id = a1 as u32;
-            let out_ptr = a2 as *mut u8;
+        // SYS_FB_INFO (320): (out_fb_info_ptr) -> 0
+        SYS_FB_INFO => {
+            let out_ptr = a1 as *mut u8;
             if out_ptr.is_null() {
                 return (-22i64) as u64;
             }
-            let pid = current_pid().0;
-            if let Some(ev) = crate::graphics::user_poll_event(pid, win_id) {
-                let bytes: &[u8] = unsafe {
+            if let Some(info) = crate::graphics::get_fb_info() {
+                let bytes = unsafe {
                     core::slice::from_raw_parts(
-                        (&ev as *const crate::graphics::event::GuiUserEvent) as *const u8,
-                        core::mem::size_of::<crate::graphics::event::GuiUserEvent>(),
+                        (&info as *const crate::graphics::FbInfo) as *const u8,
+                        core::mem::size_of::<crate::graphics::FbInfo>(),
+                    )
+                };
+                if crate::security::copy_to_user(out_ptr, bytes).is_err() {
+                    return (-14i64) as u64;
+                }
+                0
+            } else {
+                (-19i64) as u64
+            }
+        }
+        // SYS_FB_MAP (321): (out_fb_info_ptr) -> user_fb_vaddr
+        SYS_FB_MAP => {
+            let out_ptr = a1 as *mut u8;
+            let pid = current_pid().0;
+            if let Some((info, vaddr)) = crate::graphics::fb_map_for_user(pid) {
+                if !out_ptr.is_null() {
+                    let bytes = unsafe {
+                        core::slice::from_raw_parts(
+                            (&info as *const crate::graphics::FbInfo) as *const u8,
+                            core::mem::size_of::<crate::graphics::FbInfo>(),
+                        )
+                    };
+                    if crate::security::copy_to_user(out_ptr, bytes).is_err() {
+                        crate::graphics::fb_release(pid);
+                        return (-14i64) as u64;
+                    }
+                }
+                vaddr
+            } else {
+                (-16i64) as u64
+            }
+        }
+        // SYS_FB_RELEASE (322): () -> 0
+        SYS_FB_RELEASE => {
+            let pid = current_pid().0;
+            crate::graphics::fb_release(pid);
+            0
+        }
+        // SYS_INPUT_POLL (323): (out_raw_event_ptr) -> 1 | 0
+        SYS_INPUT_POLL => {
+            let out_ptr = a1 as *mut u8;
+            if out_ptr.is_null() {
+                return (-22i64) as u64;
+            }
+            if let Some(ev) = crate::graphics::event::poll_raw_input() {
+                let bytes = unsafe {
+                    core::slice::from_raw_parts(
+                        (&ev as *const crate::graphics::event::RawInputEvent) as *const u8,
+                        core::mem::size_of::<crate::graphics::event::RawInputEvent>(),
                     )
                 };
                 if crate::security::copy_to_user(out_ptr, bytes).is_err() {
@@ -1305,15 +1361,143 @@ fn syscall_dispatcher_inner(
                 0
             }
         }
-        // SYS_GUI_CLOSE_WINDOW (313): (win_id) -> 0
-        SYS_GUI_CLOSE_WINDOW => {
-            let win_id = a1 as u32;
-            let pid = current_pid().0;
-            if crate::graphics::user_close_window(pid, win_id) {
-                0
-            } else {
-                (-22i64) as u64
+        // SYS_UNIX_LISTEN (324): (path_ptr, path_len) -> 0
+        SYS_UNIX_LISTEN => {
+            let ptr = a1 as *const u8;
+            let len = (a2 as usize).min(128);
+            if ptr.is_null() || len == 0 {
+                return (-22i64) as u64;
             }
+            let mut buf = [0u8; 128];
+            if crate::security::copy_from_user(&mut buf[..len], ptr).is_err() {
+                return (-14i64) as u64;
+            }
+            let path = match core::str::from_utf8(&buf[..len]) {
+                Ok(s) => s,
+                Err(_) => return (-22i64) as u64,
+            };
+            match crate::ipc::unix_socket::unix_listen(path) {
+                Ok(()) => 0,
+                Err(_) => (-22i64) as u64,
+            }
+        }
+        // SYS_UNIX_ACCEPT (325): (path_ptr, path_len) -> fd or -11 (-EAGAIN)
+        SYS_UNIX_ACCEPT => {
+            let ptr = a1 as *const u8;
+            let len = (a2 as usize).min(128);
+            if ptr.is_null() || len == 0 {
+                return (-22i64) as u64;
+            }
+            let mut buf = [0u8; 128];
+            if crate::security::copy_from_user(&mut buf[..len], ptr).is_err() {
+                return (-14i64) as u64;
+            }
+            let path = match core::str::from_utf8(&buf[..len]) {
+                Ok(s) => s,
+                Err(_) => return (-22i64) as u64,
+            };
+            match crate::ipc::unix_socket::unix_accept(path) {
+                Ok(Some(sock)) => {
+                    let flags = crate::fs::vfs::OpenFlags {
+                        read: true,
+                        write: true,
+                        create: false,
+                        truncate: false,
+                        append: false,
+                        nonblock: true,
+                    };
+                    let desc = alloc::sync::Arc::new(crate::fs::fd::FileDescriptor::new(sock, flags));
+                    let cur_pid = current_pid();
+                    let mut proc_table = super::process::PROCESS_TABLE.lock();
+                    if let Some(proc) = proc_table.get_mut(cur_pid) {
+                        match proc.fd_table.alloc_fd(desc) {
+                            Ok(fd) => fd as u64,
+                            Err(_) => (-24i64) as u64,
+                        }
+                    } else {
+                        (-3i64) as u64
+                    }
+                }
+                Ok(None) => (-11i64) as u64,
+                Err(_) => (-2i64) as u64,
+            }
+        }
+        // SYS_UNIX_CONNECT (326): (path_ptr, path_len) -> fd
+        SYS_UNIX_CONNECT => {
+            let ptr = a1 as *const u8;
+            let len = (a2 as usize).min(128);
+            if ptr.is_null() || len == 0 {
+                return (-22i64) as u64;
+            }
+            let mut buf = [0u8; 128];
+            if crate::security::copy_from_user(&mut buf[..len], ptr).is_err() {
+                return (-14i64) as u64;
+            }
+            let path = match core::str::from_utf8(&buf[..len]) {
+                Ok(s) => s,
+                Err(_) => return (-22i64) as u64,
+            };
+            match crate::ipc::unix_socket::unix_connect(path) {
+                Ok(sock) => {
+                    let flags = crate::fs::vfs::OpenFlags {
+                        read: true,
+                        write: true,
+                        create: false,
+                        truncate: false,
+                        append: false,
+                        nonblock: true,
+                    };
+                    let desc = alloc::sync::Arc::new(crate::fs::fd::FileDescriptor::new(sock, flags));
+                    let cur_pid = current_pid();
+                    let mut proc_table = super::process::PROCESS_TABLE.lock();
+                    if let Some(proc) = proc_table.get_mut(cur_pid) {
+                        match proc.fd_table.alloc_fd(desc) {
+                            Ok(fd) => fd as u64,
+                            Err(_) => (-24i64) as u64,
+                        }
+                    } else {
+                        (-3i64) as u64
+                    }
+                }
+                Err(_) => (-111i64) as u64,
+            }
+        }
+        // SYS_SPAWN (327): (path_ptr, path_len) -> 0
+        SYS_SPAWN => {
+            let ptr = a1 as *const u8;
+            let len = (a2 as usize).min(128);
+            if ptr.is_null() || len == 0 {
+                return (-22i64) as u64;
+            }
+            let mut buf = [0u8; 128];
+            if crate::security::copy_from_user(&mut buf[..len], ptr).is_err() {
+                return (-14i64) as u64;
+            }
+            let path = match core::str::from_utf8(&buf[..len]) {
+                Ok(s) => alloc::string::String::from(s),
+                Err(_) => return (-22i64) as u64,
+            };
+            if let Ok(inode) = crate::fs::vfs::VFS.resolve_path(&path) {
+                let size = inode.stat().size;
+                if size > 0 {
+                    let mut elf_bytes = alloc::vec![0u8; size];
+                    if let Ok(n) = inode.read_at(0, &mut elf_bytes) {
+                        elf_bytes.truncate(n);
+                        static SPAWN_Q: crate::sync::Spinlock<alloc::collections::VecDeque<(alloc::string::String, alloc::vec::Vec<u8>)>> =
+                            crate::sync::Spinlock::new(alloc::collections::VecDeque::new());
+                        fn spawn_worker() {
+                            let item = SPAWN_Q.lock().pop_front();
+                            if let Some((name, bytes)) = item {
+                                let _ = super::process::execute_user_elf(&name, &bytes);
+                            }
+                        }
+                        SPAWN_Q.lock().push_back((path, elf_bytes));
+                        crate::task::spawn("user_spawn", spawn_worker, 1);
+                        return 0;
+                    }
+                }
+            }
+            (-2i64) as u64
         }
         unknown => {
             println!("[SYSCALL] Unknown syscall number: {}", unknown);

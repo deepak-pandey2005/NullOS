@@ -74,6 +74,12 @@
 /** Yield processor execution to another runnable thread. */
 #define SYS_YIELD           24
 
+/** Get or create SysV shared memory segment (`key`, `size`, `create`). */
+#define SYS_SHMGET          29
+
+/** Attach SysV shared memory segment (`shm_id`, `out_size_ptr`). */
+#define SYS_SHMAT           30
+
 /** Get process identifier of calling process. */
 #define SYS_GETPID          39
 
@@ -133,10 +139,14 @@
 
 /** Create an epoll event notification instance with flags (`flags`). */
 #define SYS_EPOLL_CREATE1   291
-#define SYS_GUI_CREATE_WINDOW 310
-#define SYS_GUI_PRESENT       311
-#define SYS_GUI_POLL_EVENT    312
-#define SYS_GUI_CLOSE_WINDOW  313
+#define SYS_FB_INFO         320
+#define SYS_FB_MAP          321
+#define SYS_FB_RELEASE      322
+#define SYS_INPUT_POLL      323
+#define SYS_UNIX_LISTEN     324
+#define SYS_UNIX_ACCEPT     325
+#define SYS_UNIX_CONNECT    326
+#define SYS_SPAWN           327
 
 /* Architecture Prctl Sub-operations for x86_64 Segment Registers */
 #define ARCH_SET_GS         0x1001
