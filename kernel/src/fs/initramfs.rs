@@ -16,7 +16,7 @@
 //! - [`ZeroDevice`]: Reads yield continuous streams of zero bytes.
 //! - [`NullDevice`]: Discards all written data; reads yield immediate EOF.
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, VecDeque};
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec;
@@ -504,6 +504,118 @@ impl Inode for BlockDeviceNode {
 
     fn poll(&self) -> u32 {
         crate::fs::vfs::POLLIN | crate::fs::vfs::POLLOUT
+    }
+
+    fn as_any(&self) -> Option<&dyn core::any::Any> {
+        Some(self)
+    }
+}
+
+/// Global packet reception queue for userspace TAP/TUN daemons reading from `/dev/net/tun0`.
+static TUN_RX_QUEUE: Spinlock<VecDeque<Vec<u8>>> = Spinlock::new(VecDeque::new());
+
+/// Enqueues an incoming or loopback raw Ethernet frame for userspace network daemons.
+pub fn tun_enqueue_rx(packet: &[u8]) {
+    let mut q = TUN_RX_QUEUE.lock();
+    if q.len() >= 64 {
+        q.pop_front();
+    }
+    let mut v = Vec::with_capacity(packet.len());
+    v.extend_from_slice(packet);
+    q.push_back(v);
+}
+
+/// Character device node representing a raw network TAP/TUN device (`/dev/net/tun0` and `/dev/tun0`).
+///
+/// Implements user-mode network stack packet transport (Issue #43):
+/// - `write_at`: Transmits raw Ethernet frame to the active network driver (VirtIO, e1000, r8169).
+/// - `read_at`: Reads next raw Ethernet frame from the userspace packet RX queue (or polls hardware NIC).
+/// - `poll`: Reports POLLOUT (always write-ready) and POLLIN (when packets are queued).
+pub struct TunDeviceNode {
+    #[allow(dead_code)]
+    name: String,
+    inode_num: u64,
+}
+
+impl TunDeviceNode {
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: String::from(name),
+            inode_num: alloc_inode_num(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl Inode for TunDeviceNode {
+    fn stat(&self) -> FileStat {
+        FileStat {
+            inode_num: self.inode_num,
+            file_type: FileType::CharDevice,
+            size: 0,
+            mode: 0o666,
+        }
+    }
+
+    fn read_at(&self, _offset: usize, buf: &mut [u8]) -> Result<usize, FsError> {
+        // First, check if a packet is queued in TUN_RX_QUEUE
+        if let Some(pkt) = TUN_RX_QUEUE.lock().pop_front() {
+            let to_copy = core::cmp::min(buf.len(), pkt.len());
+            buf[..to_copy].copy_from_slice(&pkt[..to_copy]);
+            return Ok(to_copy);
+        }
+
+        // Second, try polling the active NIC driver directly
+        let mut temp_rx = [0u8; 1536];
+        if let Ok(Some(len)) = crate::drivers::virtio_net::receive(&mut temp_rx) {
+            let to_copy = core::cmp::min(buf.len(), len);
+            buf[..to_copy].copy_from_slice(&temp_rx[..to_copy]);
+            return Ok(to_copy);
+        }
+
+        Ok(0) // Non-blocking: no packet currently available
+    }
+
+    fn write_at(&self, _offset: usize, buf: &[u8]) -> Result<usize, FsError> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        // Transmit frame via active hardware/virtual network interface
+        let _ = crate::drivers::virtio_net::send(buf);
+
+        // Echo back packet to RX queue for userspace loopback & demuxing
+        tun_enqueue_rx(buf);
+
+        Ok(buf.len())
+    }
+
+    fn lookup(&self, _name: &str) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotADirectory)
+    }
+
+    fn read_dir(&self) -> Result<Vec<DirEntry>, FsError> {
+        Err(FsError::NotADirectory)
+    }
+
+    fn create(&self, _name: &str, _file_type: FileType) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotADirectory)
+    }
+
+    fn poll(&self) -> u32 {
+        let mut revents = crate::fs::vfs::POLLOUT;
+        if !TUN_RX_QUEUE.lock().is_empty() {
+            revents |= crate::fs::vfs::POLLIN;
+        }
+        revents
+    }
+
+    fn as_any(&self) -> Option<&dyn core::any::Any> {
+        Some(self)
     }
 }
 

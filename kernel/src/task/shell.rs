@@ -1927,6 +1927,12 @@ pub fn run_automated_tests() {
     crate::net::perf::run_self_tests();
     execute_command("netperf");
 
+    if VFS.resolve_path("/bin/netd.elf").is_ok() {
+        println!("[SHELL] Testing Ring 3 Userspace Network Daemon (/bin/netd.elf)...");
+        let rc = execute_command("exec /bin/netd.elf");
+        assert_eq!(rc, 0, "Userspace network daemon must process raw packets over /dev/net/tun0 and exit 0");
+    }
+
     println!("[SHELL] 29. Testing Kernel Profiling, TSC/PMU, Tracepoints, Latency Histograms, Lock Contention & Benchmarks (M37)...");
     execute_command("perfstat");
     crate::perf::run_self_tests();

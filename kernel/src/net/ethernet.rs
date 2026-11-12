@@ -440,6 +440,9 @@ pub fn send_frame(dst: MacAddress, ethertype: EtherType, payload: &[u8]) -> Resu
 ///
 /// * `raw` – The raw received frame bytes (without FCS, as delivered by the NIC).
 pub fn handle_packet(raw: &[u8]) {
+    // Deliver copy of received Ethernet frame to userspace network TAP/TUN device (Issue #43)
+    crate::fs::initramfs::tun_enqueue_rx(raw);
+
     // Attempt to parse the Ethernet II header; drop malformed/truncated frames.
     let frame = match EthernetFrame::parse(raw) {
         Ok(f)  => f,

@@ -113,6 +113,27 @@ pub fn sync_block_device_nodes() {
     }
 }
 
+/// Creates raw packet device nodes in `/dev/` and `/dev/net/` for userspace TCP/IP daemons (Issue #43).
+pub fn sync_net_device_nodes() {
+    let dev_dir = match VFS.resolve_path("/dev") {
+        Ok(dir) => dir,
+        Err(_) => return,
+    };
+
+    if let Some(any_ref) = dev_dir.as_any() {
+        if let Some(ram_dev_dir) = any_ref.downcast_ref::<initramfs::RamDirectory>() {
+            let tun0 = alloc::sync::Arc::new(initramfs::TunDeviceNode::new("tun0"));
+            ram_dev_dir.insert_child("tun0", tun0.clone());
+
+            let net_dir = alloc::sync::Arc::new(initramfs::RamDirectory::new(0o755));
+            net_dir.insert_child("tun0", tun0);
+            ram_dev_dir.insert_dir("net", net_dir);
+
+            println!("[DEV] Registered raw packet device node '/dev/net/tun0' and '/dev/tun0'.");
+        }
+    }
+}
+
 /// Probes registered block devices and mounts detected persistent filesystems (FAT32 / ext2).
 ///
 /// # Detection Strategy

@@ -276,6 +276,7 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // Initialize TCP/IP Network Stack (Phase 8 - M24 Network Stack)
     net::init();
     net::run_self_tests();
+    fs::sync_net_device_nodes();
 
     // Initialize PS/2 Keyboard Driver (Scan Code Set 1 & Input Decoding)
     drivers::keyboard::init();
