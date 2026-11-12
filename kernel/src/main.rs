@@ -251,6 +251,10 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     drivers::nvme::init();
     drivers::nvme::run_self_tests();
 
+    // Initialize SATA/AHCI Storage Controller Driver (Bare-Metal Hardware)
+    drivers::ahci::init();
+    drivers::ahci::run_self_tests();
+
     // Initialize Advanced Storage Subsystem (Block/Page Cache, I/O Scheduler, Async I/O, WAL Journal)
     storage::init();
 
