@@ -305,9 +305,9 @@ static void render_desktop(void) {
     memcpy(g_back, g_wall, (size_t)sw * (size_t)sh * sizeof(uint32_t));
 
     /* Desktop icons */
-    const char *icon_labels[2] = { "GUI Demo", "Sys Info" };
-    uint32_t icon_cols[2] = { COL_CYAN, COL_GREEN };
-    for (int i = 0; i < 2; i++) {
+    const char *icon_labels[3] = { "Terminal", "GUI Demo", "Sys Info" };
+    uint32_t icon_cols[3] = { COL_CYAN, COL_YELLOW, COL_GREEN };
+    for (int i = 0; i < 3; i++) {
         int ix = 20, iy = 24 + i * 76;
         int hov = (g_mouse_x >= ix && g_mouse_x < ix + 68 && g_mouse_y >= iy && g_mouse_y < iy + 64);
         if (hov) fill_rect_buf(g_back, sw, sh, ix, iy, 68, 64, 0xFF1F2F4D);
@@ -392,15 +392,15 @@ static void render_desktop(void) {
 
     /* Start Menu */
     if (g_start_open) {
-        int mw = 210, ih = 28, mh = 3 * ih + 12;
+        int mw = 210, ih = 28, mh = 4 * ih + 12;
         int mx = 8, my = tb_y - mh;
         fill_rect_buf(g_back, sw, sh, mx, my, mw, mh, COL_DARK_SLATE);
         draw_rect_outline(g_back, sw, sh, mx, my, mw, mh, COL_TITLE_ACT);
-        const char *items[3] = { "GUI Demo (Ring 3)", "System Info", "Exit Desktop -> CLI" };
-        for (int i = 0; i < 3; i++) {
+        const char *items[4] = { "Terminal (Ring 3)", "GUI Demo", "System Info", "Exit Desktop -> CLI" };
+        for (int i = 0; i < 4; i++) {
             int iy = my + 6 + i * ih;
             int hov = (g_mouse_x >= mx + 6 && g_mouse_x < mx + mw - 6 && g_mouse_y >= iy && g_mouse_y < iy + ih - 4);
-            uint32_t bg = (i == 2) ? COL_CLOSE : (hov ? COL_TITLE_BAR : COL_PANEL_BG);
+            uint32_t bg = (i == 3) ? COL_CLOSE : (hov ? COL_TITLE_BAR : COL_PANEL_BG);
             fill_rect_buf(g_back, sw, sh, mx + 6, iy, mw - 12, ih - 4, bg);
             draw_text_buf(g_back, sw, sh, mx + 14, iy + 8, items[i], COL_WHITE, mw - 24);
         }
@@ -437,14 +437,15 @@ static void handle_mouse_down(int button, int x, int y) {
     mark_full_dirty();
 
     if (g_start_open && button == 0) {
-        int mw = 210, ih = 28, mh = 3 * ih + 12;
+        int mw = 210, ih = 28, mh = 4 * ih + 12;
         int mx = 8, my = tb_y - mh;
         if (x >= mx && x < mx + mw && y >= my && y < tb_y) {
             int idx = (y - my - 6) / ih;
             g_start_open = 0;
-            if (idx == 0) (void)sys_spawn("/bin/gui_demo.elf");
-            else if (idx == 1) open_builtin_info_window();
-            else if (idx == 2) g_running = 0;
+            if (idx == 0) (void)sys_spawn("/bin/term.elf");
+            else if (idx == 1) (void)sys_spawn("/bin/gui_demo.elf");
+            else if (idx == 2) open_builtin_info_window();
+            else if (idx == 3) g_running = 0;
             return;
         }
         if (!(y >= tb_y && x >= 8 && x < 88)) g_start_open = 0;
@@ -501,10 +502,11 @@ static void handle_mouse_down(int button, int x, int y) {
     }
 
     if (button == 0) {
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 3; i++) {
             int ix = 20, iy = 24 + i * 76;
             if (x >= ix && x < ix + 68 && y >= iy && y < iy + 64) {
-                if (i == 0) (void)sys_spawn("/bin/gui_demo.elf");
+                if (i == 0) (void)sys_spawn("/bin/term.elf");
+                else if (i == 1) (void)sys_spawn("/bin/gui_demo.elf");
                 else open_builtin_info_window();
                 return;
             }
