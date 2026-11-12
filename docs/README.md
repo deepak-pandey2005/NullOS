@@ -26,14 +26,22 @@ This documentation serves as an architectural blueprint, implementation guide, a
 - [**References & Research Guide**](references.md) — Official Intel/AMD/UEFI manuals, OSDev articles, books, CPU registers, and hardware cheat sheets.
 
 ### 4. Phases & Milestones
-- [**Phase 0: Foundation (M0)**](phases/phase0_foundation.md) — Toolchain, Cargo configuration, Linker scripts, QEMU runner.
-- [**Phase 1: Boot (M1 - M3)**](phases/phase1_boot.md) — Bootloader, ELF loader, GOP, kernel handoff.
-- [**Phase 2: CPU Architecture (M4 - M6)**](phases/phase2_cpu.md) — GDT, TSS, IDT, exceptions, APIC & timer.
-- [**Phase 3: Memory Management (M7 - M10)** *(Upcoming)*](phases/phase3_memory.md) — Physical frame allocator, paging, heap.
+- [**Complete Milestone Roadmap (Phase 0 – Phase 19, M0 – M42)**](phases/ROADMAP.md) — Full checklist of all 20 completed phases, 43 milestones, and 9 checkpoints.
+- [**Installation & Distribution Guide**](INSTALLATION.md) — Building images, `nullos.cfg`, release verification, and bare-metal USB flashing.
+- **Deep-Dive Phase Notes**:
+  - [**Phase 0: Foundation (M0)**](phases/phase0_foundation.md) — Toolchain, Cargo configuration, Linker scripts, QEMU runner.
+  - [**Phase 1: Boot (M1 – M3)**](phases/phase1_boot.md) — Bootloader, ELF loader, GOP, kernel handoff.
+  - [**Phase 2: CPU Architecture (M4 – M6)**](phases/phase2_cpu.md) — GDT, TSS, IDT, exceptions, APIC & timer.
+  - [**Phase 3: Memory Management (M7 – M9)**](phases/phase3_memory.md) — Physical frame allocator, paging, heap.
+  - [**Phase 4: Kernel Execution (M10 – M11)**](phases/phase4_execution.md) — Kernel threads and preemptive scheduler.
+  - [**Phase 5: User Mode, Syscalls & Process Management (M12 – M14)**](phases/phase5_usermode.md) — Ring 3 isolation, `SYSCALL`/`SYSRET`, ELF loading, and processes.
 
 ### 5. Development & Scripts
 - `./scripts/build.sh` / `scripts/windows/build.bat` (`scripts/windows/build.ps1`): Compiles bootloader & kernel and builds the GPT disk image or ESP partition.
 - `./scripts/run.sh` / `scripts/windows/run.bat` (`scripts/windows/run.ps1`): Launches QEMU with OVMF firmware, `-serial stdio`, and graphical GOP window (`--headless` for automated test check).
+- `./scripts/release.sh` (`--test`): Produces optimized release artifacts, `SHA256SUMS`, `RELEASE_MANIFEST.txt`, and optionally boot-tests x86_64/AArch64 UEFI in QEMU.
+- `./scripts/create_bootable_usb.sh` (`--verify --release` / `--device /dev/sdX`): Verifies image checksums/GPT layout or flashes a bootable UEFI USB drive.
+- `./scripts/ci_regression.sh`: Runs the full multi-target check, headless tests (Tests 1–34), release build/QEMU checks, and USB image verification.
 - `./scripts/clean.sh` / `scripts/windows/clean.bat` (`scripts/windows/clean.ps1`): Removes all build artifacts, temporary mount points, and backup files (`--all` or `-All` to clean Cargo target caches).
 
 ---
