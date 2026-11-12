@@ -269,6 +269,8 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // native PCI Ethernet drivers (Intel e1000e / Realtek RTL8168) and DHCP.
     drivers::virtio_net::init();
     drivers::virtio_net::run_self_tests();
+    drivers::e1000::init();
+    drivers::r8169::init();
 
     // Initialize TCP/IP Network Stack (Phase 8 - M24 Network Stack)
     net::init();

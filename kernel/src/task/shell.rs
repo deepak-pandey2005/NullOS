@@ -1020,9 +1020,10 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
         }
         "ifconfig" => {
             let mut out = String::new();
-            if let Some(dev) = crate::drivers::virtio_net::NETWORK_DEVICE.lock().as_ref() {
-                let mac = dev.mac();
-                let stats = dev.stats;
+            if let (Some(mac), Some(stats)) = (
+                crate::drivers::virtio_net::get_mac(),
+                crate::drivers::virtio_net::get_stats(),
+            ) {
                 let cfg = *crate::net::INTERFACE_CONFIG.lock();
                 out.push_str("eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500\n");
                 out.push_str(&alloc::format!("        inet {}  netmask {}  broadcast 10.0.2.255\n", cfg.ip, cfg.netmask));

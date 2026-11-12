@@ -11,6 +11,8 @@
 //! - **[`nvme`]**: PCIe Non-Volatile Memory Express (NVMe) storage controller driver.
 //! - **[`virtio_blk`]**: VirtIO modern PCI block storage driver implementing the BlockDevice trait.
 //! - **[`virtio_net`]**: VirtIO modern PCI network adapter driver with transmit/receive virtqueues.
+//! - **[`e1000`]**: Intel e1000 / e1000e bare-metal PCIe Gigabit Ethernet driver.
+//! - **[`r8169`]**: Realtek RTL8168/RTL8111/RTL8169 bare-metal PCIe Gigabit Ethernet driver.
 //! - **[`usb`]**: Extensible Host Controller Interface (USB 3.0 xHCI) and USB HID mouse/keyboard drivers.
 //! - **[`audio`]**: Intel High Definition Audio (HDA) controller and PCM audio generation.
 
@@ -18,9 +20,11 @@ pub mod ahci;
 pub mod audio;
 pub mod block;
 pub mod console;
+pub mod e1000;
 pub mod keyboard;
 pub mod nvme;
 pub mod pci;
+pub mod r8169;
 pub mod serial;
 pub mod usb;
 pub mod virtio_blk;

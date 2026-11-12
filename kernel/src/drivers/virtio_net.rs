@@ -623,32 +623,52 @@ pub fn init() {
     println!("[VIRTIO-NET] (Hypervisor-only: Physical PCs require Intel e1000e or Realtek RTL8168 drivers).");
 }
 
-/// Transmits a raw packet through the global network device.
+/// Transmits a raw packet through the active network device (VirtIO, Intel e1000/e1000e, or Realtek r8169).
 pub fn send(packet: &[u8]) -> Result<(), &'static str> {
     if let Some(ref mut dev) = *NETWORK_DEVICE.lock() {
+        dev.send_packet(packet)
+    } else if let Some(ref mut dev) = *crate::drivers::e1000::E1000_DEVICE.lock() {
+        dev.send_packet(packet)
+    } else if let Some(ref mut dev) = *crate::drivers::r8169::R8169_DEVICE.lock() {
         dev.send_packet(packet)
     } else {
         Err("No active network device")
     }
 }
 
-/// Receives a raw packet through the global network device if available.
+/// Receives a raw packet through the active network device if available.
 pub fn receive(buf: &mut [u8]) -> Result<Option<usize>, &'static str> {
     if let Some(ref mut dev) = *NETWORK_DEVICE.lock() {
+        dev.receive_packet(buf)
+    } else if let Some(ref mut dev) = *crate::drivers::e1000::E1000_DEVICE.lock() {
+        dev.receive_packet(buf)
+    } else if let Some(ref mut dev) = *crate::drivers::r8169::R8169_DEVICE.lock() {
         dev.receive_packet(buf)
     } else {
         Err("No active network device")
     }
 }
 
-/// Returns the MAC address of the network interface.
+/// Returns the MAC address of the active network interface.
 pub fn get_mac() -> Option<MacAddress> {
-    NETWORK_DEVICE.lock().as_ref().map(|dev| dev.mac())
+    if let Some(mac) = NETWORK_DEVICE.lock().as_ref().map(|dev| dev.mac()) {
+        return Some(mac);
+    }
+    if let Some(mac) = crate::drivers::e1000::E1000_DEVICE.lock().as_ref().map(|dev| dev.mac()) {
+        return Some(mac);
+    }
+    crate::drivers::r8169::R8169_DEVICE.lock().as_ref().map(|dev| dev.mac())
 }
 
 /// Returns current network statistics.
 pub fn get_stats() -> Option<NetStats> {
-    NETWORK_DEVICE.lock().as_ref().map(|dev| dev.stats)
+    if let Some(stats) = NETWORK_DEVICE.lock().as_ref().map(|dev| dev.stats) {
+        return Some(stats);
+    }
+    if let Some(stats) = crate::drivers::e1000::E1000_DEVICE.lock().as_ref().map(|dev| dev.stats) {
+        return Some(stats);
+    }
+    crate::drivers::r8169::R8169_DEVICE.lock().as_ref().map(|dev| dev.stats)
 }
 
 /// Runs automated driver self-tests verifying packet transmission and loopback handling.
