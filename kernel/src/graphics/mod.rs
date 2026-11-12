@@ -71,10 +71,12 @@ pub fn launch_demo() {
     if let Some(ref mut wm) = *wm_lock {
         // Clear any previous windows to start fresh
         wm.windows.clear();
+        wm.start_menu_open = false;
 
-        // Window 1: System Monitor
-        let win1_id = wm.create_window("System Monitor", 30, 30, 340, 230);
+        // Window 1: System Monitor (offset right of desktop icons)
+        let win1_id = wm.create_window("System Monitor", 112, 24, 340, 230);
         if let Some(win) = wm.windows.iter_mut().find(|w| w.id == win1_id) {
+            win.kind = window::WindowKind::SystemMonitor;
             win.surface.clear(Color::PANEL_BG);
             win.surface.draw_string(12, 12, "NullOS 64-Bit Desktop", Color::TITLE_ACTIVE, None);
             win.surface.draw_line(12, 32, 328, 32, Color::BORDER);
@@ -96,22 +98,24 @@ pub fn launch_demo() {
             let mut b4 = [0u8; 48];
             win.surface.draw_string(12, 104, format_stat(&mut b4, "Total RAM:    ", total_mem / (1024 * 1024), " MiB"), Color::LIGHT_SLATE, None);
             win.surface.draw_string(12, 128, "Compositor:   Exclusive GUI Mode", Color::YELLOW, None);
-            win.surface.draw_string(12, 148, "Double-Buffer: Enabled (60 FPS)", Color::CYAN, None);
-            win.surface.draw_string(12, 175, "Tip: Type 'exit' or click [Exit GUI]", Color::MUTED_TEXT, None);
+            win.surface.draw_string(12, 148, "Double-Buffer: Enabled (Cached BG)", Color::CYAN, None);
+            win.surface.draw_string(12, 175, "Tip: Click [NullOS] Start Menu", Color::MUTED_TEXT, None);
             win.surface.draw_string(12, 195, "     Press [ESC] to return to CLI", Color::MUTED_TEXT, None);
         }
 
         // Window 2: Kernel Log (dmesg viewer)
-        let win2_id = wm.create_window("Kernel Log (dmesg)", 390, 30, 500, 240);
+        let win2_id = wm.create_window("Kernel Log (dmesg)", 470, 24, 480, 230);
         if let Some(win) = wm.windows.iter_mut().find(|w| w.id == win2_id) {
+            win.kind = window::WindowKind::KernelLog;
             let logs = crate::drivers::console::get_dmesg_lines(14);
             win.render_log_surface(&logs);
         }
 
         // Window 3: Terminal Console (Interactive)
-        let win3_id = wm.create_window("Terminal Console", 80, 290, 520, 220);
+        let win3_id = wm.create_window("Terminal Console", 112, 290, 500, 220);
         if let Some(win) = wm.windows.iter_mut().find(|w| w.id == win3_id) {
-            win.term_lines.push("NullOS Interactive Desktop Terminal (v0.2.0)".to_string());
+            win.kind = window::WindowKind::Terminal;
+            win.term_lines.push("NullOS Interactive Desktop Terminal (v0.3.0)".to_string());
             win.term_lines.push("Type commands: help, dmesg, mem, uptime, clear, exit".to_string());
             win.term_lines.push("".to_string());
             win.render_terminal_surface();
@@ -119,7 +123,7 @@ pub fn launch_demo() {
         }
 
         // Window 4: 2D Graphics Demo
-        let win4_id = wm.create_window("2D Graphics Demo", 620, 290, 310, 220);
+        let win4_id = wm.create_window("2D Graphics Demo", 630, 290, 310, 220);
         if let Some(win) = wm.windows.iter_mut().find(|w| w.id == win4_id) {
             win.surface.clear(Color::DARK_SLATE);
             win.surface.draw_string(10, 10, "Bresenham & Midpoint Demo", Color::WHITE, None);
@@ -142,6 +146,173 @@ pub fn launch_demo() {
 
         wm.focused_window = Some(win3_id);
         wm.render_desktop();
+    }
+}
+
+pub fn open_terminal_window() {
+    let mut wm_lock = WINDOW_MANAGER.lock();
+    if let Some(ref mut wm) = *wm_lock {
+        let offset = ((wm.windows.len() % 5) * 24) as isize;
+        let id = wm.create_window("Terminal Console", 130 + offset, 260 + offset, 500, 220);
+        if let Some(win) = wm.windows.iter_mut().find(|w| w.id == id) {
+            win.kind = window::WindowKind::Terminal;
+            win.term_lines.push("NullOS Terminal".to_string());
+            win.term_lines.push("".to_string());
+            win.render_terminal_surface();
+        }
+    }
+}
+
+pub fn open_file_manager_window() {
+    let mut wm_lock = WINDOW_MANAGER.lock();
+    if let Some(ref mut wm) = *wm_lock {
+        if let Some(id) = wm.windows.iter().find(|w| w.kind == window::WindowKind::FileManager).map(|w| w.id) {
+            wm.bring_to_front(id);
+            return;
+        }
+        let id = wm.create_window("File Manager", 160, 80, 460, 320);
+        if let Some(win) = wm.windows.iter_mut().find(|w| w.id == id) {
+            win.kind = window::WindowKind::FileManager;
+            win.navigate_file_manager("/");
+        }
+    }
+}
+
+pub fn open_system_monitor_window() {
+    let mut wm_lock = WINDOW_MANAGER.lock();
+    if let Some(ref mut wm) = *wm_lock {
+        if let Some(id) = wm.windows.iter().find(|w| w.kind == window::WindowKind::SystemMonitor).map(|w| w.id) {
+            wm.bring_to_front(id);
+            return;
+        }
+        let id = wm.create_window("System Monitor", 120, 40, 340, 230);
+        if let Some(win) = wm.windows.iter_mut().find(|w| w.id == id) {
+            win.kind = window::WindowKind::SystemMonitor;
+        }
+    }
+    update_system_monitor();
+}
+
+pub fn open_kernel_log_window() {
+    let mut wm_lock = WINDOW_MANAGER.lock();
+    if let Some(ref mut wm) = *wm_lock {
+        if let Some(id) = wm.windows.iter().find(|w| w.kind == window::WindowKind::KernelLog).map(|w| w.id) {
+            wm.bring_to_front(id);
+            return;
+        }
+        let id = wm.create_window("Kernel Log (dmesg)", 460, 40, 480, 230);
+        if let Some(win) = wm.windows.iter_mut().find(|w| w.id == id) {
+            win.kind = window::WindowKind::KernelLog;
+        }
+    }
+    update_kernel_log();
+}
+
+fn user_gui_demo_thread() {
+    if let Ok(inode) = crate::fs::vfs::VFS.resolve_path("/bin/gui_demo.elf") {
+        let size = inode.stat().size;
+        if size > 0 {
+            let mut buf = alloc::vec![0u8; size];
+            if let Ok(n) = inode.read_at(0, &mut buf) {
+                buf.truncate(n);
+                let _ = crate::task::execute_user_elf("gui_demo", &buf);
+                return;
+            }
+        }
+    }
+    crate::println!("[GUI] /bin/gui_demo.elf not found in VFS.");
+}
+
+pub fn launch_user_gui_demo() {
+    crate::task::spawn("gui_demo", user_gui_demo_thread, 1);
+}
+
+fn process_desktop_actions() {
+    let actions: alloc::vec::Vec<wm::DesktopAction> = {
+        let mut wm_lock = WINDOW_MANAGER.lock();
+        if let Some(ref mut wm) = *wm_lock {
+            wm.pending_actions.drain(..).collect()
+        } else {
+            alloc::vec::Vec::new()
+        }
+    };
+    for action in actions {
+        match action {
+            wm::DesktopAction::OpenTerminal => open_terminal_window(),
+            wm::DesktopAction::OpenFileManager => open_file_manager_window(),
+            wm::DesktopAction::OpenSystemMonitor => open_system_monitor_window(),
+            wm::DesktopAction::OpenKernelLog => open_kernel_log_window(),
+            wm::DesktopAction::LaunchUserGuiDemo => launch_user_gui_demo(),
+        }
+    }
+}
+
+/// Creates a Ring 3 user application window in the compositor.
+pub fn user_create_window(owner_pid: u64, title: &str, width: usize, height: usize) -> Option<u32> {
+    let mut wm_lock = WINDOW_MANAGER.lock();
+    let wm = wm_lock.as_mut()?;
+    let w = width.clamp(64, wm.screen_width.saturating_sub(32));
+    let h = height.clamp(64, wm.screen_height.saturating_sub(80));
+    let offset = ((wm.windows.len() % 6) * 28) as isize;
+    let id = wm.create_window(title, 180 + offset, 90 + offset, w, h);
+    if let Some(win) = wm.windows.iter_mut().find(|win| win.id == id) {
+        win.kind = window::WindowKind::UserApp;
+        win.owner_pid = Some(owner_pid);
+        win.surface.clear(Color::BLACK);
+    }
+    Some(id)
+}
+
+/// Copies a Ring 3 ARGB pixel buffer into the window's surface and marks the desktop dirty.
+pub fn user_present_window(owner_pid: u64, win_id: u32, pixels: &[u32]) -> bool {
+    let mut wm_lock = WINDOW_MANAGER.lock();
+    let Some(wm) = wm_lock.as_mut() else {
+        return false;
+    };
+    let Some(win) = wm.windows.iter_mut().find(|w| w.id == win_id && w.owner_pid == Some(owner_pid)) else {
+        return false;
+    };
+    let copy_len = pixels.len().min(win.surface.buffer.len());
+    win.surface.buffer[..copy_len].copy_from_slice(&pixels[..copy_len]);
+    wm.is_dirty = true;
+    true
+}
+
+/// Pops the next queued `GuiUserEvent` for a Ring 3 window.
+pub fn user_poll_event(owner_pid: u64, win_id: u32) -> Option<event::GuiUserEvent> {
+    let mut wm_lock = WINDOW_MANAGER.lock();
+    let wm = wm_lock.as_mut()?;
+    let win = wm.windows.iter_mut().find(|w| w.id == win_id && w.owner_pid == Some(owner_pid))?;
+    win.pop_user_event()
+}
+
+/// Closes a Ring 3 window owned by `owner_pid`.
+pub fn user_close_window(owner_pid: u64, win_id: u32) -> bool {
+    let mut wm_lock = WINDOW_MANAGER.lock();
+    let Some(wm) = wm_lock.as_mut() else {
+        return false;
+    };
+    if wm.windows.iter().any(|w| w.id == win_id && w.owner_pid == Some(owner_pid)) {
+        wm.close_window(win_id);
+        true
+    } else {
+        false
+    }
+}
+
+/// Closes all windows owned by a terminated Ring 3 process.
+pub fn cleanup_user_windows(owner_pid: u64) {
+    let mut wm_lock = WINDOW_MANAGER.lock();
+    if let Some(ref mut wm) = *wm_lock {
+        let ids: alloc::vec::Vec<u32> = wm
+            .windows
+            .iter()
+            .filter(|w| w.owner_pid == Some(owner_pid))
+            .map(|w| w.id)
+            .collect();
+        for id in ids {
+            wm.close_window(id);
+        }
     }
 }
 
@@ -261,7 +432,14 @@ pub fn run_compositor() {
                 wm.is_dirty = true;
                 if let Some(focused_id) = wm.focused_window {
                     if let Some(win) = wm.windows.iter_mut().find(|w| w.id == focused_id) {
-                        if win.title.starts_with("Terminal") {
+                        if win.kind == window::WindowKind::UserApp {
+                            win.push_user_event(event::GuiUserEvent {
+                                kind: event::GUI_EVENT_KEY_DOWN,
+                                param1: ch as i32,
+                                param2: 0,
+                                param3: 0,
+                            });
+                        } else if win.kind == window::WindowKind::Terminal || win.title.starts_with("Terminal") {
                             match ch {
                                 '\n' => {
                                     let cmd = win.input_line.clone();
@@ -312,6 +490,7 @@ pub fn run_compositor() {
                 });
             }
         }
+        process_desktop_actions();
 
         // 3. Periodically update dynamic statistics (System Monitor & Kernel Log) every 1 second
         let current_tick = crate::arch::x86_64::apic::get_ticks();

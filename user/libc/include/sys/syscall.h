@@ -133,6 +133,10 @@
 
 /** Create an epoll event notification instance with flags (`flags`). */
 #define SYS_EPOLL_CREATE1   291
+#define SYS_GUI_CREATE_WINDOW 310
+#define SYS_GUI_PRESENT       311
+#define SYS_GUI_POLL_EVENT    312
+#define SYS_GUI_CLOSE_WINDOW  313
 
 /* Architecture Prctl Sub-operations for x86_64 Segment Registers */
 #define ARCH_SET_GS         0x1001

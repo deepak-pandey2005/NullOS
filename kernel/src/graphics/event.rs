@@ -14,6 +14,22 @@ pub enum MouseButton {
     Middle,
 }
 
+pub const GUI_EVENT_MOUSE_DOWN: u32 = 1;
+pub const GUI_EVENT_MOUSE_UP: u32 = 2;
+pub const GUI_EVENT_MOUSE_MOVE: u32 = 3;
+pub const GUI_EVENT_KEY_DOWN: u32 = 4;
+pub const GUI_EVENT_CLOSE_REQUESTED: u32 = 5;
+
+/// ABI-stable GUI event delivered to Ring 3 user applications via `SYS_GUI_POLL_EVENT`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuiUserEvent {
+    pub kind: u32,
+    pub param1: i32,
+    pub param2: i32,
+    pub param3: i32,
+}
+
 /// Unified user input event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputEvent {

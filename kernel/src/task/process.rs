@@ -202,14 +202,17 @@ pub fn create_process(name: &str, parent_pid: Option<ProcessId>) -> Result<Proce
 
 /// Marks a process as exited (Zombie state) and stores its exit code.
 pub fn exit_process(pid: ProcessId, exit_code: i32) {
-    let mut table = PROCESS_TABLE.lock();
-    if let Some(proc) = table.get_mut(pid) {
-        println!("[PROCESS] Process #{} \"{}\" exited with code: {}. Transitioning to Zombie state.",
-            pid.0, proc.name, exit_code
-        );
-        proc.state = ProcessState::Zombie(exit_code);
-        proc.exit_code = Some(exit_code);
+    {
+        let mut table = PROCESS_TABLE.lock();
+        if let Some(proc) = table.get_mut(pid) {
+            println!("[PROCESS] Process #{} \"{}\" exited with code: {}. Transitioning to Zombie state.",
+                pid.0, proc.name, exit_code
+            );
+            proc.state = ProcessState::Zombie(exit_code);
+            proc.exit_code = Some(exit_code);
+        }
     }
+    crate::graphics::cleanup_user_windows(pid.0);
 }
 
 /// Terminates a process by PID with a given signal / exit code.

@@ -101,6 +101,14 @@ pub const SYS_DLOPEN: u64 = 300;
 pub const SYS_DLSYM: u64 = 301;
 /// Dynamic linker dlclose syscall number (302).
 pub const SYS_DLCLOSE: u64 = 302;
+/// GUI compositor: create user window (`title_ptr`, `title_len`, `width`, `height`) -> `win_id`.
+pub const SYS_GUI_CREATE_WINDOW: u64 = 310;
+/// GUI compositor: present ARGB pixel buffer (`win_id`, `buf_ptr`, `buf_bytes`) -> `0`.
+pub const SYS_GUI_PRESENT: u64 = 311;
+/// GUI compositor: poll next `GuiUserEvent` (`win_id`, `out_event_ptr`) -> `1 | 0`.
+pub const SYS_GUI_POLL_EVENT: u64 = 312;
+/// GUI compositor: close user window (`win_id`) -> `0`.
+pub const SYS_GUI_CLOSE_WINDOW: u64 = 313;
 
 /// Sets Thread Local Storage (TLS) register `%gs` base address.
 pub const ARCH_SET_GS: u64 = 0x1001;
@@ -1231,6 +1239,80 @@ fn syscall_dispatcher_inner(
             match crate::task::dynlink::dlclose(handle) {
                 Ok(()) => 0,
                 Err(_) => (-1i64) as u64,
+            }
+        }
+        // SYS_GUI_CREATE_WINDOW (310): (title_ptr, title_len, width, height) -> win_id
+        SYS_GUI_CREATE_WINDOW => {
+            let title_ptr = a1 as *const u8;
+            let title_len = (a2 as usize).min(64);
+            let width = a3 as usize;
+            let height = a4 as usize;
+            if title_ptr.is_null() || title_len == 0 {
+                return (-22i64) as u64;
+            }
+            let mut title_buf = [0u8; 64];
+            if crate::security::copy_from_user(&mut title_buf[..title_len], title_ptr).is_err() {
+                return (-14i64) as u64;
+            }
+            let title = core::str::from_utf8(&title_buf[..title_len]).unwrap_or("App");
+            let pid = current_pid().0;
+            match crate::graphics::user_create_window(pid, title, width, height) {
+                Some(id) => id as u64,
+                None => (-12i64) as u64,
+            }
+        }
+        // SYS_GUI_PRESENT (311): (win_id, buf_ptr, buf_bytes) -> 0
+        SYS_GUI_PRESENT => {
+            let win_id = a1 as u32;
+            let buf_ptr = a2 as *const u8;
+            let buf_bytes = a3 as usize;
+            if buf_ptr.is_null() || buf_bytes == 0 || (buf_bytes % 4) != 0 || buf_bytes > 16 * 1024 * 1024 {
+                return (-22i64) as u64;
+            }
+            let mut kbuf = alloc::vec![0u8; buf_bytes];
+            if crate::security::copy_from_user(&mut kbuf, buf_ptr).is_err() {
+                return (-14i64) as u64;
+            }
+            let pixel_count = buf_bytes / 4;
+            let pixels: &[u32] = unsafe { core::slice::from_raw_parts(kbuf.as_ptr() as *const u32, pixel_count) };
+            let pid = current_pid().0;
+            if crate::graphics::user_present_window(pid, win_id, pixels) {
+                0
+            } else {
+                (-22i64) as u64
+            }
+        }
+        // SYS_GUI_POLL_EVENT (312): (win_id, out_event_ptr) -> 1 (event) | 0 (empty)
+        SYS_GUI_POLL_EVENT => {
+            let win_id = a1 as u32;
+            let out_ptr = a2 as *mut u8;
+            if out_ptr.is_null() {
+                return (-22i64) as u64;
+            }
+            let pid = current_pid().0;
+            if let Some(ev) = crate::graphics::user_poll_event(pid, win_id) {
+                let bytes: &[u8] = unsafe {
+                    core::slice::from_raw_parts(
+                        (&ev as *const crate::graphics::event::GuiUserEvent) as *const u8,
+                        core::mem::size_of::<crate::graphics::event::GuiUserEvent>(),
+                    )
+                };
+                if crate::security::copy_to_user(out_ptr, bytes).is_err() {
+                    return (-14i64) as u64;
+                }
+                1
+            } else {
+                0
+            }
+        }
+        // SYS_GUI_CLOSE_WINDOW (313): (win_id) -> 0
+        SYS_GUI_CLOSE_WINDOW => {
+            let win_id = a1 as u32;
+            let pid = current_pid().0;
+            if crate::graphics::user_close_window(pid, win_id) {
+                0
+            } else {
+                (-22i64) as u64
             }
         }
         unknown => {

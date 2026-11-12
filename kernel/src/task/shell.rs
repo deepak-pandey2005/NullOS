@@ -1898,8 +1898,23 @@ pub fn run_automated_tests() {
             assert!(wm.dragging.is_none());
 
             wm.render_desktop();
+            wm.minimize_window(win_id);
+            assert!(wm.windows[0].minimized);
+            wm.bring_to_front(win_id);
+            assert!(!wm.windows[0].minimized);
+            wm.toggle_maximize_window(win_id);
+            assert!(wm.windows[0].maximized);
+            wm.toggle_maximize_window(win_id);
+            assert!(!wm.windows[0].maximized);
             wm.close_window(win_id);
             assert_eq!(wm.windows.len(), 0);
+        }
+        drop(wm_lock);
+        // Test Ring 3 GUI surface & event bridge
+        if let Some(u_id) = crate::graphics::user_create_window(999, "Ring3 Test", 80, 60) {
+            let pixels = alloc::vec![0xFF336699u32; 80 * 60];
+            assert!(crate::graphics::user_present_window(999, u_id, &pixels));
+            assert!(crate::graphics::user_close_window(999, u_id));
         }
     }
     // Launch interactive demo showcase on screen
