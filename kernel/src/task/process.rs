@@ -304,19 +304,21 @@ pub fn spawn_init_process(elf_bytes: &[u8]) -> Result<ProcessId, &'static str> {
         loaded_elf.total_memory_size
     );
 
-    // Map user stack page (0x7000_0000)
-    let user_stack_vaddr = crate::memory::VirtAddr::new(0x7000_0000);
-    let stack_page = crate::memory::Page::containing_address(user_stack_vaddr);
-    let stack_frame = crate::memory::alloc_frame().ok_or("Out of memory for init user stack")?;
+    // Map user stack pages (0x7000_0000 - 0x7001_0000, 64 KiB)
+    for i in 0..16u64 {
+        let user_stack_vaddr = crate::memory::VirtAddr::new(0x7000_0000 + i * 4096);
+        let stack_page = crate::memory::Page::containing_address(user_stack_vaddr);
+        let stack_frame = crate::memory::alloc_frame().ok_or("Out of memory for init user stack")?;
 
-    crate::memory::paging::map_page(
-        stack_page,
-        stack_frame,
-        crate::memory::PageTableFlags::PRESENT
-            | crate::memory::PageTableFlags::WRITABLE
-            | crate::memory::PageTableFlags::USER_ACCESSIBLE
-            | crate::memory::PageTableFlags::NO_EXECUTE,
-    )?;
+        crate::memory::paging::map_page(
+            stack_page,
+            stack_frame,
+            crate::memory::PageTableFlags::PRESENT
+                | crate::memory::PageTableFlags::WRITABLE
+                | crate::memory::PageTableFlags::USER_ACCESSIBLE
+                | crate::memory::PageTableFlags::NO_EXECUTE,
+        )?;
+    }
 
     proc.state = ProcessState::Ready;
 
@@ -362,29 +364,32 @@ pub fn execute_user_elf(name: &str, elf_bytes: &[u8]) -> Result<i32, &'static st
             pid.0, name, loaded_elf.entry_point, loaded_elf.total_memory_size
         );
 
-        // Map user stack page (0x7000_0000)
-        let user_stack_vaddr = crate::memory::VirtAddr::new(0x7000_0000);
-        let stack_page = crate::memory::Page::containing_address(user_stack_vaddr);
-        let stack_frame = crate::memory::alloc_frame().ok_or("Out of memory for user stack")?;
+        // Map user stack pages (0x7000_0000 - 0x7001_0000, 64 KiB)
+        const USER_STACK_PAGES: u64 = 16;
+        for i in 0..USER_STACK_PAGES {
+            let user_stack_vaddr = crate::memory::VirtAddr::new(0x7000_0000 + i * 4096);
+            let stack_page = crate::memory::Page::containing_address(user_stack_vaddr);
+            let stack_frame = crate::memory::alloc_frame().ok_or("Out of memory for user stack")?;
 
-        crate::memory::paging::map_page(
-            stack_page,
-            stack_frame,
-            crate::memory::PageTableFlags::PRESENT
-                | crate::memory::PageTableFlags::WRITABLE
-                | crate::memory::PageTableFlags::USER_ACCESSIBLE
-                | crate::memory::PageTableFlags::NO_EXECUTE,
-        )?;
+            crate::memory::paging::map_page(
+                stack_page,
+                stack_frame,
+                crate::memory::PageTableFlags::PRESENT
+                    | crate::memory::PageTableFlags::WRITABLE
+                    | crate::memory::PageTableFlags::USER_ACCESSIBLE
+                    | crate::memory::PageTableFlags::NO_EXECUTE,
+            )?;
 
-        unsafe {
-            core::ptr::write_bytes(stack_frame.start_address().as_mut_ptr::<u8>(), 0, 4096);
+            unsafe {
+                core::ptr::write_bytes(stack_frame.start_address().as_mut_ptr::<u8>(), 0, 4096);
+            }
         }
 
         proc.state = ProcessState::Ready;
         loaded_elf.entry_point
     };
 
-    let user_stack_top = 0x7000_0000 + 4096 - 16;
+    let user_stack_top = 0x7000_0000 + 16 * 4096 - 16;
     super::syscall::set_current_pid(pid.0);
     PENDING_USER_ENTRY.store(entry_point, Ordering::SeqCst);
     PENDING_USER_STACK.store(user_stack_top, Ordering::SeqCst);

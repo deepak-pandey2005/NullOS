@@ -91,6 +91,28 @@ pub fn init(initramfs_data: Option<&[u8]>) {
     println!("[FS] Initialized standard device nodes: /dev/console, /dev/null, /dev/zero.");
 }
 
+/// Creates block device nodes in `/dev/` for all registered physical and virtual storage devices.
+pub fn sync_block_device_nodes() {
+    let dev_dir = match VFS.resolve_path("/dev") {
+        Ok(dir) => dir,
+        Err(_) => return,
+    };
+
+    if let Some(any_ref) = dev_dir.as_any() {
+        if let Some(ram_dev_dir) = any_ref.downcast_ref::<initramfs::RamDirectory>() {
+            for bdev in crate::drivers::block::all_devices() {
+                let node = alloc::sync::Arc::new(initramfs::BlockDeviceNode::new(bdev.clone()));
+                ram_dev_dir.insert_child(bdev.name(), node);
+                println!(
+                    "[DEV] Registered raw block device node '/dev/{}' ({} MiB).",
+                    bdev.name(),
+                    bdev.capacity_bytes() / (1024 * 1024)
+                );
+            }
+        }
+    }
+}
+
 /// Probes registered block devices and mounts detected persistent filesystems (FAT32 / ext2).
 ///
 /// # Detection Strategy

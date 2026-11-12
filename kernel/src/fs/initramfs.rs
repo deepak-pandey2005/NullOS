@@ -19,6 +19,7 @@
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 
@@ -205,6 +206,10 @@ impl Inode for RamDirectory {
             Err(FsError::NotFound)
         }
     }
+
+    fn as_any(&self) -> Option<&dyn core::any::Any> {
+        Some(self)
+    }
 }
 
 /// Character device node representing `/dev/console` and standard output.
@@ -345,6 +350,144 @@ impl Inode for NullDevice {
 
     fn write_at(&self, _offset: usize, buf: &[u8]) -> Result<usize, FsError> {
         Ok(buf.len())
+    }
+
+    fn lookup(&self, _name: &str) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotADirectory)
+    }
+
+    fn read_dir(&self) -> Result<Vec<DirEntry>, FsError> {
+        Err(FsError::NotADirectory)
+    }
+
+    fn create(&self, _name: &str, _file_type: FileType) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotADirectory)
+    }
+
+    fn poll(&self) -> u32 {
+        crate::fs::vfs::POLLIN | crate::fs::vfs::POLLOUT
+    }
+}
+
+/// Block device node representing a raw storage device (e.g. `/dev/virtio0`, `/dev/ahci0`).
+pub struct BlockDeviceNode {
+    inode_num: u64,
+    device: Arc<dyn crate::drivers::block::BlockDevice>,
+}
+
+impl BlockDeviceNode {
+    /// Creates a new block device node wrapping `device`.
+    pub fn new(device: Arc<dyn crate::drivers::block::BlockDevice>) -> Self {
+        Self {
+            inode_num: alloc_inode_num(),
+            device,
+        }
+    }
+}
+
+impl Inode for BlockDeviceNode {
+    fn stat(&self) -> FileStat {
+        FileStat {
+            inode_num: self.inode_num,
+            file_type: FileType::BlockDevice,
+            size: self.device.capacity_bytes() as usize,
+            mode: 0o660,
+        }
+    }
+
+    fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, FsError> {
+        let sector_size = self.device.sector_size();
+        if sector_size == 0 || buf.is_empty() {
+            return Ok(0);
+        }
+        let total_capacity = self.device.capacity_bytes() as usize;
+        if offset >= total_capacity {
+            return Ok(0); // EOF
+        }
+
+        let to_read = core::cmp::min(buf.len(), total_capacity - offset);
+        let start_sector = (offset / sector_size) as u64;
+        let sector_offset = offset % sector_size;
+        let end_sector = ((offset + to_read + sector_size - 1) / sector_size) as u64;
+
+        let mut read_bytes = 0usize;
+        let mut temp_sec = vec![0u8; sector_size];
+
+        for sec in start_sector..end_sector {
+            self.device
+                .read_sector(sec, &mut temp_sec)
+                .map_err(|_| FsError::IoError)?;
+
+            let src_start = if sec == start_sector { sector_offset } else { 0 };
+            let src_end = if sec == end_sector - 1 {
+                let tail = (offset + to_read) % sector_size;
+                if tail == 0 { sector_size } else { tail }
+            } else {
+                sector_size
+            };
+
+            let chunk_len = src_end.saturating_sub(src_start);
+            let dst_end = read_bytes + chunk_len;
+            if dst_end > to_read {
+                break;
+            }
+            buf[read_bytes..dst_end].copy_from_slice(&temp_sec[src_start..src_end]);
+            read_bytes += chunk_len;
+        }
+
+        Ok(read_bytes)
+    }
+
+    fn write_at(&self, offset: usize, buf: &[u8]) -> Result<usize, FsError> {
+        let sector_size = self.device.sector_size();
+        if sector_size == 0 || buf.is_empty() {
+            return Ok(0);
+        }
+        let total_capacity = self.device.capacity_bytes() as usize;
+        if offset >= total_capacity {
+            return Err(FsError::NoSpace);
+        }
+
+        let to_write = core::cmp::min(buf.len(), total_capacity - offset);
+        let start_sector = (offset / sector_size) as u64;
+        let sector_offset = offset % sector_size;
+        let end_sector = ((offset + to_write + sector_size - 1) / sector_size) as u64;
+
+        let mut written_bytes = 0usize;
+        let mut temp_sec = vec![0u8; sector_size];
+
+        for sec in start_sector..end_sector {
+            let is_partial = (sec == start_sector && sector_offset != 0)
+                || (sec == end_sector - 1 && ((offset + to_write) % sector_size) != 0);
+
+            if is_partial {
+                self.device
+                    .read_sector(sec, &mut temp_sec)
+                    .map_err(|_| FsError::IoError)?;
+            }
+
+            let dst_start = if sec == start_sector { sector_offset } else { 0 };
+            let dst_end = if sec == end_sector - 1 {
+                let tail = (offset + to_write) % sector_size;
+                if tail == 0 { sector_size } else { tail }
+            } else {
+                sector_size
+            };
+
+            let chunk_len = dst_end.saturating_sub(dst_start);
+            let src_end = written_bytes + chunk_len;
+            if src_end > to_write {
+                break;
+            }
+            temp_sec[dst_start..dst_end].copy_from_slice(&buf[written_bytes..src_end]);
+
+            self.device
+                .write_sector(sec, &temp_sec)
+                .map_err(|_| FsError::IoError)?;
+            written_bytes += chunk_len;
+        }
+
+        Ok(written_bytes)
     }
 
     fn lookup(&self, _name: &str) -> Result<Arc<dyn Inode>, FsError> {

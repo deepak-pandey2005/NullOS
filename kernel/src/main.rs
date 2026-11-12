@@ -259,6 +259,7 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     storage::init();
 
     // Mount Persistent Block Storage Filesystems (Phase 6 - M19 Filesystems)
+    fs::sync_block_device_nodes();
     fs::mount_block_devices();
 
     // Initialize Dynamic Linker & Shared Library Subsystem (Phase 14 - M34)

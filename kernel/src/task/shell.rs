@@ -1916,6 +1916,12 @@ pub fn run_automated_tests() {
     crate::storage::run_self_tests();
     execute_command("storage");
 
+    if VFS.resolve_path("/bin/fat32d.elf").is_ok() {
+        println!("[SHELL] Testing Ring 3 Userspace Filesystem Daemon (/bin/fat32d.elf)...");
+        let rc = execute_command("exec /bin/fat32d.elf");
+        assert_eq!(rc, 0, "Userspace FAT32 daemon must inspect /dev/virtio0 and exit 0");
+    }
+
     println!("[SHELL] 28. Testing High-Performance Networking, RSS Multiqueue, NAPI Polling, Zero-Copy, Batching & TCP Opt (M36)...");
     execute_command("netperf");
     crate::net::perf::run_self_tests();
