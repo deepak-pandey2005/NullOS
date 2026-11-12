@@ -605,25 +605,44 @@ impl Inode for Fat32Inode {
         }
 
         let bytes_per_cluster = (self.fs.bpb.sectors_per_cluster as usize) * 512;
-        let entry_offset = match target_offset {
-            Some(off) => off,
-            None => dir_data.len(),
-        };
+        let (entry_offset, target_cluster, sector_in_cluster, offset_in_sec) = match target_offset {
+            Some(off) => {
+                let cluster_idx = off / bytes_per_cluster;
+                let offset_in_cluster = off % bytes_per_cluster;
+                let sec_in_cluster = (offset_in_cluster / 512) as u64;
+                let off_in_sec = offset_in_cluster % 512;
 
-        // Write the entry into the directory cluster
-        let cluster_idx = entry_offset / bytes_per_cluster;
-        let offset_in_cluster = entry_offset % bytes_per_cluster;
-        let sector_in_cluster = (offset_in_cluster / 512) as u64;
-        let offset_in_sec = offset_in_cluster % 512;
-
-        let mut curr_dir = Some(self.first_cluster);
-        let mut target_cluster = self.first_cluster;
-        for _ in 0..cluster_idx {
-            if let Some(c) = curr_dir {
-                curr_dir = self.fs.get_next_cluster(c)?;
-                if let Some(next) = curr_dir { target_cluster = next; }
+                let mut curr_dir = Some(self.first_cluster);
+                let mut tgt_cluster = self.first_cluster;
+                for _ in 0..cluster_idx {
+                    if let Some(c) = curr_dir {
+                        curr_dir = self.fs.get_next_cluster(c)?;
+                        if let Some(next) = curr_dir {
+                            tgt_cluster = next;
+                        }
+                    }
+                }
+                (off, tgt_cluster, sec_in_cluster, off_in_sec)
             }
-        }
+            None => {
+                // Directory is full: allocate and zero-fill a new cluster and link it to the chain
+                let mut last_cluster = self.first_cluster;
+                while let Some(next) = self.fs.get_next_cluster(last_cluster)? {
+                    last_cluster = next;
+                }
+                let new_dir_cluster = self.fs.allocate_cluster()?;
+                self.fs.set_fat_entry(last_cluster, new_dir_cluster)?;
+                let zero_sec = [0u8; SECTOR_SIZE];
+                let base_sec = self.fs.cluster_to_sector(new_dir_cluster);
+                for s in 0..self.fs.bpb.sectors_per_cluster {
+                    self.fs
+                        .block_dev
+                        .write_sector(base_sec + s as u64, &zero_sec)
+                        .map_err(|_| FsError::IoError)?;
+                }
+                (dir_data.len(), new_dir_cluster, 0u64, 0usize)
+            }
+        };
 
         let target_sector = self.fs.cluster_to_sector(target_cluster) + sector_in_cluster;
         let mut sec_buf = [0u8; SECTOR_SIZE];

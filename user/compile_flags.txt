@@ -1,0 +1,11 @@
+-Wall
+-Wextra
+-nostdinc
+-isystem
+libc/include
+-Icompositor
+-fno-builtin
+-fno-stack-protector
+-mno-red-zone
+-mcmodel=small
+

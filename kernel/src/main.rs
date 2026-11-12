@@ -177,6 +177,7 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
 
     // Initialize Physical Memory Manager (Phase 3 - M7, M8, M9)
     memory::init(boot_info);
+    drivers::console::init_backbuffer();
     memory::run_self_tests();
 
     // Initialize Phase 18 M40 Debugging & Observability (Symbolizer, Klog, Lockdep)

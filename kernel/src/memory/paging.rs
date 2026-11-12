@@ -670,21 +670,28 @@ pub fn init(boot_info: &'static BootInfo) {
     println!("[PAGING] 4-level x86_64 Virtual Memory Paging active.");
 }
 
-/// Translates a virtual address into its physical address using the active kernel page table.
+/// Translates a virtual address into its physical address using the currently active page table (CR3).
 pub fn translate_addr(vaddr: VirtAddr) -> Option<PhysAddr> {
-    KERNEL_PAGE_TABLE
-        .lock()
-        .as_ref()
-        .and_then(|kpt| kpt.translate_addr(vaddr))
+    let (active_cr3, _) = x86::read_cr3();
+    let guard = KERNEL_PAGE_TABLE.lock();
+    let kpt = guard.as_ref()?;
+    if active_cr3 == kpt.pml4_frame() {
+        kpt.translate_addr(vaddr)
+    } else {
+        KernelPageTable::new(active_cr3).translate_addr(vaddr)
+    }
 }
 
-/// Maps a page using the active kernel page table.
+/// Maps a page into the currently active page table (CR3).
 pub fn map_page(page: Page, frame: PhysFrame, flags: PageTableFlags) -> Result<(), &'static str> {
-    KERNEL_PAGE_TABLE
-        .lock()
-        .as_mut()
-        .ok_or("Kernel page table not initialized")?
-        .map_page(page, frame, flags)
+    let (active_cr3, _) = x86::read_cr3();
+    let mut guard = KERNEL_PAGE_TABLE.lock();
+    let kpt = guard.as_mut().ok_or("Kernel page table not initialized")?;
+    if active_cr3 == kpt.pml4_frame() {
+        kpt.map_page(page, frame, flags)
+    } else {
+        KernelPageTable::new(active_cr3).map_page(page, frame, flags)
+    }
 }
 
 /// Identity-maps a physical memory range 1:1 using the active kernel page table.
@@ -696,13 +703,16 @@ pub fn identity_map_range(start: PhysAddr, size: u64, flags: PageTableFlags) -> 
         .identity_map_range(start, size, flags)
 }
 
-/// Unmaps a page using the active kernel page table.
+/// Unmaps a page from the currently active page table (CR3).
 pub fn unmap_page(page: Page) -> Result<PhysFrame, &'static str> {
-    KERNEL_PAGE_TABLE
-        .lock()
-        .as_mut()
-        .ok_or("Kernel page table not initialized")?
-        .unmap_page(page)
+    let (active_cr3, _) = x86::read_cr3();
+    let mut guard = KERNEL_PAGE_TABLE.lock();
+    let kpt = guard.as_mut().ok_or("Kernel page table not initialized")?;
+    if active_cr3 == kpt.pml4_frame() {
+        kpt.unmap_page(page)
+    } else {
+        KernelPageTable::new(active_cr3).unmap_page(page)
+    }
 }
 
 /// Executes comprehensive self-tests verifying virtual memory mapping, translation, and unmapping.

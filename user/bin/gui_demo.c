@@ -1,5 +1,4 @@
 #include <nullos_gui.h>
-#include <stdlib.h>
 #include <unistd.h>
 
 #define WIN_W 320

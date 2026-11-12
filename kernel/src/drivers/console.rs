@@ -55,7 +55,43 @@ enum AnsiState {
     Param(u32),
 }
 
-/// Linear framebuffer text console renderer.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Cell {
+    ch: char,
+    fg: u32,
+    bg: u32,
+}
+
+impl Cell {
+    const fn blank() -> Self {
+        Self {
+            ch: ' ',
+            fg: DEFAULT_FG,
+            bg: DEFAULT_BG,
+        }
+    }
+}
+
+struct CellBuffer {
+    cols: usize,
+    logical: Vec<Cell>,
+    displayed: Vec<Cell>,
+}
+
+impl CellBuffer {
+    fn new(cols: usize, rows: usize) -> Self {
+        let total = cols * rows;
+        Self {
+            cols,
+            logical: alloc::vec![Cell::blank(); total],
+            displayed: alloc::vec![Cell::blank(); total],
+        }
+    }
+}
+
+static CELL_BUFFER: Spinlock<Option<CellBuffer>> = Spinlock::new(None);
+
+/// Linear framebuffer text console renderer with RAM text-cell ring buffer & dirty-cell redraw.
 pub struct FramebufferConsole {
     address: u64,
     width: usize,
@@ -63,8 +99,11 @@ pub struct FramebufferConsole {
     stride: usize,
     _bytes_per_pixel: usize,
     _pixel_format: PixelFormat,
-    cursor_x: usize,
-    cursor_y: usize,
+    cols: usize,
+    rows: usize,
+    cursor_col: usize,
+    cursor_row: usize,
+    top_row: usize,
     fg_color: u32,
     bg_color: u32,
     ansi_state: AnsiState,
@@ -112,6 +151,8 @@ static DMESG_RING: Spinlock<DmesgRing> = Spinlock::new(DmesgRing::new());
 
 impl FramebufferConsole {
     pub fn new(fb: &FramebufferInfo) -> Self {
+        let cols = (fb.width / CHAR_WIDTH).max(1);
+        let rows = (fb.height / CHAR_HEIGHT).max(1);
         Self {
             address: fb.address,
             width: fb.width,
@@ -119,8 +160,11 @@ impl FramebufferConsole {
             stride: fb.stride,
             _bytes_per_pixel: fb.bytes_per_pixel,
             _pixel_format: fb.pixel_format,
-            cursor_x: 0,
-            cursor_y: 0,
+            cols,
+            rows,
+            cursor_col: 0,
+            cursor_row: 0,
+            top_row: 0,
             fg_color: DEFAULT_FG,
             bg_color: DEFAULT_BG,
             ansi_state: AnsiState::Normal,
@@ -136,11 +180,29 @@ impl FramebufferConsole {
                 *ptr.add(i) = color;
             }
         }
-        self.cursor_x = 0;
-        self.cursor_y = 0;
+
+        let blank = Cell {
+            ch: ' ',
+            fg: self.fg_color,
+            bg: self.bg_color,
+        };
+        if let Some(ref mut buf) = *CELL_BUFFER.lock() {
+            buf.logical.fill(blank);
+            buf.displayed.fill(blank);
+        }
+
+        self.cursor_col = 0;
+        self.cursor_row = 0;
+        self.top_row = 0;
     }
 
+    #[allow(dead_code)]
     pub fn write_char(&mut self, c: char) {
+        self.write_char_buffered(c);
+        self.flush();
+    }
+
+    fn write_char_buffered(&mut self, c: char) {
         // ANSI escape sequence state machine
         match self.ansi_state {
             AnsiState::Normal => {
@@ -184,38 +246,63 @@ impl FramebufferConsole {
             }
         }
 
-        // Standard character rendering
+        // Standard character rendering into RAM cell ring buffer (or direct before heap init)
         match c {
             '\n' => self.newline(),
-            '\r' => self.cursor_x = 0,
+            '\r' => self.cursor_col = 0,
             '\x08' => {
-                if self.cursor_x >= CHAR_WIDTH {
-                    self.cursor_x -= CHAR_WIDTH;
-                } else if self.cursor_y >= CHAR_HEIGHT {
-                    self.cursor_y -= CHAR_HEIGHT;
-                    self.cursor_x = (self.width / CHAR_WIDTH) * CHAR_WIDTH - CHAR_WIDTH;
+                if self.cursor_col > 0 {
+                    self.cursor_col -= 1;
+                } else if self.cursor_row > 0 {
+                    self.cursor_row -= 1;
+                    self.cursor_col = self.cols - 1;
                 }
             }
             '\t' => {
                 for _ in 0..4 {
-                    self.write_char(' ');
+                    self.write_char_buffered(' ');
                 }
             }
             ' ' => {
-                if self.cursor_x + CHAR_WIDTH > self.width {
+                if self.cursor_col >= self.cols {
                     self.newline();
                 }
-                self.clear_char(self.cursor_x, self.cursor_y);
-                self.cursor_x += CHAR_WIDTH;
+                self.emit_cell(Cell {
+                    ch: ' ',
+                    fg: self.fg_color,
+                    bg: self.bg_color,
+                });
+                self.cursor_col += 1;
             }
             c if !c.is_control() => {
-                if self.cursor_x + CHAR_WIDTH > self.width {
+                if self.cursor_col >= self.cols {
                     self.newline();
                 }
-                self.draw_char(self.cursor_x, self.cursor_y, c);
-                self.cursor_x += CHAR_WIDTH;
+                self.emit_cell(Cell {
+                    ch: c,
+                    fg: self.fg_color,
+                    bg: self.bg_color,
+                });
+                self.cursor_col += 1;
             }
             _ => {}
+        }
+    }
+
+    #[inline]
+    fn emit_cell(&self, cell: Cell) {
+        let mut guard = CELL_BUFFER.lock();
+        if let Some(ref mut buf) = *guard {
+            let log_row = (self.top_row + self.cursor_row) % self.rows;
+            buf.logical[log_row * buf.cols + self.cursor_col] = cell;
+        } else {
+            let x_pos = self.cursor_col * CHAR_WIDTH;
+            let y_pos = self.cursor_row * CHAR_HEIGHT;
+            if cell.ch == ' ' {
+                self.clear_char_at(x_pos, y_pos, cell.bg);
+            } else {
+                self.draw_char_at(x_pos, y_pos, cell.ch, cell.fg, cell.bg);
+            }
         }
     }
 
@@ -243,35 +330,75 @@ impl FramebufferConsole {
     }
 
     fn newline(&mut self) {
-        self.cursor_x = 0;
-        self.cursor_y += CHAR_HEIGHT;
-        if self.cursor_y + CHAR_HEIGHT > self.height {
+        self.cursor_col = 0;
+        if self.cursor_row + 1 < self.rows {
+            self.cursor_row += 1;
+        } else {
             self.scroll_up();
         }
     }
 
-    /// High-performance screen scrolling via block memory movement.
+    /// O(1) ring-buffer scroll in RAM — never reads back from hardware VRAM once backbuffer is active.
     fn scroll_up(&mut self) {
-        let ptr = self.address as *mut u32;
-        let lines_to_move = self.height - CHAR_HEIGHT;
-        let total_pixels_to_move = lines_to_move * self.stride;
-
-        unsafe {
-            // Fast sequential block copy
-            core::ptr::copy(ptr.add(CHAR_HEIGHT * self.stride), ptr, total_pixels_to_move);
-
-            // Fast clear of the newly exposed bottom row
-            let clear_ptr = ptr.add(total_pixels_to_move);
-            let clear_count = CHAR_HEIGHT * self.stride;
-            for i in 0..clear_count {
-                *clear_ptr.add(i) = self.bg_color;
+        let mut guard = CELL_BUFFER.lock();
+        if let Some(ref mut buf) = *guard {
+            self.top_row = (self.top_row + 1) % self.rows;
+            let bottom_log_row = (self.top_row + self.rows - 1) % self.rows;
+            let row_base = bottom_log_row * buf.cols;
+            let blank = Cell {
+                ch: ' ',
+                fg: self.fg_color,
+                bg: self.bg_color,
+            };
+            buf.logical[row_base..row_base + buf.cols].fill(blank);
+            self.cursor_row = self.rows - 1;
+        } else {
+            // Early-boot fallback before heap is initialized
+            let ptr = self.address as *mut u32;
+            let lines_to_move = self.height - CHAR_HEIGHT;
+            let total_pixels_to_move = lines_to_move * self.stride;
+            unsafe {
+                core::ptr::copy(ptr.add(CHAR_HEIGHT * self.stride), ptr, total_pixels_to_move);
+                let clear_ptr = ptr.add(total_pixels_to_move);
+                let clear_count = CHAR_HEIGHT * self.stride;
+                for i in 0..clear_count {
+                    *clear_ptr.add(i) = self.bg_color;
+                }
             }
+            self.cursor_row = self.rows - 1;
         }
-
-        self.cursor_y = lines_to_move;
     }
 
-    fn clear_char(&mut self, x_pos: usize, y_pos: usize) {
+    /// Flushes only dirty character cells from the RAM ring buffer to the GOP framebuffer (write-only).
+    pub fn flush(&self) {
+        let mut guard = CELL_BUFFER.lock();
+        let buf = match *guard {
+            Some(ref mut b) => b,
+            None => return,
+        };
+
+        for screen_row in 0..self.rows {
+            let log_row = (self.top_row + screen_row) % self.rows;
+            let log_base = log_row * buf.cols;
+            let disp_base = screen_row * buf.cols;
+            let y_pos = screen_row * CHAR_HEIGHT;
+
+            for col in 0..self.cols {
+                let cell = buf.logical[log_base + col];
+                if cell != buf.displayed[disp_base + col] {
+                    buf.displayed[disp_base + col] = cell;
+                    let x_pos = col * CHAR_WIDTH;
+                    if cell.ch == ' ' {
+                        self.clear_char_at(x_pos, y_pos, cell.bg);
+                    } else {
+                        self.draw_char_at(x_pos, y_pos, cell.ch, cell.fg, cell.bg);
+                    }
+                }
+            }
+        }
+    }
+
+    fn clear_char_at(&self, x_pos: usize, y_pos: usize, bg: u32) {
         let ptr = self.address as *mut u32;
         for row_idx in 0..CHAR_HEIGHT {
             if y_pos + row_idx >= self.height {
@@ -283,13 +410,13 @@ impl FramebufferConsole {
                     break;
                 }
                 unsafe {
-                    *ptr.add(row_offset + x_pos + col_idx) = self.bg_color;
+                    *ptr.add(row_offset + x_pos + col_idx) = bg;
                 }
             }
         }
     }
 
-    fn draw_char(&mut self, x_pos: usize, y_pos: usize, c: char) {
+    fn draw_char_at(&self, x_pos: usize, y_pos: usize, c: char, fg: u32, bg: u32) {
         let raster = get_raster(c, FontWeight::Regular, FONT_HEIGHT)
             .unwrap_or_else(|| get_raster('?', FontWeight::Regular, FONT_HEIGHT).unwrap());
 
@@ -307,11 +434,11 @@ impl FramebufferConsole {
                 }
 
                 let pixel_color = if intensity > 128 {
-                    self.fg_color
+                    fg
                 } else if intensity > 30 {
-                    self.blend_color(self.fg_color, self.bg_color, intensity)
+                    self.blend_color(fg, bg, intensity)
                 } else {
-                    self.bg_color
+                    bg
                 };
 
                 unsafe {
@@ -344,8 +471,9 @@ impl FramebufferConsole {
 impl fmt::Write for FramebufferConsole {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for c in s.chars() {
-            self.write_char(c);
+            self.write_char_buffered(c);
         }
+        self.flush();
         Ok(())
     }
 }
@@ -357,6 +485,52 @@ pub fn init(fb: &FramebufferInfo) {
     let mut console = FramebufferConsole::new(fb);
     console.clear();
     *CONSOLE.lock() = Some(console);
+}
+
+/// Activates the heap-backed RAM text-cell ring buffer once the kernel heap is ready,
+/// syncing existing screen content from `DMESG_RING` without touching hardware VRAM.
+pub fn init_backbuffer() {
+    let (cols, rows) = match *CONSOLE.lock() {
+        Some(ref c) => (c.cols, c.rows),
+        None => return,
+    };
+
+    let buf = CellBuffer::new(cols, rows);
+    let raw_bytes: Vec<u8> = {
+        let ring = DMESG_RING.lock();
+        let mut v = Vec::with_capacity(ring.count);
+        for i in 0..ring.count {
+            v.push(ring.buf[(ring.head + i) % DMESG_CAPACITY]);
+        }
+        v
+    };
+
+    if let Some(ref mut console) = *CONSOLE.lock() {
+        console.cursor_col = 0;
+        console.cursor_row = 0;
+        console.top_row = 0;
+        console.fg_color = DEFAULT_FG;
+        console.bg_color = DEFAULT_BG;
+        console.ansi_state = AnsiState::Normal;
+
+        *CELL_BUFFER.lock() = Some(buf);
+
+        if let Ok(s) = core::str::from_utf8(&raw_bytes) {
+            for ch in s.chars() {
+                console.write_char_buffered(ch);
+            }
+        }
+
+        if let Some(ref mut cb) = *CELL_BUFFER.lock() {
+            for screen_row in 0..console.rows {
+                let log_row = (console.top_row + screen_row) % console.rows;
+                let log_base = log_row * cb.cols;
+                let disp_base = screen_row * cb.cols;
+                cb.displayed[disp_base..disp_base + cb.cols]
+                    .copy_from_slice(&cb.logical[log_base..log_base + cb.cols]);
+            }
+        }
+    }
 }
 
 /// Suspends or resumes direct rendering to the GOP framebuffer console.
