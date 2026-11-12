@@ -12,6 +12,27 @@ if [ -d "${ROOT_DIR}/build" ]; then
     rm -rf "${ROOT_DIR}/build"
 fi
 
+# Clean userspace libc and user binaries (user/build/, user/libc/build/)
+if [ -f "${ROOT_DIR}/user/Makefile" ]; then
+    echo "  -> Cleaning userspace libc and binaries..."
+    make -C "${ROOT_DIR}/user" clean > /dev/null 2>&1 || true
+    rm -rf "${ROOT_DIR}/user/build" "${ROOT_DIR}/user/libc/build"
+fi
+
+# Clean SDK sysroot, examples, and templates
+if [ -d "${ROOT_DIR}/sdk" ]; then
+    echo "  -> Cleaning SDK sysroot and demo packages..."
+    rm -rf "${ROOT_DIR}/sdk/sysroot"
+    for ex_dir in "${ROOT_DIR}/sdk/examples"/* "${ROOT_DIR}/sdk/templates"/*; do
+        if [ -d "${ex_dir}/build" ]; then
+            rm -rf "${ex_dir}/build"
+        fi
+        if [ -f "${ex_dir}/Makefile" ]; then
+            make -C "${ex_dir}" clean > /dev/null 2>&1 || true
+        fi
+    done
+fi
+
 # Clean Rust target directory if requested via --all or -a
 if [[ "${1:-}" == "--all" || "${1:-}" == "-a" ]]; then
     echo "  -> Cleaning Cargo build targets..."
