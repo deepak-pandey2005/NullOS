@@ -74,17 +74,39 @@ impl Cell {
 
 struct CellBuffer {
     cols: usize,
+    #[allow(dead_code)]
+    rows: usize,
+    stride: usize,
+    height: usize,
     logical: Vec<Cell>,
-    displayed: Vec<Cell>,
+    shadow_fb: Vec<u32>,
+    dirty_min_y: usize,
+    dirty_max_y: usize,
 }
 
 impl CellBuffer {
-    fn new(cols: usize, rows: usize) -> Self {
+    fn new(cols: usize, rows: usize, stride: usize, height: usize, bg_color: u32) -> Self {
         let total = cols * rows;
+        let total_pixels = stride * height;
         Self {
             cols,
+            rows,
+            stride,
+            height,
             logical: alloc::vec![Cell::blank(); total],
-            displayed: alloc::vec![Cell::blank(); total],
+            shadow_fb: alloc::vec![bg_color; total_pixels],
+            dirty_min_y: 0,
+            dirty_max_y: height,
+        }
+    }
+
+    #[inline]
+    fn mark_dirty(&mut self, y_start: usize, y_end: usize) {
+        if y_start < self.dirty_min_y {
+            self.dirty_min_y = y_start;
+        }
+        if y_end > self.dirty_max_y {
+            self.dirty_max_y = y_end;
         }
     }
 }
@@ -172,28 +194,34 @@ impl FramebufferConsole {
     }
 
     pub fn clear(&mut self) {
-        let ptr = self.address as *mut u32;
-        let total_pixels = self.stride * self.height;
-        let color = self.bg_color;
-        for i in 0..total_pixels {
-            unsafe {
-                *ptr.add(i) = color;
-            }
-        }
-
         let blank = Cell {
             ch: ' ',
             fg: self.fg_color,
             bg: self.bg_color,
         };
-        if let Some(ref mut buf) = *CELL_BUFFER.lock() {
-            buf.logical.fill(blank);
-            buf.displayed.fill(blank);
+        {
+            let mut guard = CELL_BUFFER.lock();
+            if let Some(ref mut buf) = *guard {
+                buf.logical.fill(blank);
+                buf.shadow_fb.fill(self.bg_color);
+                buf.dirty_min_y = 0;
+                buf.dirty_max_y = self.height;
+            } else {
+                let ptr = self.address as *mut u32;
+                let total_pixels = self.stride * self.height;
+                let color = self.bg_color;
+                for i in 0..total_pixels {
+                    unsafe {
+                        *ptr.add(i) = color;
+                    }
+                }
+            }
         }
 
         self.cursor_col = 0;
         self.cursor_row = 0;
         self.top_row = 0;
+        self.flush();
     }
 
     #[allow(dead_code)]
@@ -291,13 +319,62 @@ impl FramebufferConsole {
 
     #[inline]
     fn emit_cell(&self, cell: Cell) {
+        let x_pos = self.cursor_col * CHAR_WIDTH;
+        let y_pos = self.cursor_row * CHAR_HEIGHT;
+
         let mut guard = CELL_BUFFER.lock();
         if let Some(ref mut buf) = *guard {
             let log_row = (self.top_row + self.cursor_row) % self.rows;
             buf.logical[log_row * buf.cols + self.cursor_col] = cell;
+
+            let y_end = (y_pos + CHAR_HEIGHT).min(buf.height);
+            buf.mark_dirty(y_pos, y_end);
+
+            if cell.ch == ' ' {
+                for row_idx in 0..CHAR_HEIGHT {
+                    let cur_y = y_pos + row_idx;
+                    if cur_y >= buf.height {
+                        break;
+                    }
+                    let row_offset = cur_y * buf.stride;
+                    for col_idx in 0..CHAR_WIDTH {
+                        let cur_x = x_pos + col_idx;
+                        if cur_x >= self.width {
+                            break;
+                        }
+                        buf.shadow_fb[row_offset + cur_x] = cell.bg;
+                    }
+                }
+            } else {
+                let raster = get_raster(cell.ch, FontWeight::Regular, FONT_HEIGHT)
+                    .unwrap_or_else(|| get_raster('?', FontWeight::Regular, FONT_HEIGHT).unwrap());
+
+                for (row_idx, row) in raster.raster().iter().enumerate() {
+                    let cur_y = y_pos + row_idx;
+                    if cur_y >= buf.height {
+                        break;
+                    }
+                    let row_offset = cur_y * buf.stride;
+
+                    for (col_idx, &intensity) in row.iter().enumerate() {
+                        let cur_x = x_pos + col_idx;
+                        if cur_x >= self.width {
+                            break;
+                        }
+
+                        let pixel_color = if intensity > 128 {
+                            cell.fg
+                        } else if intensity > 30 {
+                            self.blend_color(cell.fg, cell.bg, intensity)
+                        } else {
+                            cell.bg
+                        };
+
+                        buf.shadow_fb[row_offset + cur_x] = pixel_color;
+                    }
+                }
+            }
         } else {
-            let x_pos = self.cursor_col * CHAR_WIDTH;
-            let y_pos = self.cursor_row * CHAR_HEIGHT;
             if cell.ch == ' ' {
                 self.clear_char_at(x_pos, y_pos, cell.bg);
             } else {
@@ -338,7 +415,7 @@ impl FramebufferConsole {
         }
     }
 
-    /// O(1) ring-buffer scroll in RAM — never reads back from hardware VRAM once backbuffer is active.
+    /// Fast RAM shadow buffer scroll: memmove in cached DRAM without touching hardware VRAM.
     fn scroll_up(&mut self) {
         let mut guard = CELL_BUFFER.lock();
         if let Some(ref mut buf) = *guard {
@@ -351,6 +428,24 @@ impl FramebufferConsole {
                 bg: self.bg_color,
             };
             buf.logical[row_base..row_base + buf.cols].fill(blank);
+
+            let lines_to_move = self.height.saturating_sub(CHAR_HEIGHT);
+            let total_pixels_to_move = lines_to_move * self.stride;
+            let shadow_ptr = buf.shadow_fb.as_mut_ptr();
+            unsafe {
+                core::ptr::copy(
+                    shadow_ptr.add(CHAR_HEIGHT * self.stride),
+                    shadow_ptr,
+                    total_pixels_to_move,
+                );
+                let clear_ptr = shadow_ptr.add(total_pixels_to_move);
+                let clear_count = CHAR_HEIGHT * self.stride;
+                for i in 0..clear_count {
+                    *clear_ptr.add(i) = self.bg_color;
+                }
+            }
+            buf.dirty_min_y = 0;
+            buf.dirty_max_y = self.height;
             self.cursor_row = self.rows - 1;
         } else {
             // Early-boot fallback before heap is initialized
@@ -369,32 +464,37 @@ impl FramebufferConsole {
         }
     }
 
-    /// Flushes only dirty character cells from the RAM ring buffer to the GOP framebuffer (write-only).
+    /// Flushes updated scanlines from the RAM shadow buffer to the hardware GOP framebuffer (write-only).
     pub fn flush(&self) {
+        if CONSOLE_SUSPENDED.load(Ordering::Relaxed) {
+            return;
+        }
+
         let mut guard = CELL_BUFFER.lock();
         let buf = match *guard {
             Some(ref mut b) => b,
             None => return,
         };
 
-        for screen_row in 0..self.rows {
-            let log_row = (self.top_row + screen_row) % self.rows;
-            let log_base = log_row * buf.cols;
-            let disp_base = screen_row * buf.cols;
-            let y_pos = screen_row * CHAR_HEIGHT;
+        if buf.dirty_max_y > buf.dirty_min_y {
+            let min_y = buf.dirty_min_y.min(self.height);
+            let max_y = buf.dirty_max_y.min(self.height);
+            if max_y > min_y {
+                let start_pixel = min_y * self.stride;
+                let pixel_count = (max_y - min_y) * self.stride;
+                let vram_ptr = self.address as *mut u32;
+                let shadow_ptr = buf.shadow_fb.as_ptr();
 
-            for col in 0..self.cols {
-                let cell = buf.logical[log_base + col];
-                if cell != buf.displayed[disp_base + col] {
-                    buf.displayed[disp_base + col] = cell;
-                    let x_pos = col * CHAR_WIDTH;
-                    if cell.ch == ' ' {
-                        self.clear_char_at(x_pos, y_pos, cell.bg);
-                    } else {
-                        self.draw_char_at(x_pos, y_pos, cell.ch, cell.fg, cell.bg);
-                    }
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        shadow_ptr.add(start_pixel),
+                        vram_ptr.add(start_pixel),
+                        pixel_count,
+                    );
                 }
             }
+            buf.dirty_min_y = usize::MAX;
+            buf.dirty_max_y = 0;
         }
     }
 
@@ -487,15 +587,15 @@ pub fn init(fb: &FramebufferInfo) {
     *CONSOLE.lock() = Some(console);
 }
 
-/// Activates the heap-backed RAM text-cell ring buffer once the kernel heap is ready,
-/// syncing existing screen content from `DMESG_RING` without touching hardware VRAM.
+/// Activates the heap-backed RAM shadow buffer and text ring buffer once the kernel heap is ready,
+/// syncing existing screen content from `DMESG_RING` with high-performance burst VRAM blitting.
 pub fn init_backbuffer() {
-    let (cols, rows) = match *CONSOLE.lock() {
-        Some(ref c) => (c.cols, c.rows),
+    let (cols, rows, stride, height, bg_color) = match *CONSOLE.lock() {
+        Some(ref c) => (c.cols, c.rows, c.stride, c.height, c.bg_color),
         None => return,
     };
 
-    let buf = CellBuffer::new(cols, rows);
+    let buf = CellBuffer::new(cols, rows, stride, height, bg_color);
     let raw_bytes: Vec<u8> = {
         let ring = DMESG_RING.lock();
         let mut v = Vec::with_capacity(ring.count);
@@ -520,16 +620,7 @@ pub fn init_backbuffer() {
                 console.write_char_buffered(ch);
             }
         }
-
-        if let Some(ref mut cb) = *CELL_BUFFER.lock() {
-            for screen_row in 0..console.rows {
-                let log_row = (console.top_row + screen_row) % console.rows;
-                let log_base = log_row * cb.cols;
-                let disp_base = screen_row * cb.cols;
-                cb.displayed[disp_base..disp_base + cb.cols]
-                    .copy_from_slice(&cb.logical[log_base..log_base + cb.cols]);
-            }
-        }
+        console.flush();
     }
 }
 
