@@ -1903,6 +1903,12 @@ pub fn run_automated_tests() {
     execute_command("acpi");
     crate::arch::x86_64::acpi::run_self_tests();
 
+    if VFS.resolve_path("/bin/powerd.elf").is_ok() {
+        println!("[SHELL] Testing Ring 3 Userspace ACPI Power Daemon (/bin/powerd.elf)...");
+        let rc = execute_command("exec /bin/powerd.elf");
+        assert_eq!(rc, 0, "Userspace power daemon must parse DSDT AML & configure sleep states via /dev/power and exit 0");
+    }
+
     println!("[SHELL] 26. Testing Dynamic Linking, Shared Libraries (.so) & Runtime Relocations (M34)...");
     execute_command("libs");
     crate::task::dynlink::run_self_tests();

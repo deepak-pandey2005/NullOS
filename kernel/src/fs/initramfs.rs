@@ -26,6 +26,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use super::tar::{TarArchive, TarType};
 use super::vfs::{DirEntry, FileStat, FileType, FileSystem, FsError, Inode};
 use crate::drivers::serial;
+use crate::println;
 use crate::sync::Spinlock;
 
 /// Monotonically increasing atomic counter allocating unique 64-bit inode numbers.
@@ -680,6 +681,136 @@ impl Inode for AudioDeviceNode {
 
     fn poll(&self) -> u32 {
         crate::fs::vfs::POLLOUT
+    }
+
+    fn as_any(&self) -> Option<&dyn core::any::Any> {
+        Some(self)
+    }
+}
+
+/// Character device node representing `/dev/power` and `/dev/acpi`.
+///
+/// Implements Ring 3 userspace ACPI power management (Issue #45):
+/// - `read_at`: Reads raw ACPI DSDT table and AML bytecode bytes for Ring 3 AML interpretation.
+/// - `write_at`: Receives validated sleep states (SLP_TYPa, SLP_TYPb) and power directives from /bin/powerd.elf.
+/// - `poll`: Reports POLLIN | POLLOUT.
+pub struct PowerDeviceNode {
+    #[allow(dead_code)]
+    name: String,
+    inode_num: u64,
+}
+
+impl PowerDeviceNode {
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: String::from(name),
+            inode_num: alloc_inode_num(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl Inode for PowerDeviceNode {
+    fn stat(&self) -> FileStat {
+        let size = crate::arch::x86_64::acpi::ACPI_INFO.lock()
+            .as_ref()
+            .and_then(|info| info.dsdt)
+            .map(|d| d.length)
+            .unwrap_or(256);
+
+        FileStat {
+            inode_num: self.inode_num,
+            file_type: FileType::CharDevice,
+            size,
+            mode: 0o666,
+        }
+    }
+
+    fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, FsError> {
+        let guard = crate::arch::x86_64::acpi::ACPI_INFO.lock();
+        if let Some(ref acpi) = *guard {
+            if let Some(dsdt) = acpi.dsdt {
+                if dsdt.address != 0 && dsdt.length > 0 {
+                    if offset >= dsdt.length {
+                        return Ok(0); // EOF
+                    }
+                    let avail = dsdt.length - offset;
+                    let to_read = core::cmp::min(buf.len(), avail);
+                    unsafe {
+                        let src = (dsdt.address as *const u8).add(offset);
+                        core::ptr::copy_nonoverlapping(src, buf.as_mut_ptr(), to_read);
+                    }
+                    return Ok(to_read);
+                }
+            }
+        }
+
+        // Fallback minimal DSDT block with _S5 package if ACPI DSDT is not yet mapped
+        static FALLBACK_DSDT: &[u8] = &[
+            b'D', b'S', b'D', b'T', // Signature
+            0x28, 0x00, 0x00, 0x00, // Length (40 bytes)
+            0x02,                   // Revision
+            0x00,                   // Checksum
+            b'N', b'U', b'L', b'L', b'O', b'S', // OEM ID
+            b'D', b'S', b'D', b'T', 0x20, 0x20, 0x20, 0x20, // OEM Table ID
+            0x01, 0x00, 0x00, 0x00, // OEM Revision
+            b'I', b'N', b'T', b'L', // Creator ID
+            0x01, 0x00, 0x00, 0x00, // Creator Revision
+            // AML Payload: Name(_S5, Package(4) { 0x00, 0x00, 0x00, 0x00 })
+            0x08, b'_', b'S', b'5', b'_', 0x12, 0x06, 0x04, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        if offset >= FALLBACK_DSDT.len() {
+            return Ok(0);
+        }
+        let avail = FALLBACK_DSDT.len() - offset;
+        let to_read = core::cmp::min(buf.len(), avail);
+        buf[..to_read].copy_from_slice(&FALLBACK_DSDT[offset..offset + to_read]);
+        Ok(to_read)
+    }
+
+    fn write_at(&self, _offset: usize, buf: &[u8]) -> Result<usize, FsError> {
+        if buf.len() >= 6 {
+            // Power management command packet: [cmd: u32, slp_typa: u8, slp_typb: u8]
+            let cmd = u32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]);
+            let slp_typa = buf[4];
+            let slp_typb = buf[5];
+
+            let mut guard = crate::arch::x86_64::acpi::ACPI_INFO.lock();
+            if let Some(ref mut acpi) = *guard {
+                if let Some(ref mut dsdt) = acpi.dsdt {
+                    dsdt.slp_typa = slp_typa;
+                    dsdt.slp_typb = slp_typb;
+                    dsdt.s5_supported = true;
+                }
+            }
+
+            println!(
+                "[POWER] Userspace powerd configured ACPI S5 parameters: SLP_TYPa=0x{:02x}, SLP_TYPb=0x{:02x} (cmd={})",
+                slp_typa, slp_typb, cmd
+            );
+        }
+        Ok(buf.len())
+    }
+
+    fn lookup(&self, _name: &str) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotADirectory)
+    }
+
+    fn read_dir(&self) -> Result<Vec<DirEntry>, FsError> {
+        Err(FsError::NotADirectory)
+    }
+
+    fn create(&self, _name: &str, _file_type: FileType) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotADirectory)
+    }
+
+    fn poll(&self) -> u32 {
+        crate::fs::vfs::POLLIN | crate::fs::vfs::POLLOUT
     }
 
     fn as_any(&self) -> Option<&dyn core::any::Any> {

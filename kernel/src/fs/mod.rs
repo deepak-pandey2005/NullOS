@@ -155,6 +155,24 @@ pub fn sync_audio_device_nodes() {
     }
 }
 
+/// Creates ACPI power management device nodes in `/dev/` for userspace power daemons (Issue #45).
+pub fn sync_power_device_nodes() {
+    let dev_dir = match VFS.resolve_path("/dev") {
+        Ok(dir) => dir,
+        Err(_) => return,
+    };
+
+    if let Some(any_ref) = dev_dir.as_any() {
+        if let Some(ram_dev_dir) = any_ref.downcast_ref::<initramfs::RamDirectory>() {
+            let power_node = alloc::sync::Arc::new(initramfs::PowerDeviceNode::new("power"));
+            ram_dev_dir.insert_child("power", power_node.clone());
+            ram_dev_dir.insert_child("acpi", power_node);
+
+            println!("[DEV] Registered raw ACPI power device node '/dev/power' and '/dev/acpi'.");
+        }
+    }
+}
+
 /// Probes registered block devices and mounts detected persistent filesystems (FAT32 / ext2).
 ///
 /// # Detection Strategy

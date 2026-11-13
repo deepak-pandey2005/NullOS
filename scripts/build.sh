@@ -69,7 +69,7 @@ cp "${ESP_DIR}/nullos.cfg" "${ESP_DIR}/EFI/BOOT/nullos.cfg"
 rm -rf "${INITRAMFS_STAGE}" "${INITRAMFS_TAR}"
 mkdir -p "${INITRAMFS_STAGE}/bin" "${INITRAMFS_STAGE}/lib" "${INITRAMFS_STAGE}/etc" "${INITRAMFS_STAGE}/pkg"
 
-for bin_name in hello.elf cat.elf threads.elf async_test.elf dyn_test.elf dyn_hello.elf gui_demo.elf term.elf fat32d.elf netd.elf audiod.elf compositor.elf; do
+for bin_name in hello.elf cat.elf threads.elf async_test.elf dyn_test.elf dyn_hello.elf gui_demo.elf term.elf fat32d.elf netd.elf audiod.elf powerd.elf compositor.elf; do
     if [ -f "${ROOT_DIR}/user/build/bin/${bin_name}" ]; then
         cp "${ROOT_DIR}/user/build/bin/${bin_name}" "${INITRAMFS_STAGE}/bin/${bin_name}"
     fi
