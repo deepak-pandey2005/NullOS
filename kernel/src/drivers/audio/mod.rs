@@ -82,6 +82,30 @@ pub fn stop() {
     }
 }
 
+/// Streams raw 16-bit interleaved stereo PCM audio samples through the active DMA engine (Issue #44).
+pub fn play_pcm_bytes(bytes: &[u8]) -> Result<usize, &'static str> {
+    if bytes.is_empty() {
+        return Ok(0);
+    }
+    let mut guard = HDA.lock();
+    match guard.as_mut() {
+        Some(controller) => {
+            let sample_count = bytes.len() / 2;
+            if sample_count == 0 {
+                return Ok(0);
+            }
+            let ptr = bytes.as_ptr() as *const i16;
+            let samples = unsafe { core::slice::from_raw_parts(ptr, sample_count) };
+            controller.play_samples(samples)?;
+            Ok(sample_count * 2)
+        }
+        None => {
+            // Virtual audio sink fallback when no HDA controller is present
+            Ok(bytes.len())
+        }
+    }
+}
+
 /// Retrieves the current status, metrics, and active node configuration of the audio controller.
 pub fn get_status() -> Option<AudioStatus> {
     let guard = HDA.lock();

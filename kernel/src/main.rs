@@ -239,6 +239,7 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // Initialize Intel High Definition Audio (HDA) Subsystem (Phase 12 - M32)
     drivers::audio::init();
     drivers::audio::run_self_tests();
+    fs::sync_audio_device_nodes();
 
     // Initialize VirtIO Block Storage Subsystem (Phase 6 - M18 Block Devices)
     // NOTE: VirtIO block devices operate in virtualized environments (QEMU/KVM).

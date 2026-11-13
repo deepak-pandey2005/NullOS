@@ -1893,6 +1893,12 @@ pub fn run_automated_tests() {
     execute_command("beep");
     crate::drivers::audio::run_self_tests();
 
+    if VFS.resolve_path("/bin/audiod.elf").is_ok() {
+        println!("[SHELL] Testing Ring 3 Userspace Audio Daemon (/bin/audiod.elf)...");
+        let rc = execute_command("exec /bin/audiod.elf");
+        assert_eq!(rc, 0, "Userspace audio daemon must synthesize and stream PCM audio via /dev/audio and exit 0");
+    }
+
     println!("[SHELL] 25. Testing ACPI Table Parser, FADT, DSDT & System Power Subsystem (M33)...");
     execute_command("acpi");
     crate::arch::x86_64::acpi::run_self_tests();

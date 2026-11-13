@@ -134,6 +134,27 @@ pub fn sync_net_device_nodes() {
     }
 }
 
+/// Creates raw audio PCM device nodes in `/dev/` and `/dev/snd/` for userspace audio daemons (Issue #44).
+pub fn sync_audio_device_nodes() {
+    let dev_dir = match VFS.resolve_path("/dev") {
+        Ok(dir) => dir,
+        Err(_) => return,
+    };
+
+    if let Some(any_ref) = dev_dir.as_any() {
+        if let Some(ram_dev_dir) = any_ref.downcast_ref::<initramfs::RamDirectory>() {
+            let audio_node = alloc::sync::Arc::new(initramfs::AudioDeviceNode::new("audio"));
+            ram_dev_dir.insert_child("audio", audio_node.clone());
+
+            let snd_dir = alloc::sync::Arc::new(initramfs::RamDirectory::new(0o755));
+            snd_dir.insert_child("pcm0", audio_node);
+            ram_dev_dir.insert_dir("snd", snd_dir);
+
+            println!("[DEV] Registered raw audio PCM device node '/dev/audio' and '/dev/snd/pcm0'.");
+        }
+    }
+}
+
 /// Probes registered block devices and mounts detected persistent filesystems (FAT32 / ext2).
 ///
 /// # Detection Strategy

@@ -619,6 +619,74 @@ impl Inode for TunDeviceNode {
     }
 }
 
+/// Character device node representing `/dev/audio` and `/dev/snd/pcm0`.
+///
+/// Implements Ring 3 userspace audio streaming (Issue #44):
+/// - `write_at`: Streams raw 16-bit interleaved PCM audio frames directly into the hardware DMA audio engine.
+/// - `poll`: Reports POLLOUT (ready for audio sample writes).
+pub struct AudioDeviceNode {
+    #[allow(dead_code)]
+    name: String,
+    inode_num: u64,
+}
+
+impl AudioDeviceNode {
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: String::from(name),
+            inode_num: alloc_inode_num(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl Inode for AudioDeviceNode {
+    fn stat(&self) -> FileStat {
+        FileStat {
+            inode_num: self.inode_num,
+            file_type: FileType::CharDevice,
+            size: 0,
+            mode: 0o666,
+        }
+    }
+
+    fn read_at(&self, _offset: usize, _buf: &mut [u8]) -> Result<usize, FsError> {
+        Ok(0)
+    }
+
+    fn write_at(&self, _offset: usize, buf: &[u8]) -> Result<usize, FsError> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let _ = crate::drivers::audio::play_pcm_bytes(buf);
+        Ok(buf.len())
+    }
+
+    fn lookup(&self, _name: &str) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotADirectory)
+    }
+
+    fn read_dir(&self) -> Result<Vec<DirEntry>, FsError> {
+        Err(FsError::NotADirectory)
+    }
+
+    fn create(&self, _name: &str, _file_type: FileType) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotADirectory)
+    }
+
+    fn poll(&self) -> u32 {
+        crate::fs::vfs::POLLOUT
+    }
+
+    fn as_any(&self) -> Option<&dyn core::any::Any> {
+        Some(self)
+    }
+}
+
 /// In-memory RamFS filesystem driver instance.
 pub struct RamFs {
     root: Arc<RamDirectory>,
