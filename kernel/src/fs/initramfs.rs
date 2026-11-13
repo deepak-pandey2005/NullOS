@@ -818,6 +818,222 @@ impl Inode for PowerDeviceNode {
     }
 }
 
+/// Packed structure representing PCI device info returned to userspace via `/dev/uioX`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct UioPciInfo {
+    pub vendor_id: u16,
+    pub device_id: u16,
+    pub class_code: u8,
+    pub subclass: u8,
+    pub prog_if: u8,
+    pub revision: u8,
+    pub bus: u8,
+    pub device: u8,
+    pub function: u8,
+    pub irq_line: u8,
+    pub command: u16,
+    pub status: u16,
+    pub bar0_address: u64,
+    pub bar0_size: u64,
+    pub bar0_is_mmio: u32,
+    pub num_bars: u32,
+}
+
+/// Character device node representing `/dev/uioX`.
+///
+/// Implements Ring 3 userspace PCI driver framework (VFIO / UIO Architecture, Issue #46):
+/// - `read_at`: Reads serialized `UioPciInfo` header (at offset 0) or raw PCI configuration registers (at offset 40+).
+/// - `write_at`: Configures PCI command register bits (bus mastering, memory space, I/O space) or writes PCI config bytes.
+/// - `poll`: Reports POLLIN | POLLOUT.
+pub struct UioDeviceNode {
+    inode_num: u64,
+    pub device_index: usize,
+    #[allow(dead_code)]
+    pub address: crate::drivers::pci::PciAddress,
+}
+
+impl UioDeviceNode {
+    pub fn new(device_index: usize, address: crate::drivers::pci::PciAddress) -> Self {
+        Self {
+            inode_num: alloc_inode_num(),
+            device_index,
+            address,
+        }
+    }
+}
+
+impl Inode for UioDeviceNode {
+    fn stat(&self) -> FileStat {
+        FileStat {
+            inode_num: self.inode_num,
+            file_type: FileType::CharDevice,
+            size: core::mem::size_of::<UioPciInfo>() + 256,
+            mode: 0o660,
+        }
+    }
+
+    fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, FsError> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        let pci_dev = {
+            let devices = crate::drivers::pci::PCI_DEVICES.lock();
+            devices.get(self.device_index).cloned()
+        };
+
+        let dev = match pci_dev {
+            Some(d) => d,
+            None => return Err(FsError::NotFound),
+        };
+
+        let (bar0_addr, bar0_size, bar0_is_mmio) = if let Some(bar0) = dev.bars.first() {
+            match bar0.bar_type {
+                crate::drivers::pci::BarType::Memory32 { address, size, .. } => (address as u64, size as u64, 1u32),
+                crate::drivers::pci::BarType::Memory64 { address, size, .. } => (address, size as u64, 1u32),
+                crate::drivers::pci::BarType::Io { port, size } => (port as u64, size as u64, 0u32),
+            }
+        } else {
+            (0, 0, 0)
+        };
+
+        let cmd = crate::drivers::pci::pci_read_u16(dev.address.bus, dev.address.device, dev.address.function, 0x04);
+        let status = crate::drivers::pci::pci_read_u16(dev.address.bus, dev.address.device, dev.address.function, 0x06);
+
+        let info = UioPciInfo {
+            vendor_id: dev.vendor_id,
+            device_id: dev.device_id,
+            class_code: dev.class_code,
+            subclass: dev.subclass,
+            prog_if: dev.prog_if,
+            revision: dev.revision,
+            bus: dev.address.bus,
+            device: dev.address.device,
+            function: dev.address.function,
+            irq_line: dev.interrupt_line,
+            command: cmd,
+            status,
+            bar0_address: bar0_addr,
+            bar0_size: bar0_size,
+            bar0_is_mmio,
+            num_bars: dev.bars.len() as u32,
+        };
+
+        let info_size = core::mem::size_of::<UioPciInfo>();
+        let mut bytes_read = 0;
+
+        if offset < info_size {
+            let info_bytes = unsafe {
+                core::slice::from_raw_parts(&info as *const UioPciInfo as *const u8, info_size)
+            };
+            let avail = info_size - offset;
+            let to_copy = core::cmp::min(buf.len(), avail);
+            buf[..to_copy].copy_from_slice(&info_bytes[offset..offset + to_copy]);
+            bytes_read += to_copy;
+        }
+
+        // If buffer has room and offset reaches config space
+        let config_start = offset.saturating_sub(info_size);
+        if bytes_read < buf.len() && config_start < 256 {
+            let remaining_buf = &mut buf[bytes_read..];
+            let max_cfg = core::cmp::min(remaining_buf.len(), 256 - config_start);
+            for i in 0..max_cfg {
+                let cfg_reg = (config_start + i) as u8;
+                remaining_buf[i] = crate::drivers::pci::pci_read_u8(dev.address.bus, dev.address.device, dev.address.function, cfg_reg);
+            }
+            bytes_read += max_cfg;
+        }
+
+        Ok(bytes_read)
+    }
+
+    fn write_at(&self, offset: usize, buf: &[u8]) -> Result<usize, FsError> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        let pci_dev = {
+            let devices = crate::drivers::pci::PCI_DEVICES.lock();
+            devices.get(self.device_index).cloned()
+        };
+
+        let dev = match pci_dev {
+            Some(d) => d,
+            None => return Err(FsError::NotFound),
+        };
+
+        let info_size = core::mem::size_of::<UioPciInfo>();
+
+        if offset == 0 {
+            // Control commands written at offset 0:
+            // 1: Enable Bus Mastering
+            // 2: Enable Memory Space
+            // 3: Enable I/O Space
+            for &cmd in buf {
+                match cmd {
+                    1 => {
+                        dev.enable_bus_mastering();
+                        println!(
+                            "[UIO] /dev/uio{}: Enabled Bus Mastering on [{:02x}:{:02x}.{}]",
+                            self.device_index, dev.address.bus, dev.address.device, dev.address.function
+                        );
+                    }
+                    2 => {
+                        dev.enable_memory_space();
+                        println!(
+                            "[UIO] /dev/uio{}: Enabled Memory Space on [{:02x}:{:02x}.{}]",
+                            self.device_index, dev.address.bus, dev.address.device, dev.address.function
+                        );
+                    }
+                    3 => {
+                        dev.enable_io_space();
+                        println!(
+                            "[UIO] /dev/uio{}: Enabled I/O Space on [{:02x}:{:02x}.{}]",
+                            self.device_index, dev.address.bus, dev.address.device, dev.address.function
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            return Ok(buf.len());
+        }
+
+        // Direct PCI config space write (at offset >= info_size)
+        if offset >= info_size {
+            let config_start = offset - info_size;
+            let max_cfg = core::cmp::min(buf.len(), 256usize.saturating_sub(config_start));
+            for i in 0..max_cfg {
+                let cfg_reg = (config_start + i) as u8;
+                crate::drivers::pci::pci_write_u8(dev.address.bus, dev.address.device, dev.address.function, cfg_reg, buf[i]);
+            }
+            return Ok(max_cfg);
+        }
+
+        Ok(buf.len())
+    }
+
+    fn lookup(&self, _name: &str) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotADirectory)
+    }
+
+    fn read_dir(&self) -> Result<Vec<DirEntry>, FsError> {
+        Err(FsError::NotADirectory)
+    }
+
+    fn create(&self, _name: &str, _file_type: FileType) -> Result<Arc<dyn Inode>, FsError> {
+        Err(FsError::NotADirectory)
+    }
+
+    fn poll(&self) -> u32 {
+        crate::fs::vfs::POLLIN | crate::fs::vfs::POLLOUT
+    }
+
+    fn as_any(&self) -> Option<&dyn core::any::Any> {
+        Some(self)
+    }
+}
+
 /// In-memory RamFS filesystem driver instance.
 pub struct RamFs {
     root: Arc<RamDirectory>,

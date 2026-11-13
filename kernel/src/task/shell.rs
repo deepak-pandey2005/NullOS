@@ -1909,6 +1909,12 @@ pub fn run_automated_tests() {
         assert_eq!(rc, 0, "Userspace power daemon must parse DSDT AML & configure sleep states via /dev/power and exit 0");
     }
 
+    if VFS.resolve_path("/bin/uiod.elf").is_ok() {
+        println!("[SHELL] Testing Ring 3 Userspace PCI Driver Framework (/bin/uiod.elf)...");
+        let rc = execute_command("exec /bin/uiod.elf");
+        assert_eq!(rc, 0, "Userspace PCI driver daemon must discover /dev/uio0 and exit 0");
+    }
+
     println!("[SHELL] 26. Testing Dynamic Linking, Shared Libraries (.so) & Runtime Relocations (M34)...");
     execute_command("libs");
     crate::task::dynlink::run_self_tests();

@@ -173,6 +173,35 @@ pub fn sync_power_device_nodes() {
     }
 }
 
+/// Creates Userspace I/O (UIO / VFIO) device nodes in `/dev/` for Ring 3 device drivers (Issue #46).
+pub fn sync_uio_device_nodes() {
+    let dev_dir = match VFS.resolve_path("/dev") {
+        Ok(dir) => dir,
+        Err(_) => return,
+    };
+
+    if let Some(any_ref) = dev_dir.as_any() {
+        if let Some(ram_dev_dir) = any_ref.downcast_ref::<initramfs::RamDirectory>() {
+            let devices = crate::drivers::pci::PCI_DEVICES.lock();
+            let uio_dir = alloc::sync::Arc::new(initramfs::RamDirectory::new(0o755));
+
+            for (idx, dev) in devices.iter().enumerate() {
+                let node = alloc::sync::Arc::new(initramfs::UioDeviceNode::new(idx, dev.address));
+                // Expose as /dev/uio{idx}
+                let name = alloc::format!("uio{}", idx);
+                ram_dev_dir.insert_child(&name, node.clone());
+                // Also expose as /dev/uio/{idx}
+                let idx_name = alloc::format!("{}", idx);
+                uio_dir.insert_child(&idx_name, node);
+            }
+
+            ram_dev_dir.insert_dir("uio", uio_dir);
+
+            println!("[DEV] Registered {} Userspace I/O (UIO) PCI device nodes in /dev/.", devices.len());
+        }
+    }
+}
+
 /// Probes registered block devices and mounts detected persistent filesystems (FAT32 / ext2).
 ///
 /// # Detection Strategy
