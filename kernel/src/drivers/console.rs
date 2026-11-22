@@ -688,6 +688,7 @@ pub fn get_dmesg() -> String {
 }
 
 /// Returns the last `max` lines from the dmesg buffer without allocating full 64 KiB ring buffers.
+#[allow(dead_code)]
 pub fn get_dmesg_lines(max: usize) -> Vec<String> {
     let mut raw_bytes = alloc::vec::Vec::new();
     {
