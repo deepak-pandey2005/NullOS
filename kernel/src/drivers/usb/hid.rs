@@ -68,11 +68,21 @@ impl UsbKeyboardState {
         ];
 
         let shift = (modifiers & 0x22) != 0; // Left Shift (0x02) or Right Shift (0x20)
+        let ctrl = (modifiers & 0x11) != 0;  // Left Ctrl (0x01) or Right Ctrl (0x10)
 
         // Detect newly pressed keys (present in current keys, but absent in prev_keys)
         for &key in &keys {
             if key != 0 && !self.prev_keys.contains(&key) {
-                if let Some(ch) = hid_usage_to_char(key, shift) {
+                // Check for F4 (USB HID usage 0x3D)
+                let ch = if key == 0x3D && ctrl {
+                    Some('\x14') // Ctrl+F4 shortcut sentinel (DC4 = 0x14)
+                } else if key == 0x3D {
+                    Some('\u{F004}')
+                } else {
+                    hid_usage_to_char(key, shift)
+                };
+
+                if let Some(ch) = ch {
                     // Buffer character for interactive shell
                     USB_CHAR_QUEUE.lock().push_back(ch);
 

@@ -106,6 +106,10 @@ impl KeyboardState {
                 0x9D => { self.ctrl = false; return None; }      // Right Ctrl release
                 0x38 => { self.alt = true; return None; }        // Right Alt press
                 0xB8 => { self.alt = false; return None; }       // Right Alt release
+                0x48 => return Some('\x10'),                     // Up Arrow (mapped to DLE 0x10)
+                0x50 => return Some('\x0E'),                     // Down Arrow (mapped to SO 0x0E)
+                0x4B => return Some('\x02'),                     // Left Arrow (mapped to STX 0x02)
+                0x4D => return Some('\x06'),                     // Right Arrow (mapped to ACK 0x06)
                 _ => return None,
             }
         }
@@ -140,6 +144,15 @@ impl KeyboardState {
                 // CapsLock toggles state
                 self.caps_lock = !self.caps_lock;
                 None
+            }
+            0x3E => {
+                // F4 key (make code 0x3E)
+                // If Ctrl is held down, return a dedicated sentinel for Ctrl+F4: '\x14' (DC4 = 0x14)
+                if self.ctrl {
+                    Some('\x14')
+                } else {
+                    Some('\u{F004}') // Unicode private use area for F4
+                }
             }
             0x1C => Some('\n'),     // Enter
             0x0E => Some('\x08'),   // Backspace

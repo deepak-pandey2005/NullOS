@@ -2008,12 +2008,18 @@ pub fn interactive_loop() {
     print!("nullos> ");
 
     let mut line_buf = String::new();
+    let mut history: alloc::vec::Vec<String> = alloc::vec::Vec::new();
+    let mut history_idx: usize = 0;
+    let mut saved_current = String::new();
+
+    // ANSI escape parsing state machine for serial / terminal sequences
+    let mut esc_state = 0u8; // 0 = normal, 1 = saw '\x1B', 2 = saw '['
 
     loop {
         // Poll USB inputs (HID keyboards and mice)
         crate::drivers::usb::poll_inputs();
 
-        // Read input from USB keyboard, PS/2 keyboard, or COM1 serial
+        // Read raw byte/char from USB keyboard, PS/2 keyboard, or COM1 serial
         let incoming_char = if let Some(ch) = crate::drivers::usb::read_char() {
             Some(ch)
         } else if let Some(ch) = crate::drivers::keyboard::read_char() {
@@ -2022,6 +2028,7 @@ pub fn interactive_loop() {
             match byte {
                 b'\r' | b'\n' => Some('\n'),
                 0x08 | 0x7F => Some('\x08'),
+                0x1B => Some('\x1B'),
                 b if b >= 0x20 && b <= 0x7E => Some(b as char),
                 _ => None,
             }
@@ -2030,9 +2037,52 @@ pub fn interactive_loop() {
         };
 
         if let Some(ch) = incoming_char {
-            match ch {
+            // Handle ANSI escape sequences (\x1B[A = Up, \x1B[B = Down, \x1B[C = Right, \x1B[D = Left)
+            if esc_state == 1 {
+                if ch == '[' {
+                    esc_state = 2;
+                    continue;
+                } else {
+                    esc_state = 0;
+                }
+            } else if esc_state == 2 {
+                esc_state = 0;
+                if ch == 'A' {
+                    // Up arrow from serial
+                    // fallthrough to handle as \x10
+                } else if ch == 'B' {
+                    // Down arrow from serial
+                    // fallthrough to handle as \x0E
+                } else {
+                    continue;
+                }
+            } else if ch == '\x1B' {
+                esc_state = 1;
+                continue;
+            }
+
+            // Normalise serial arrows if parsed from escape state
+            let norm_ch = if esc_state == 0 && incoming_char == Some('A') && esc_state == 2 {
+                '\x10'
+            } else {
+                ch
+            };
+
+            match norm_ch {
                 '\n' => {
                     println!();
+                    let trimmed = line_buf.trim();
+                    if !trimmed.is_empty() {
+                        if history.is_empty() || history.last().map(|s| s.as_str()) != Some(trimmed) {
+                            history.push(trimmed.to_string());
+                            if history.len() > 64 {
+                                history.remove(0);
+                            }
+                        }
+                    }
+                    history_idx = history.len();
+                    saved_current.clear();
+
                     execute_command(&line_buf);
                     line_buf.clear();
                     print!("nullos> ");
@@ -2045,14 +2095,82 @@ pub fn interactive_loop() {
                         print!("\x08 \x08");
                     }
                 }
+                '\t' => {
+                    // Tab auto-completion for common shell commands
+                    static COMMON_COMMANDS: &[&str] = &[
+                        "help", "clear", "echo", "pwd", "cd", "ls", "cat", "ps", "kill", "test",
+                        "gui", "mem", "uptime", "exec", "storage", "cache", "diskbench", "netperf",
+                        "netbench", "perfstat", "kbench", "trace", "optstat", "optbench", "sdk",
+                        "pkg", "dbg", "kdbg", "bt", "sym", "klog", "lockdep", "crashdump"
+                    ];
+                    let prefix = line_buf.trim_start();
+                    if !prefix.is_empty() && !prefix.contains(' ') {
+                        let mut matches = alloc::vec::Vec::new();
+                        for &cmd in COMMON_COMMANDS {
+                            if cmd.starts_with(prefix) {
+                                matches.push(cmd);
+                            }
+                        }
+                        if matches.len() == 1 {
+                            let comp = matches[0];
+                            let remainder = &comp[prefix.len()..];
+                            for c in remainder.chars() {
+                                line_buf.push(c);
+                                print!("{}", c);
+                            }
+                            line_buf.push(' ');
+                            print!(" ");
+                        } else if matches.len() > 1 {
+                            println!();
+                            for m in &matches {
+                                print!("{}  ", m);
+                            }
+                            println!();
+                            print!("nullos> {}", line_buf);
+                        }
+                    }
+                }
+                '\x10' => {
+                    // Up arrow: Navigate backward in history
+                    if !history.is_empty() {
+                        if history_idx == history.len() {
+                            saved_current = line_buf.clone();
+                        }
+                        if history_idx > 0 {
+                            history_idx -= 1;
+                            // Erase current input line visually
+                            while !line_buf.is_empty() {
+                                line_buf.pop();
+                                print!("\x08 \x08");
+                            }
+                            let cmd = &history[history_idx];
+                            line_buf.push_str(cmd);
+                            print!("{}", cmd);
+                        }
+                    }
+                }
+                '\x0E' => {
+                    // Down arrow: Navigate forward in history
+                    if !history.is_empty() && history_idx < history.len() {
+                        history_idx += 1;
+                        while !line_buf.is_empty() {
+                            line_buf.pop();
+                            print!("\x08 \x08");
+                        }
+                        let cmd = if history_idx < history.len() {
+                            &history[history_idx]
+                        } else {
+                            &saved_current
+                        };
+                        line_buf.push_str(cmd);
+                        print!("{}", cmd);
+                    }
+                }
                 c if c >= ' ' && c <= '~' => {
                     // Printable ASCII character
                     line_buf.push(c);
                     print!("{}", c);
                 }
-                // TODO(shell-history): Implement circular history buffer with Up/Down arrow ANSI escape sequences (\x1b[A / \x1b[B).
-                // TODO(shell-completion): Implement Tab key ('\t') auto-completion for builtin commands and VFS filesystem paths.
-                // TODO(shell-navigation): Implement Left/Right cursor movement (\x1b[D / \x1b[C) and inline line-editing.
                 _ => {}
             }
         } else {

@@ -23,18 +23,18 @@
 #define BORDER_W        2
 #define BTN_SIZE        16
 
-#define COL_DARK_SLATE  0xFF0F172A
-#define COL_PANEL_BG    0xFF1E293B
-#define COL_TITLE_BAR   0xFF334155
-#define COL_TITLE_ACT   0xFF2563EB
-#define COL_LIGHT_SLATE 0xFFE2E8F0
+#define COL_DARK_SLATE  0xFF0B132B
+#define COL_PANEL_BG    0xFF1C2541
+#define COL_TITLE_BAR   0xFF3A506B
+#define COL_TITLE_ACT   0xFF4F46E5
+#define COL_LIGHT_SLATE 0xFFF8FAFC
 #define COL_MUTED       0xFF94A3B8
-#define COL_BORDER      0xFF475569
-#define COL_CLOSE       0xFFDC2626
-#define COL_TASKBAR     0xFF090D16
+#define COL_BORDER      0xFF6366F1
+#define COL_CLOSE       0xFFEF4444
+#define COL_TASKBAR     0xFF0A0F1D
 #define COL_CYAN        0xFF06B6D4
-#define COL_GREEN       0xFF22C55E
-#define COL_YELLOW      0xFFEAB308
+#define COL_GREEN       0xFF10B981
+#define COL_YELLOW      0xFFF59E0B
 #define COL_WHITE       0xFFFFFFFF
 #define COL_BLACK       0xFF000000
 
@@ -177,17 +177,24 @@ static void build_wallpaper(void) {
     int w = (int)g_fb.width;
     int h = (int)g_fb.height;
     for (int py = 0; py < h; py++) {
-        int f = (py * 28) / (h > 0 ? h : 1);
-        uint8_t r = (uint8_t)(15 > f ? 15 - f : 0);
-        uint8_t g = (uint8_t)(23 > f ? 23 - f : 0);
-        uint8_t b = (uint8_t)(42 > f ? 42 - f : 0);
+        /* Elegant deep indigo-to-midnight vertical gradient */
+        int f = (py * 32) / (h > 0 ? h : 1);
+        uint8_t r = (uint8_t)(15 > f ? 15 - f + 5 : 8);
+        uint8_t g = (uint8_t)(24 > f ? 24 - f + 8 : 12);
+        uint8_t b = (uint8_t)(56 > f ? 56 - f + 14 : 32);
         uint32_t col = 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
         uint32_t *row = &g_wall[py * w];
         for (int px = 0; px < w; px++) row[px] = col;
     }
-    for (int x = 0; x < w; x += 40) fill_rect_buf(g_wall, w, h, x, 0, 1, h, 0xFF1A253D);
-    for (int y = 0; y < h; y += 40) fill_rect_buf(g_wall, w, h, 0, y, w, 1, 0xFF1A253D);
-    draw_text_buf(g_wall, w, h, w - 300, h - TASKBAR_H - 20, "NullOS Ring 3 Compositor (Linux-style)", COL_MUTED, 290);
+    /* Subtle geometric grid with soft ambient dots */
+    for (int x = 0; x < w; x += 32) fill_rect_buf(g_wall, w, h, x, 0, 1, h, 0xFF16203B);
+    for (int y = 0; y < h; y += 32) fill_rect_buf(g_wall, w, h, 0, y, w, 1, 0xFF16203B);
+    for (int y = 0; y < h; y += 32) {
+        for (int x = 0; x < w; x += 32) {
+            fill_rect_buf(g_wall, w, h, x, y, 2, 2, 0xFF283864);
+        }
+    }
+    draw_text_buf(g_wall, w, h, w - 310, h - TASKBAR_H - 18, "NullOS Ring 3 Compositor [Ctrl+F4 to Exit]", COL_MUTED, 305);
 }
 
 static void render_builtin_info(comp_window_t *win) {
@@ -201,7 +208,7 @@ static void render_builtin_info(comp_window_t *win) {
     draw_text_buf(win->pixels, win->width, win->height, 12, 94, "Shortcuts:", COL_YELLOW, win->width - 24);
     draw_text_buf(win->pixels, win->width, win->height, 12, 110, "  Click [NullOS] -> Start Menu", COL_MUTED, win->width - 24);
     draw_text_buf(win->pixels, win->width, win->height, 12, 126, "  Ctrl+N: Cycle | Ctrl+W: Close", COL_MUTED, win->width - 24);
-    draw_text_buf(win->pixels, win->width, win->height, 12, 142, "  ESC: Return to CLI Shell", COL_MUTED, win->width - 24);
+    draw_text_buf(win->pixels, win->width, win->height, 12, 142, "  Ctrl+F4 or ESC: Return to CLI", COL_WHITE, win->width - 24);
 }
 
 static void bring_to_front(int idx) {
@@ -332,16 +339,26 @@ static void render_desktop(void) {
         fill_rect_buf(g_back, sw, sh, w->x + BORDER_W, w->y + BORDER_W, w->width, TITLEBAR_H, tcol);
         draw_text_buf(g_back, sw, sh, w->x + BORDER_W + 8, w->y + BORDER_W + 9, w->title, COL_WHITE, w->width - 70);
 
-        /* Controls: [_] [+] [x] */
+        /* Controls: [_] [+] [x] with subtle borders & hover styling */
         int by = w->y + BORDER_W + (TITLEBAR_H - BTN_SIZE) / 2;
         int bx_min = w->x + tw - BORDER_W - BTN_SIZE * 3 - 12;
         int bx_max = w->x + tw - BORDER_W - BTN_SIZE * 2 - 8;
         int bx_cls = w->x + tw - BORDER_W - BTN_SIZE - 4;
-        fill_rect_buf(g_back, sw, sh, bx_min, by, BTN_SIZE, BTN_SIZE, COL_PANEL_BG);
+
+        int hov_min = (g_mouse_x >= bx_min && g_mouse_x < bx_min + BTN_SIZE && g_mouse_y >= by && g_mouse_y < by + BTN_SIZE);
+        int hov_max = (g_mouse_x >= bx_max && g_mouse_x < bx_max + BTN_SIZE && g_mouse_y >= by && g_mouse_y < by + BTN_SIZE);
+        int hov_cls = (g_mouse_x >= bx_cls && g_mouse_x < bx_cls + BTN_SIZE && g_mouse_y >= by && g_mouse_y < by + BTN_SIZE);
+
+        fill_rect_buf(g_back, sw, sh, bx_min, by, BTN_SIZE, BTN_SIZE, hov_min ? COL_TITLE_BAR : COL_PANEL_BG);
+        draw_rect_outline(g_back, sw, sh, bx_min, by, BTN_SIZE, BTN_SIZE, COL_BORDER);
         draw_char_buf(g_back, sw, sh, bx_min + 4, by + 4, '_', COL_WHITE);
-        fill_rect_buf(g_back, sw, sh, bx_max, by, BTN_SIZE, BTN_SIZE, COL_PANEL_BG);
+
+        fill_rect_buf(g_back, sw, sh, bx_max, by, BTN_SIZE, BTN_SIZE, hov_max ? COL_TITLE_BAR : COL_PANEL_BG);
+        draw_rect_outline(g_back, sw, sh, bx_max, by, BTN_SIZE, BTN_SIZE, COL_BORDER);
         draw_char_buf(g_back, sw, sh, bx_max + 4, by + 4, w->maximized ? '-' : '+', COL_WHITE);
-        fill_rect_buf(g_back, sw, sh, bx_cls, by, BTN_SIZE, BTN_SIZE, COL_CLOSE);
+
+        fill_rect_buf(g_back, sw, sh, bx_cls, by, BTN_SIZE, BTN_SIZE, hov_cls ? 0xFFEF4444 : COL_CLOSE);
+        draw_rect_outline(g_back, sw, sh, bx_cls, by, BTN_SIZE, BTN_SIZE, 0xFF991B1B);
         draw_char_buf(g_back, sw, sh, bx_cls + 4, by + 4, 'x', COL_WHITE);
 
         /* Client surface blit (clipped to screen) */
@@ -380,10 +397,17 @@ static void render_desktop(void) {
     int exit_x = sw - 102;
     for (int i = 0; i < MAX_WINDOWS; i++) {
         if (!g_wins[i].used || tab_x + 140 > exit_x - 12) continue;
-        uint32_t tc = (g_wins[i].focused && !g_wins[i].minimized) ? COL_TITLE_BAR : COL_PANEL_BG;
+        int is_act = (g_wins[i].focused && !g_wins[i].minimized);
+        uint32_t tc = is_act ? COL_TITLE_ACT : COL_PANEL_BG;
+        uint32_t bc = is_act ? COL_CYAN : COL_BORDER;
         fill_rect_buf(g_back, sw, sh, tab_x, tb_y + 4, 136, TASKBAR_H - 8, tc);
-        draw_rect_outline(g_back, sw, sh, tab_x, tb_y + 4, 136, TASKBAR_H - 8, COL_BORDER);
-        draw_text_buf(g_back, sw, sh, tab_x + 6, tb_y + 12, g_wins[i].title, COL_LIGHT_SLATE, 124);
+        draw_rect_outline(g_back, sw, sh, tab_x, tb_y + 4, 136, TASKBAR_H - 8, bc);
+        if (g_wins[i].minimized) {
+            draw_char_buf(g_back, sw, sh, tab_x + 6, tb_y + 12, '*', COL_YELLOW);
+            draw_text_buf(g_back, sw, sh, tab_x + 16, tb_y + 12, g_wins[i].title, COL_MUTED, 114);
+        } else {
+            draw_text_buf(g_back, sw, sh, tab_x + 8, tb_y + 12, g_wins[i].title, COL_WHITE, 120);
+        }
         tab_x += 142;
     }
 
@@ -633,7 +657,8 @@ int main(void) {
                     }
                 }
             } else if (ev.kind == RAW_INPUT_KEY) {
-                if (ev.key == 0x1B) { g_running = 0; break; }
+                /* Exit desktop and return to CLI Shell on ESC (0x1B) or Ctrl+F4 (0x14) */
+                if (ev.key == 0x1B || ev.key == 0x14) { g_running = 0; break; }
                 if (ev.key == 0x0E && g_win_count > 1) { bring_to_front(g_zorder[0]); }
                 else if (ev.key == 0x17 && g_win_count > 0) { close_window_slot(g_zorder[g_win_count - 1]); }
                 else if (g_win_count > 0) {
