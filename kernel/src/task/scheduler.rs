@@ -142,6 +142,15 @@ fn activate_thread_hardware_state(next: &Thread) {
     }
 }
 
+/// Updates the current thread's Thread-Local Storage (`fs_base`) address.
+pub fn set_current_fs_base(fs_base: u64) {
+    if let Some(ref mut sched) = *SCHEDULER.lock() {
+        if let Some(cur) = sched.current.as_mut() {
+            cur.fs_base = fs_base;
+        }
+    }
+}
+
 pub fn yield_now() {
     // Keep interrupts disabled across BOTH releasing `SCHEDULER` and `switch_threads` so a
     // timer IRQ cannot preempt after `sched.current` changed while still on `prev`'s stack.

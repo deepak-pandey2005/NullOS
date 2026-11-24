@@ -273,6 +273,79 @@ fn syscall_dispatcher_inner(
     a5: u64,
 ) -> u64 {
     match num {
+        // Linux uname (63)
+        63 => {
+            let buf_ptr = a1 as *mut u8;
+            if !buf_ptr.is_null() && crate::security::validate_user_buffer(buf_ptr, 390).is_ok() {
+                unsafe {
+                    core::ptr::write_bytes(buf_ptr, 0, 390);
+                    // sysname = "NullOS"
+                    let sysname = b"NullOS\0";
+                    core::ptr::copy_nonoverlapping(sysname.as_ptr(), buf_ptr, sysname.len());
+                    // nodename = "nullos\0"
+                    let nodename = b"nullos\0";
+                    core::ptr::copy_nonoverlapping(nodename.as_ptr(), buf_ptr.add(65), nodename.len());
+                    // release = "0.1.0\0"
+                    let release = b"0.1.0\0";
+                    core::ptr::copy_nonoverlapping(release.as_ptr(), buf_ptr.add(130), release.len());
+                    // version = "1\0"
+                    let version = b"1\0";
+                    core::ptr::copy_nonoverlapping(version.as_ptr(), buf_ptr.add(195), version.len());
+                    // machine = "x86_64\0"
+                    let machine = b"x86_64\0";
+                    core::ptr::copy_nonoverlapping(machine.as_ptr(), buf_ptr.add(260), machine.len());
+                }
+                0
+            } else {
+                (-14i64) as u64
+            }
+        }
+        // Linux getcwd (79)
+        79 => {
+            let buf_ptr = a1 as *mut u8;
+            let size = a2 as usize;
+            if !buf_ptr.is_null() && size >= 2 && crate::security::validate_user_buffer(buf_ptr, 2).is_ok() {
+                unsafe {
+                    *buf_ptr = b'/';
+                    *buf_ptr.add(1) = 0;
+                }
+                buf_ptr as u64
+            } else {
+                (-14i64) as u64
+            }
+        }
+        // Linux getppid (110)
+        110 => {
+            1 // init is parent
+        }
+        // Linux exit_group (231)
+        231 => {
+            let code = a1 as i32;
+            println!("[USER] Process exit_group({}) requested.", code);
+            let cur_pid = current_pid();
+            super::process::exit_process(cur_pid, code);
+            super::exit();
+        }
+        // Linux rt_sigaction (13), rt_sigprocmask (14)
+        13 | 14 => {
+            0 // success
+        }
+        // Linux set_tid_address (218)
+        218 => {
+            current_pid().0
+        }
+        // Linux prctl (157)
+        157 => {
+            0 // success
+        }
+        // Linux getuid (102), geteuid (107), getgid (104), getegid (108)
+        102 | 104 | 107 | 108 => {
+            0 // root
+        }
+        // Linux umask (95)
+        95 => {
+            0o022
+        }
         SYS_READ => {
             let fd = a1 as i32;
             let buf_ptr = a2 as *mut u8;
@@ -800,6 +873,7 @@ fn syscall_dispatcher_inner(
                     if addr >= crate::security::USER_SPACE_CEILING {
                         return u64::MAX;
                     }
+                    super::set_current_fs_base(addr);
                     unsafe {
                         crate::arch::x86_64::syscall::write_msr(
                             crate::arch::x86_64::syscall::IA32_FS_BASE_MSR,

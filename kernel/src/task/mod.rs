@@ -68,7 +68,7 @@ pub mod thread;
 pub use elf::{load_user_elf, LoadedUserElf};
 pub use process::{create_process, execute_user_elf, exit_process, kill_process, process_count, spawn_init_process, waitpid, Process, ProcessId, ProcessState};
 pub use scheduler::{
-    block_current_thread, current_thread_id, exit, init, sleep, spawn, spawn_user, stats,
+    block_current_thread, current_thread_id, exit, init, set_current_fs_base, sleep, spawn, spawn_user, stats,
     thread_list, timer_tick, wake_thread, yield_now, ThreadInfo,
 };
 pub use syscall::run_user_mode_self_test;

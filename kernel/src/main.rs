@@ -307,10 +307,30 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
     }
 
     println!();
-    println!("[KERNEL] Kernel initialization complete. Shell active.");
+    println!("[KERNEL] Kernel initialization complete. Transitioning to userspace Init...");
     println!();
 
-    // Hand execution over to the interactive shell (with cooperative yield for background tasks)
+    // Check if external /bin/sh or /bin/busybox exists in VFS
+    let sh_path = if fs::vfs::VFS.resolve_path("/bin/sh").is_ok() {
+        Some("/bin/sh")
+    } else if fs::vfs::VFS.resolve_path("/bin/busybox").is_ok() {
+        Some("/bin/busybox")
+    } else {
+        None
+    };
+
+    if let Some(path) = sh_path {
+        if let Ok(inode) = fs::vfs::VFS.resolve_path(path) {
+            let size = inode.stat().size;
+            let mut elf_buf = alloc::vec![0u8; size];
+            if inode.read_at(0, &mut elf_buf).is_ok() {
+                println!("[INIT] Spawning external userspace shell ({}) as PID 1...", path);
+                let _ = task::execute_user_elf("sh", &elf_buf);
+            }
+        }
+    }
+
+    // Fallback to internal shell if external shell exits or was not found
     task::shell::interactive_loop();
 
     // Fallback CPU low-power idle halt loop

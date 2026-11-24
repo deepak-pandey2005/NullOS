@@ -237,8 +237,35 @@ impl Inode for ConsoleDevice {
         }
     }
 
-    fn read_at(&self, _offset: usize, _buf: &mut [u8]) -> Result<usize, FsError> {
-        Ok(0) // Non-blocking EOF for basic console read
+    fn read_at(&self, _offset: usize, buf: &mut [u8]) -> Result<usize, FsError> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let mut read_bytes = 0;
+        while read_bytes < buf.len() {
+            let ch = if let Some(c) = crate::drivers::keyboard::read_char() {
+                Some(c as u8)
+            } else if let Some(b) = crate::drivers::serial::read_byte() {
+                Some(b)
+            } else {
+                None
+            };
+
+            if let Some(b) = ch {
+                buf[read_bytes] = b;
+                read_bytes += 1;
+                if b == b'\n' || b == b'\r' {
+                    break;
+                }
+            } else {
+                if read_bytes > 0 {
+                    break;
+                }
+                // Yield thread to wait for input
+                crate::task::yield_now();
+            }
+        }
+        Ok(read_bytes)
     }
 
     fn write_at(&self, _offset: usize, buf: &[u8]) -> Result<usize, FsError> {

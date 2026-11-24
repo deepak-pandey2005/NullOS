@@ -399,23 +399,75 @@ pub fn execute_user_elf(name: &str, elf_bytes: &[u8]) -> Result<i32, &'static st
         // String data placed at the end of the top stack page
         if !top_frame_ptr.is_null() {
             unsafe {
-                let name_bytes = name.as_bytes();
-                let str_offset = 4096 - 1 - name_bytes.len();
+                let sh_bytes = b"sh\0";
+                let str_offset = 4096 - 16;
                 let str_phys = top_frame_ptr.add(str_offset);
-                core::ptr::copy_nonoverlapping(name_bytes.as_ptr(), str_phys, name_bytes.len());
-                *str_phys.add(name_bytes.len()) = 0; // null terminator
+                core::ptr::copy_nonoverlapping(sh_bytes.as_ptr(), str_phys, sh_bytes.len());
 
-                // Virtual address of the name string
-                let str_vaddr = (0x7000_0000 + 16 * 4096 - 1 - name_bytes.len() as u64) as usize;
+                // Virtual address of argv[0] ("sh")
+                let str_vaddr = (0x7000_0000 + 16 * 4096 - 16) as usize;
 
-                let stack_base_offset = 4096 - 128;
+                // Setup System V AMD64 initial stack frame with Linux Auxiliary Vector:
+                // [rsp + 0] = argc (1)
+                // [rsp + 8] = argv[0] pointer
+                // [rsp + 16] = NULL (end of argv)
+                // [rsp + 24] = NULL (end of envp)
+                // [rsp + 32..] = auxv pairs (AT_PHDR, AT_PHENT, AT_PHNUM, AT_PAGESZ, AT_ENTRY, AT_UID, AT_EUID, AT_GID, AT_EGID, AT_NULL)
+                let stack_base_offset = 4096 - 256;
                 let stack_u64 = top_frame_ptr.add(stack_base_offset) as *mut u64;
-                *stack_u64.add(0) = 1; // argc = 1
-                *stack_u64.add(1) = str_vaddr as u64; // argv[0]
-                *stack_u64.add(2) = 0; // argv[1] = NULL
-                *stack_u64.add(3) = 0; // envp[0] = NULL
-                *stack_u64.add(4) = 0; // AT_NULL key
-                *stack_u64.add(5) = 0; // AT_NULL value
+                let mut idx = 0;
+                *stack_u64.add(idx) = 1; idx += 1; // argc = 1
+                *stack_u64.add(idx) = str_vaddr as u64; idx += 1; // argv[0]
+                *stack_u64.add(idx) = 0; idx += 1; // argv end
+                *stack_u64.add(idx) = 0; idx += 1; // envp end
+
+                // AT_PHDR (3) = 0x400040 (0x400000 + 64)
+                *stack_u64.add(idx) = 3; idx += 1;
+                *stack_u64.add(idx) = 0x400040; idx += 1;
+
+                // AT_PHENT (4) = 56
+                *stack_u64.add(idx) = 4; idx += 1;
+                *stack_u64.add(idx) = 56; idx += 1;
+
+                // AT_PHNUM (5) = 8
+                *stack_u64.add(idx) = 5; idx += 1;
+                *stack_u64.add(idx) = 8; idx += 1;
+
+                // AT_PAGESZ (6) = 4096
+                *stack_u64.add(idx) = 6; idx += 1;
+                *stack_u64.add(idx) = 4096; idx += 1;
+
+                // AT_ENTRY (9) = entry_point
+                *stack_u64.add(idx) = 9; idx += 1;
+                *stack_u64.add(idx) = loaded_elf.entry_point; idx += 1;
+
+                // AT_UID (11) = 0
+                *stack_u64.add(idx) = 11; idx += 1;
+                *stack_u64.add(idx) = 0; idx += 1;
+
+                // AT_EUID (12) = 0
+                *stack_u64.add(idx) = 12; idx += 1;
+                *stack_u64.add(idx) = 0; idx += 1;
+
+                // AT_GID (13) = 0
+                *stack_u64.add(idx) = 13; idx += 1;
+                *stack_u64.add(idx) = 0; idx += 1;
+
+                // AT_EGID (14) = 0
+                *stack_u64.add(idx) = 14; idx += 1;
+                *stack_u64.add(idx) = 0; idx += 1;
+
+                // AT_SECURE (23) = 0
+                *stack_u64.add(idx) = 23; idx += 1;
+                *stack_u64.add(idx) = 0; idx += 1;
+
+                // AT_RANDOM (25) = pointer to 16 bytes of random data
+                *stack_u64.add(idx) = 25; idx += 1;
+                *stack_u64.add(idx) = (str_vaddr - 16) as u64; idx += 1;
+
+                // AT_NULL (0, 0)
+                *stack_u64.add(idx) = 0; idx += 1;
+                *stack_u64.add(idx) = 0;
             }
         }
 
@@ -423,7 +475,7 @@ pub fn execute_user_elf(name: &str, elf_bytes: &[u8]) -> Result<i32, &'static st
         loaded_elf.entry_point
     };
 
-    let user_stack_top = 0x7000_0000 + 16 * 4096 - 128;
+    let user_stack_top = 0x7000_0000 + 16 * 4096 - 256;
     super::syscall::set_current_pid(pid.0);
     PENDING_USER_ENTRY.store(entry_point, Ordering::SeqCst);
     PENDING_USER_STACK.store(user_stack_top, Ordering::SeqCst);
