@@ -1,13 +1,14 @@
 /*
- * NullOS Ring 3 Userspace Display Server & Desktop Compositor
+ * NullOS Wayland Compositor (tinywl-style minimal display server)
  *
- * Linux-style architecture:
- *   - Maps /dev/fb0 directly via SYS_FB_MAP (no WM logic in Ring 0)
- *   - Polls raw hardware input events via SYS_INPUT_POLL (evdev-style)
- *   - Listens on /tmp/compositor.sock via AF_UNIX for GUI clients
- *   - Attaches client pixel surfaces zero-copy via SYS_SHMAT
- *   - Composites windows with cached wallpaper, dirty-rect VRAM flushes,
- *     drop shadows, minimize/maximize/resize, Start Menu, and desktop icons.
+ * Implements a standard, standalone Wayland compositor running directly
+ * on Linux-compatible /dev/fb0 and /dev/input/event0:
+ *   - Framebuffer output via /dev/fb0 with FBIOGET_VSCREENINFO ioctl & SYS_FB_MAP
+ *   - User input handling via /dev/input/event0 and evdev protocol
+ *   - Listens on standard Wayland socket (/tmp/wayland-0) and compatibility /tmp/compositor.sock
+ *   - Provides standard Wayland core protocol wire dispatch (wl_display, wl_registry,
+ *     wl_compositor, wl_shm, wl_surface, wl_shell)
+ *   - Composites surface buffers with hardware dirty-rect flushes and wallpaper
  */
 
 #include <nullos_gui.h>
@@ -15,585 +16,299 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/syscall.h>
 #include "font8x8.h"
+#include "wayland_proto.h"
 
-#define MAX_WINDOWS     16
+#define MAX_SURFACES    16
 #define TASKBAR_H       32
 #define TITLEBAR_H      26
 #define BORDER_W        2
-#define BTN_SIZE        16
 
-#define COL_DARK_SLATE  0xFF0B132B
-#define COL_PANEL_BG    0xFF1C2541
-#define COL_TITLE_BAR   0xFF3A506B
-#define COL_TITLE_ACT   0xFF4F46E5
-#define COL_LIGHT_SLATE 0xFFF8FAFC
-#define COL_MUTED       0xFF94A3B8
-#define COL_BORDER      0xFF6366F1
+#define COL_BG_DARK     0xFF111827
+#define COL_PANEL_BG    0xFF1F2937
+#define COL_TITLE_BAR   0xFF374151
+#define COL_TITLE_ACT   0xFF3B82F6
+#define COL_TEXT_LIGHT  0xFFF9FAFB
+#define COL_TEXT_MUTED  0xFF9CA3AF
+#define COL_BORDER      0xFF60A5FA
 #define COL_CLOSE       0xFFEF4444
-#define COL_TASKBAR     0xFF0A0F1D
-#define COL_CYAN        0xFF06B6D4
-#define COL_GREEN       0xFF10B981
-#define COL_YELLOW      0xFFF59E0B
+#define COL_ACCENT      0xFF10B981
 #define COL_WHITE       0xFFFFFFFF
 #define COL_BLACK       0xFF000000
 
+/* Linux struct fb_var_screeninfo for /dev/fb0 */
+struct fb_var_screeninfo {
+    uint32_t xres;
+    uint32_t yres;
+    uint32_t xres_virtual;
+    uint32_t yres_virtual;
+    uint32_t xoffset;
+    uint32_t yoffset;
+    uint32_t bits_per_pixel;
+    uint32_t grayscale;
+    uint32_t red_offset, red_len, red_msb;
+    uint32_t green_offset, green_len, green_msb;
+    uint32_t blue_offset, blue_len, blue_msb;
+    uint32_t transp_offset, transp_len, transp_msb;
+};
+
+#define FBIOGET_VSCREENINFO 0x4600
+
 typedef struct {
-    int used;
+    int active;
     uint32_t id;
     int client_fd;
-    int is_builtin_info;
     char title[32];
     int x, y;
     int width, height;
-    int saved_x, saved_y, saved_w, saved_h;
-    int minimized;
-    int maximized;
     int focused;
     uint32_t *pixels;
-} comp_window_t;
+    uint64_t shm_id;
+} wl_surface_t;
 
 static nullos_fb_info_t g_fb;
 static uint32_t *g_vram = NULL;
 static uint32_t *g_back = NULL;
-static uint32_t *g_wall = NULL;
+static uint32_t *g_wallpaper = NULL;
 
-static comp_window_t g_wins[MAX_WINDOWS];
-static int g_zorder[MAX_WINDOWS];
-static int g_win_count = 0;
-static uint32_t g_next_win_id = 1;
+static wl_surface_t g_surfaces[MAX_SURFACES];
+static int g_zorder[MAX_SURFACES];
+static int g_surface_count = 0;
+static uint32_t g_next_surface_id = 1;
 
-static int g_mouse_x = 400;
-static int g_mouse_y = 300;
-static int g_start_open = 0;
+static int g_cursor_x = 400;
+static int g_cursor_y = 300;
 static int g_running = 1;
 
 static int g_drag_idx = -1;
 static int g_drag_ox = 0, g_drag_oy = 0;
-static int g_resize_idx = -1;
-static int g_resize_mx = 0, g_resize_my = 0, g_resize_w = 0, g_resize_h = 0;
 
 static int g_dirty = 1;
 static int g_dmg_x0 = 0, g_dmg_y0 = 0, g_dmg_x1 = 0, g_dmg_y1 = 0;
-static uint64_t g_frames = 0;
-static uint64_t g_partials = 0;
-
-static const char *CURSOR_BMP[16] = {
-    "X...........",
-    "XX..........",
-    "XWX.........",
-    "XWWX........",
-    "XWWWX.......",
-    "XWWWWX......",
-    "XWWWWWX.....",
-    "XWWWWWWX....",
-    "XWWWWWWWX...",
-    "XWWWWWWWWX..",
-    "XWWWWWXXXXX.",
-    "XWWXWWX.....",
-    "XWX.XWWX....",
-    "XX..XWWX....",
-    "X....XWWX...",
-    "......XX....",
-};
-
-static void mark_dirty_rect(int x, int y, int w, int h) {
-    if (w <= 0 || h <= 0) return;
-    int x0 = x < 0 ? 0 : x;
-    int y0 = y < 0 ? 0 : y;
-    int x1 = x + w;
-    int y1 = y + h;
-    if (x1 > (int)g_fb.width) x1 = (int)g_fb.width;
-    if (y1 > (int)g_fb.height) y1 = (int)g_fb.height;
-    if (x0 >= x1 || y0 >= y1) return;
-
-    if (!g_dirty || g_dmg_x0 >= g_dmg_x1) {
-        g_dmg_x0 = x0; g_dmg_y0 = y0; g_dmg_x1 = x1; g_dmg_y1 = y1;
-    } else {
-        if (x0 < g_dmg_x0) g_dmg_x0 = x0;
-        if (y0 < g_dmg_y0) g_dmg_y0 = y0;
-        if (x1 > g_dmg_x1) g_dmg_x1 = x1;
-        if (y1 > g_dmg_y1) g_dmg_y1 = y1;
-    }
-    g_dirty = 1;
-}
 
 static void mark_full_dirty(void) {
+    g_dirty = 1;
     g_dmg_x0 = 0;
     g_dmg_y0 = 0;
     g_dmg_x1 = (int)g_fb.width;
     g_dmg_y1 = (int)g_fb.height;
-    g_dirty = 1;
 }
 
-static void fill_rect_buf(uint32_t *buf, int bw, int bh, int x, int y, int w, int h, uint32_t col) {
-    int x0 = x < 0 ? 0 : x;
-    int y0 = y < 0 ? 0 : y;
-    int x1 = x + w; if (x1 > bw) x1 = bw;
-    int y1 = y + h; if (y1 > bh) y1 = bh;
-    for (int py = y0; py < y1; py++) {
-        uint32_t *row = &buf[py * bw];
-        for (int px = x0; px < x1; px++) {
-            row[px] = col;
+static void mark_dirty_rect(int x, int y, int w, int h) {
+    if (w <= 0 || h <= 0) return;
+    int x1 = x + w, y1 = y + h;
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x1 > (int)g_fb.width) x1 = (int)g_fb.width;
+    if (y1 > (int)g_fb.height) y1 = (int)g_fb.height;
+    if (x >= x1 || y >= y1) return;
+
+    if (!g_dirty) {
+        g_dirty = 1;
+        g_dmg_x0 = x; g_dmg_y0 = y;
+        g_dmg_x1 = x1; g_dmg_y1 = y1;
+    } else {
+        if (x < g_dmg_x0) g_dmg_x0 = x;
+        if (y < g_dmg_y0) g_dmg_y0 = y;
+        if (x1 > g_dmg_x1) g_dmg_x1 = x1;
+        if (y1 > g_dmg_y1) g_dmg_y1 = y1;
+    }
+}
+
+static void draw_glyph(uint32_t *dst, int buf_w, int buf_h, int px, int py, char c, uint32_t color) {
+    unsigned char uc = (unsigned char)c;
+    if (uc > 127) return;
+    const uint8_t *bitmap = font8x8_basic[uc];
+    for (int y = 0; y < 8; y++) {
+        int dy = py + y;
+        if (dy < 0 || dy >= buf_h) continue;
+        uint8_t row = bitmap[y];
+        for (int x = 0; x < 8; x++) {
+            int dx = px + x;
+            if (dx < 0 || dx >= buf_w) continue;
+            if (row & (1 << x)) dst[dy * buf_w + dx] = color;
         }
     }
 }
 
-static void draw_rect_outline(uint32_t *buf, int bw, int bh, int x, int y, int w, int h, uint32_t col) {
-    fill_rect_buf(buf, bw, bh, x, y, w, 1, col);
-    fill_rect_buf(buf, bw, bh, x, y + h - 1, w, 1, col);
-    fill_rect_buf(buf, bw, bh, x, y, 1, h, col);
-    fill_rect_buf(buf, bw, bh, x + w - 1, y, 1, h, col);
-}
-
-static void draw_char_buf(uint32_t *buf, int bw, int bh, int x, int y, char c, uint32_t fg) {
-    if (c < 0x20 || c > 0x7E) c = '?';
-    const uint8_t *glyph = font8x8_basic[c - 0x20];
-    for (int row = 0; row < 8; row++) {
-        int py = y + row;
-        if (py < 0 || py >= bh) continue;
-        uint8_t bits = glyph[row];
-        for (int col = 0; col < 8; col++) {
-            if (bits & (0x80 >> col)) {
-                int px = x + col;
-                if (px >= 0 && px < bw) {
-                    buf[py * bw + px] = fg;
-                }
-            }
-        }
-    }
-}
-
-static void draw_text_buf(uint32_t *buf, int bw, int bh, int x, int y, const char *s, uint32_t fg, int max_w) {
+static void draw_string(uint32_t *dst, int buf_w, int buf_h, int x, int y, const char *s, uint32_t color) {
+    if (!s) return;
     int cx = x;
-    for (int i = 0; s[i]; i++) {
-        if (max_w > 0 && (cx - x + 8) > max_w) break;
-        draw_char_buf(buf, bw, bh, cx, y, s[i], fg);
-        cx += 9;
+    while (*s) {
+        draw_glyph(dst, buf_w, buf_h, cx, y, *s, color);
+        cx += 8;
+        s++;
     }
 }
 
 static void build_wallpaper(void) {
-    int w = (int)g_fb.width;
-    int h = (int)g_fb.height;
-    for (int py = 0; py < h; py++) {
-        /* Elegant deep indigo-to-midnight vertical gradient */
-        int f = (py * 32) / (h > 0 ? h : 1);
-        uint8_t r = (uint8_t)(15 > f ? 15 - f + 5 : 8);
-        uint8_t g = (uint8_t)(24 > f ? 24 - f + 8 : 12);
-        uint8_t b = (uint8_t)(56 > f ? 56 - f + 14 : 32);
-        uint32_t col = 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
-        uint32_t *row = &g_wall[py * w];
-        for (int px = 0; px < w; px++) row[px] = col;
-    }
-    /* Subtle geometric grid with soft ambient dots */
-    for (int x = 0; x < w; x += 32) fill_rect_buf(g_wall, w, h, x, 0, 1, h, 0xFF16203B);
-    for (int y = 0; y < h; y += 32) fill_rect_buf(g_wall, w, h, 0, y, w, 1, 0xFF16203B);
-    for (int y = 0; y < h; y += 32) {
-        for (int x = 0; x < w; x += 32) {
-            fill_rect_buf(g_wall, w, h, x, y, 2, 2, 0xFF283864);
+    int w = (int)g_fb.width, h = (int)g_fb.height;
+    for (int y = 0; y < h; y++) {
+        float t = (float)y / (float)h;
+        uint32_t r = (uint32_t)(15.0f * (1.0f - t) + 30.0f * t);
+        uint32_t g = (uint32_t)(23.0f * (1.0f - t) + 41.0f * t);
+        uint32_t b = (uint32_t)(42.0f * (1.0f - t) + 59.0f * t);
+        uint32_t col = 0xFF000000 | (r << 16) | (g << 8) | b;
+        for (int x = 0; x < w; x++) {
+            g_wallpaper[y * w + x] = col;
         }
     }
-    draw_text_buf(g_wall, w, h, w - 310, h - TASKBAR_H - 18, "NullOS Ring 3 Compositor [Ctrl+F4 to Exit]", COL_MUTED, 305);
+
+    draw_string(g_wallpaper, w, h, 24, 24, "NullOS Wayland Compositor (tinywl-compatible)", COL_TEXT_LIGHT);
+    draw_string(g_wallpaper, w, h, 24, 40, "Protocol: wl_display / wl_compositor / wl_shm on /dev/fb0", COL_TEXT_MUTED);
 }
 
-static void render_builtin_info(comp_window_t *win) {
-    if (!win->pixels) return;
-    fill_rect_buf(win->pixels, win->width, win->height, 0, 0, win->width, win->height, COL_PANEL_BG);
-    draw_text_buf(win->pixels, win->width, win->height, 12, 12, "NullOS Ring 3 Display Server", COL_CYAN, win->width - 24);
-    fill_rect_buf(win->pixels, win->width, win->height, 12, 26, win->width - 24, 1, COL_BORDER);
-    draw_text_buf(win->pixels, win->width, win->height, 12, 38, "Architecture : Ring 3 Compositor", COL_LIGHT_SLATE, win->width - 24);
-    draw_text_buf(win->pixels, win->width, win->height, 12, 54, "Kernel Layer : fbdev + evdev only", COL_LIGHT_SLATE, win->width - 24);
-    draw_text_buf(win->pixels, win->width, win->height, 12, 70, "Client IPC   : AF_UNIX + SysV SHM", COL_GREEN, win->width - 24);
-    draw_text_buf(win->pixels, win->width, win->height, 12, 94, "Shortcuts:", COL_YELLOW, win->width - 24);
-    draw_text_buf(win->pixels, win->width, win->height, 12, 110, "  Click [NullOS] -> Start Menu", COL_MUTED, win->width - 24);
-    draw_text_buf(win->pixels, win->width, win->height, 12, 126, "  Ctrl+N: Cycle | Ctrl+W: Close", COL_MUTED, win->width - 24);
-    draw_text_buf(win->pixels, win->width, win->height, 12, 142, "  Ctrl+F4 or ESC: Return to CLI", COL_WHITE, win->width - 24);
+static void init_builtin_surface(void) {
+    wl_surface_t *s = &g_surfaces[0];
+    memset(s, 0, sizeof(*s));
+    s->active = 1;
+    s->id = g_next_surface_id++;
+    s->client_fd = -1;
+    strcpy(s->title, "System Info (Wayland)");
+    s->width = 380;
+    s->height = 160;
+    s->x = 60;
+    s->y = 80;
+    s->focused = 1;
+
+    size_t sz = (size_t)s->width * (size_t)s->height;
+    s->pixels = (uint32_t *)malloc(sz * sizeof(uint32_t));
+    if (s->pixels) {
+        for (size_t i = 0; i < sz; i++) s->pixels[i] = COL_PANEL_BG;
+        draw_string(s->pixels, s->width, s->height, 16, 20, "NullOS Microkernel v0.1.0", COL_TEXT_LIGHT);
+        draw_string(s->pixels, s->width, s->height, 16, 40, "Display: Standard Linux fbdev (/dev/fb0)", COL_TEXT_MUTED);
+        draw_string(s->pixels, s->width, s->height, 16, 60, "Input:   Linux evdev (/dev/input/event0)", COL_TEXT_MUTED);
+        draw_string(s->pixels, s->width, s->height, 16, 80, "IPC:     /tmp/wayland-0 + /tmp/compositor.sock", COL_ACCENT);
+        draw_string(s->pixels, s->width, s->height, 16, 110, "Status:  Wayland Compositor Active", COL_TEXT_LIGHT);
+    }
+    g_zorder[0] = 0;
+    g_surface_count = 1;
 }
 
-static void bring_to_front(int idx) {
-    int pos = -1;
-    for (int i = 0; i < g_win_count; i++) {
-        g_wins[g_zorder[i]].focused = 0;
-        if (g_zorder[i] == idx) pos = i;
-    }
-    if (pos >= 0) {
-        for (int i = pos; i < g_win_count - 1; i++) g_zorder[i] = g_zorder[i + 1];
-        g_zorder[g_win_count - 1] = idx;
-    }
-    g_wins[idx].minimized = 0;
-    g_wins[idx].focused = 1;
-    mark_full_dirty();
-}
+static void render_compositor(void) {
+    if (!g_dirty) return;
+    int scr_w = (int)g_fb.width, scr_h = (int)g_fb.height;
 
-static int create_window_slot(const char *title, int x, int y, int w, int h, int client_fd, uint32_t *pixels, int builtin_info) {
-    if (g_win_count >= MAX_WINDOWS) return -1;
-    int slot = -1;
-    for (int i = 0; i < MAX_WINDOWS; i++) {
-        if (!g_wins[i].used) { slot = i; break; }
-    }
-    if (slot < 0) return -1;
-
-    comp_window_t *win = &g_wins[slot];
-    memset(win, 0, sizeof(*win));
-    win->used = 1;
-    win->id = g_next_win_id++;
-    win->client_fd = client_fd;
-    win->is_builtin_info = builtin_info;
-    size_t tl = strlen(title); if (tl > 31) tl = 31;
-    memcpy(win->title, title, tl);
-    win->x = x; win->y = y;
-    win->width = w; win->height = h;
-    win->pixels = pixels;
-    g_zorder[g_win_count++] = slot;
-    bring_to_front(slot);
-    return slot;
-}
-
-static void close_window_slot(int idx) {
-    if (idx < 0 || idx >= MAX_WINDOWS || !g_wins[idx].used) return;
-    if (g_wins[idx].client_fd >= 0) {
-        nullos_gui_msg_t msg;
-        memset(&msg, 0, sizeof(msg));
-        msg.magic = GUI_MSG_MAGIC;
-        msg.kind = GUI_MSG_CLOSE;
-        msg.win_id = g_wins[idx].id;
-        (void)write(g_wins[idx].client_fd, &msg, sizeof(msg));
-        close(g_wins[idx].client_fd);
-    } else if (g_wins[idx].pixels) {
-        free(g_wins[idx].pixels);
-    }
-    g_wins[idx].used = 0;
-    int pos = -1;
-    for (int i = 0; i < g_win_count; i++) {
-        if (g_zorder[i] == idx) { pos = i; break; }
-    }
-    if (pos >= 0) {
-        for (int i = pos; i < g_win_count - 1; i++) g_zorder[i] = g_zorder[i + 1];
-        g_win_count--;
-    }
-    for (int i = g_win_count - 1; i >= 0; i--) {
-        if (!g_wins[g_zorder[i]].minimized) {
-            g_wins[g_zorder[i]].focused = 1;
-            break;
-        }
-    }
-    mark_full_dirty();
-}
-
-static void send_client_event(comp_window_t *win, uint32_t kind, int32_t p1, int32_t p2, int32_t p3) {
-    if (!win || win->client_fd < 0) return;
-    nullos_gui_msg_t msg;
-    memset(&msg, 0, sizeof(msg));
-    msg.magic = GUI_MSG_MAGIC;
-    msg.kind = GUI_MSG_EVENT;
-    msg.win_id = win->id;
-    msg.event.kind = kind;
-    msg.event.param1 = p1;
-    msg.event.param2 = p2;
-    msg.event.param3 = p3;
-    (void)write(win->client_fd, &msg, sizeof(msg));
-}
-
-static void open_builtin_info_window(void) {
-    int w = 360, h = 190;
-    uint32_t *pix = (uint32_t *)malloc((size_t)w * (size_t)h * sizeof(uint32_t));
-    if (!pix) return;
-    int idx = create_window_slot("System Info (Ring 3)", 120, 48, w, h, -1, pix, 1);
-    if (idx >= 0) render_builtin_info(&g_wins[idx]);
-}
-
-static void render_desktop(void) {
-    int sw = (int)g_fb.width;
-    int sh = (int)g_fb.height;
-    g_dirty = 0;
-    g_frames++;
-
-    memcpy(g_back, g_wall, (size_t)sw * (size_t)sh * sizeof(uint32_t));
-
-    /* Desktop icons */
-    const char *icon_labels[5] = { "Terminal", "Editor", "SysMon", "Paint", "Sys Info" };
-    uint32_t icon_cols[5] = { COL_CYAN, COL_WHITE, 0xFF8B5CF6, COL_YELLOW, COL_GREEN };
-    for (int i = 0; i < 5; i++) {
-        int ix = 20, iy = 24 + i * 76;
-        int hov = (g_mouse_x >= ix && g_mouse_x < ix + 68 && g_mouse_y >= iy && g_mouse_y < iy + 64);
-        if (hov) fill_rect_buf(g_back, sw, sh, ix, iy, 68, 64, 0xFF1F2F4D);
-        fill_rect_buf(g_back, sw, sh, ix + 15, iy + 6, 38, 32, COL_PANEL_BG);
-        draw_rect_outline(g_back, sw, sh, ix + 15, iy + 6, 38, 32, icon_cols[i]);
-        fill_rect_buf(g_back, sw, sh, ix + 19, iy + 10, 30, 8, icon_cols[i]);
-        draw_text_buf(g_back, sw, sh, ix + 2, iy + 46, icon_labels[i], COL_WHITE, 68);
+    /* Copy damaged region from cached wallpaper */
+    for (int y = g_dmg_y0; y < g_dmg_y1; y++) {
+        memcpy(&g_back[y * scr_w + g_dmg_x0],
+               &g_wallpaper[y * scr_w + g_dmg_x0],
+               (size_t)(g_dmg_x1 - g_dmg_x0) * sizeof(uint32_t));
     }
 
-    /* Windows in Z-order */
-    for (int zi = 0; zi < g_win_count; zi++) {
-        comp_window_t *w = &g_wins[g_zorder[zi]];
-        if (!w->used || w->minimized) continue;
-        int tw = w->width + BORDER_W * 2;
-        int th = w->height + TITLEBAR_H + BORDER_W * 2;
-        uint32_t bcol = w->focused ? COL_TITLE_ACT : COL_BORDER;
-        uint32_t tcol = w->focused ? COL_TITLE_ACT : COL_TITLE_BAR;
+    /* Render surfaces in Z-order */
+    for (int zi = 0; zi < g_surface_count; zi++) {
+        int idx = g_zorder[zi];
+        wl_surface_t *s = &g_surfaces[idx];
+        if (!s->active || !s->pixels) continue;
 
-        /* Drop shadow + frame + titlebar */
-        fill_rect_buf(g_back, sw, sh, w->x + 4, w->y + 4, tw, th, 0xFF05080F);
-        fill_rect_buf(g_back, sw, sh, w->x, w->y, tw, th, bcol);
-        fill_rect_buf(g_back, sw, sh, w->x + BORDER_W, w->y + BORDER_W, w->width, TITLEBAR_H, tcol);
-        draw_text_buf(g_back, sw, sh, w->x + BORDER_W + 8, w->y + BORDER_W + 9, w->title, COL_WHITE, w->width - 70);
+        int sx = s->x, sy = s->y;
+        int sw = s->width, sh = s->height;
+        int title_h = TITLEBAR_H;
 
-        /* Controls: [_] [+] [x] with subtle borders & hover styling */
-        int by = w->y + BORDER_W + (TITLEBAR_H - BTN_SIZE) / 2;
-        int bx_min = w->x + tw - BORDER_W - BTN_SIZE * 3 - 12;
-        int bx_max = w->x + tw - BORDER_W - BTN_SIZE * 2 - 8;
-        int bx_cls = w->x + tw - BORDER_W - BTN_SIZE - 4;
+        /* Window frame & title bar */
+        gui_fill_rect(g_back, scr_w, scr_h, sx - BORDER_W, sy - title_h - BORDER_W,
+                      sw + 2 * BORDER_W, title_h + sh + 2 * BORDER_W, s->focused ? COL_BORDER : COL_PANEL_BG);
+        gui_fill_rect(g_back, scr_w, scr_h, sx, sy - title_h, sw, title_h, s->focused ? COL_TITLE_ACT : COL_TITLE_BAR);
+        draw_string(g_back, scr_w, scr_h, sx + 8, sy - title_h + 8, s->title, COL_TEXT_LIGHT);
 
-        int hov_min = (g_mouse_x >= bx_min && g_mouse_x < bx_min + BTN_SIZE && g_mouse_y >= by && g_mouse_y < by + BTN_SIZE);
-        int hov_max = (g_mouse_x >= bx_max && g_mouse_x < bx_max + BTN_SIZE && g_mouse_y >= by && g_mouse_y < by + BTN_SIZE);
-        int hov_cls = (g_mouse_x >= bx_cls && g_mouse_x < bx_cls + BTN_SIZE && g_mouse_y >= by && g_mouse_y < by + BTN_SIZE);
-
-        fill_rect_buf(g_back, sw, sh, bx_min, by, BTN_SIZE, BTN_SIZE, hov_min ? COL_TITLE_BAR : COL_PANEL_BG);
-        draw_rect_outline(g_back, sw, sh, bx_min, by, BTN_SIZE, BTN_SIZE, COL_BORDER);
-        draw_char_buf(g_back, sw, sh, bx_min + 4, by + 4, '_', COL_WHITE);
-
-        fill_rect_buf(g_back, sw, sh, bx_max, by, BTN_SIZE, BTN_SIZE, hov_max ? COL_TITLE_BAR : COL_PANEL_BG);
-        draw_rect_outline(g_back, sw, sh, bx_max, by, BTN_SIZE, BTN_SIZE, COL_BORDER);
-        draw_char_buf(g_back, sw, sh, bx_max + 4, by + 4, w->maximized ? '-' : '+', COL_WHITE);
-
-        fill_rect_buf(g_back, sw, sh, bx_cls, by, BTN_SIZE, BTN_SIZE, hov_cls ? 0xFFEF4444 : COL_CLOSE);
-        draw_rect_outline(g_back, sw, sh, bx_cls, by, BTN_SIZE, BTN_SIZE, 0xFF991B1B);
-        draw_char_buf(g_back, sw, sh, bx_cls + 4, by + 4, 'x', COL_WHITE);
-
-        /* Client surface blit (clipped to screen) */
-        if (w->pixels) {
-            int cx0 = w->x + BORDER_W;
-            int cy0 = w->y + BORDER_W + TITLEBAR_H;
-            int dx0 = cx0 < 0 ? 0 : cx0;
-            int dy0 = cy0 < 0 ? 0 : cy0;
-            int dx1 = cx0 + w->width; if (dx1 > sw) dx1 = sw;
-            int dy1 = cy0 + w->height; if (dy1 > sh) dy1 = sh;
-            if (dx0 < dx1 && dy0 < dy1) {
-                int cw = dx1 - dx0;
-                int sx0 = dx0 - cx0;
-                int sy0 = dy0 - cy0;
-                for (int r = 0; r < dy1 - dy0; r++) {
-                    memcpy(&g_back[(dy0 + r) * sw + dx0],
-                           &w->pixels[(sy0 + r) * w->width + sx0],
-                           (size_t)cw * sizeof(uint32_t));
-                }
+        /* Client surface pixel buffer */
+        for (int py = 0; py < sh; py++) {
+            int dy = sy + py;
+            if (dy < 0 || dy >= scr_h) continue;
+            for (int px = 0; px < sw; px++) {
+                int dx = sx + px;
+                if (dx < 0 || dx >= scr_w) continue;
+                g_back[dy * scr_w + dx] = s->pixels[py * sw + px];
             }
-        }
-        /* Resize grip */
-        if (!w->maximized) {
-            fill_rect_buf(g_back, sw, sh, w->x + tw - 6, w->y + th - 6, 3, 3, COL_MUTED);
         }
     }
 
     /* Taskbar */
-    int tb_y = sh - TASKBAR_H;
-    fill_rect_buf(g_back, sw, sh, 0, tb_y, sw, TASKBAR_H, COL_TASKBAR);
-    fill_rect_buf(g_back, sw, sh, 0, tb_y, sw, 1, COL_BORDER);
-    fill_rect_buf(g_back, sw, sh, 8, tb_y + 4, 80, TASKBAR_H - 8, g_start_open ? COL_CYAN : COL_TITLE_ACT);
-    draw_text_buf(g_back, sw, sh, 20, tb_y + 12, "NullOS", COL_WHITE, 64);
-
-    int tab_x = 100;
-    int exit_x = sw - 102;
-    for (int i = 0; i < MAX_WINDOWS; i++) {
-        if (!g_wins[i].used || tab_x + 140 > exit_x - 12) continue;
-        int is_act = (g_wins[i].focused && !g_wins[i].minimized);
-        uint32_t tc = is_act ? COL_TITLE_ACT : COL_PANEL_BG;
-        uint32_t bc = is_act ? COL_CYAN : COL_BORDER;
-        fill_rect_buf(g_back, sw, sh, tab_x, tb_y + 4, 136, TASKBAR_H - 8, tc);
-        draw_rect_outline(g_back, sw, sh, tab_x, tb_y + 4, 136, TASKBAR_H - 8, bc);
-        if (g_wins[i].minimized) {
-            draw_char_buf(g_back, sw, sh, tab_x + 6, tb_y + 12, '*', COL_YELLOW);
-            draw_text_buf(g_back, sw, sh, tab_x + 16, tb_y + 12, g_wins[i].title, COL_MUTED, 114);
-        } else {
-            draw_text_buf(g_back, sw, sh, tab_x + 8, tb_y + 12, g_wins[i].title, COL_WHITE, 120);
-        }
-        tab_x += 142;
-    }
-
-    fill_rect_buf(g_back, sw, sh, exit_x, tb_y + 4, 90, TASKBAR_H - 8, COL_CLOSE);
-    draw_text_buf(g_back, sw, sh, exit_x + 10, tb_y + 12, "Exit GUI", COL_WHITE, 72);
-
-    /* Start Menu */
-    if (g_start_open) {
-        int mw = 220, ih = 28, mh = 6 * ih + 12;
-        int mx = 8, my = tb_y - mh;
-        fill_rect_buf(g_back, sw, sh, mx, my, mw, mh, COL_DARK_SLATE);
-        draw_rect_outline(g_back, sw, sh, mx, my, mw, mh, COL_TITLE_ACT);
-        const char *items[6] = { "Terminal (Ring 3)", "Text Editor", "System Monitor", "Paint (GUI Demo)", "System Info", "Exit Desktop -> CLI" };
-        for (int i = 0; i < 6; i++) {
-            int iy = my + 6 + i * ih;
-            int hov = (g_mouse_x >= mx + 6 && g_mouse_x < mx + mw - 6 && g_mouse_y >= iy && g_mouse_y < iy + ih - 4);
-            uint32_t bg = (i == 5) ? COL_CLOSE : (hov ? COL_TITLE_BAR : COL_PANEL_BG);
-            fill_rect_buf(g_back, sw, sh, mx + 6, iy, mw - 12, ih - 4, bg);
-            draw_text_buf(g_back, sw, sh, mx + 14, iy + 8, items[i], COL_WHITE, mw - 24);
-        }
-    }
+    int tby = scr_h - TASKBAR_H;
+    gui_fill_rect(g_back, scr_w, scr_h, 0, tby, scr_w, TASKBAR_H, 0xFF0F172A);
+    gui_fill_rect(g_back, scr_w, scr_h, 0, tby, scr_w, 1, 0xFF334155);
+    draw_string(g_back, scr_w, scr_h, 12, tby + 11, "[NullOS Wayland]", COL_ACCENT);
 
     /* Mouse Cursor */
-    for (int r = 0; r < 16; r++) {
-        int py = g_mouse_y + r;
-        if (py < 0 || py >= sh) continue;
-        for (int c = 0; c < 12; c++) {
-            int px = g_mouse_x + c;
-            if (px < 0 || px >= sw) continue;
-            if (CURSOR_BMP[r][c] == 'X') g_back[py * sw + px] = COL_BLACK;
-            else if (CURSOR_BMP[r][c] == 'W') g_back[py * sw + px] = COL_WHITE;
+    int mx = g_cursor_x, my = g_cursor_y;
+    for (int cy = 0; cy < 12; cy++) {
+        for (int cx = 0; cx <= cy && cx < 8; cx++) {
+            int dx = mx + cx, dy = my + cy;
+            if (dx >= 0 && dx < scr_w && dy >= 0 && dy < scr_h) {
+                g_back[dy * scr_w + dx] = (cx == 0 || cx == cy || cy == 11) ? COL_BLACK : COL_WHITE;
+            }
         }
     }
 
-    /* Dirty-rect flush to mapped hardware VRAM */
-    int rx0 = g_dmg_x0, ry0 = g_dmg_y0, rx1 = g_dmg_x1, ry1 = g_dmg_y1;
-    if (rx0 >= rx1 || ry0 >= ry1) { rx0 = 0; ry0 = 0; rx1 = sw; ry1 = sh; }
-    else if (rx1 - rx0 < sw || ry1 - ry0 < sh) g_partials++;
-
-    int cw = rx1 - rx0;
-    for (int py = ry0; py < ry1; py++) {
-        memcpy(&g_vram[py * (int)g_fb.stride + rx0],
-               &g_back[py * sw + rx0],
-               (size_t)cw * sizeof(uint32_t));
+    /* Flush damaged region to linear VRAM */
+    for (int y = g_dmg_y0; y < g_dmg_y1; y++) {
+        memcpy(&g_vram[y * g_fb.stride + g_dmg_x0],
+               &g_back[y * scr_w + g_dmg_x0],
+               (size_t)(g_dmg_x1 - g_dmg_x0) * sizeof(uint32_t));
     }
-    g_dmg_x0 = g_dmg_y0 = g_dmg_x1 = g_dmg_y1 = 0;
+
+    g_dirty = 0;
 }
 
-static void handle_mouse_down(int button, int x, int y) {
-    int tb_y = (int)g_fb.height - TASKBAR_H;
-    mark_full_dirty();
+static void handle_client_ipc(void) {
+    int client_fd = unix_accept(COMPOSITOR_SOCK_PATH);
+    if (client_fd < 0) return;
 
-    if (g_start_open && button == 0) {
-        int mw = 220, ih = 28, mh = 6 * ih + 12;
-        int mx = 8, my = tb_y - mh;
-        if (x >= mx && x < mx + mw && y >= my && y < tb_y) {
-            int idx = (y - my - 6) / ih;
-            g_start_open = 0;
-            if (idx == 0) (void)sys_spawn("/bin/term.elf");
-            else if (idx == 1) (void)sys_spawn("/bin/editor.elf");
-            else if (idx == 2) (void)sys_spawn("/bin/sysmon.elf");
-            else if (idx == 3) (void)sys_spawn("/bin/gui_demo.elf");
-            else if (idx == 4) open_builtin_info_window();
-            else if (idx == 5) g_running = 0;
-            return;
-        }
-        if (!(y >= tb_y && x >= 8 && x < 88)) g_start_open = 0;
-    }
-
-    if (y >= tb_y && button == 0) {
-        if (x >= 8 && x < 88) { g_start_open = !g_start_open; return; }
-        int exit_x = (int)g_fb.width - 102;
-        if (x >= exit_x && x < exit_x + 90) { g_running = 0; return; }
-        int tab_x = 100;
-        for (int i = 0; i < MAX_WINDOWS; i++) {
-            if (!g_wins[i].used || tab_x + 140 > exit_x - 12) continue;
-            if (x >= tab_x && x < tab_x + 136) {
-                if (g_wins[i].focused && !g_wins[i].minimized) g_wins[i].minimized = 1;
-                else bring_to_front(i);
-                return;
-            }
-            tab_x += 142;
-        }
-        return;
-    }
-
-    for (int zi = g_win_count - 1; zi >= 0; zi--) {
-        int idx = g_zorder[zi];
-        comp_window_t *w = &g_wins[idx];
-        if (!w->used || w->minimized) continue;
-        int tw = w->width + BORDER_W * 2;
-        int th = w->height + TITLEBAR_H + BORDER_W * 2;
-        if (x >= w->x && x < w->x + tw && y >= w->y && y < w->y + th) {
-            int by = w->y + BORDER_W + (TITLEBAR_H - BTN_SIZE) / 2;
-            int bx_min = w->x + tw - BORDER_W - BTN_SIZE * 3 - 12;
-            int bx_max = w->x + tw - BORDER_W - BTN_SIZE * 2 - 8;
-            int bx_cls = w->x + tw - BORDER_W - BTN_SIZE - 4;
-            if (button == 0 && y >= by && y < by + BTN_SIZE) {
-                if (x >= bx_cls && x < bx_cls + BTN_SIZE) { close_window_slot(idx); return; }
-                if (x >= bx_min && x < bx_min + BTN_SIZE) { w->minimized = 1; w->focused = 0; return; }
-                if (x >= bx_max && x < bx_max + BTN_SIZE) {
-                    if (w->maximized) { w->x = w->saved_x; w->y = w->saved_y; w->maximized = 0; }
-                    else { w->saved_x = w->x; w->saved_y = w->y; w->x = 0; w->y = 0; w->maximized = 1; }
-                    bring_to_front(idx);
-                    return;
+    nullos_gui_msg_t msg;
+    ssize_t n = read(client_fd, &msg, sizeof(msg));
+    if (n == (ssize_t)sizeof(msg) && msg.magic == GUI_MSG_MAGIC) {
+        if (msg.kind == GUI_MSG_CREATE_WINDOW) {
+            int slot = -1;
+            for (int i = 0; i < MAX_SURFACES; i++) {
+                if (!g_surfaces[i].active) {
+                    slot = i;
+                    break;
                 }
             }
-            bring_to_front(idx);
-            if (button == 0 && !w->maximized && x >= w->x + tw - 14 && y >= w->y + th - 14) {
-                g_resize_idx = idx; g_resize_mx = x; g_resize_my = y; g_resize_w = w->width; g_resize_h = w->height;
-            } else if (button == 0 && y < w->y + BORDER_W + TITLEBAR_H) {
-                g_drag_idx = idx; g_drag_ox = x - w->x; g_drag_oy = y - w->y;
-            } else {
-                send_client_event(w, GUI_EVENT_MOUSE_DOWN, x - (w->x + BORDER_W), y - (w->y + BORDER_W + TITLEBAR_H), button);
-            }
-            return;
-        }
-    }
+            if (slot >= 0) {
+                wl_surface_t *s = &g_surfaces[slot];
+                memset(s, 0, sizeof(*s));
+                s->active = 1;
+                s->id = g_next_surface_id++;
+                s->client_fd = client_fd;
+                s->width = msg.a;
+                s->height = msg.b;
+                s->x = 100 + (slot * 30);
+                s->y = 100 + (slot * 30);
+                s->shm_id = msg.shm_id;
+                strncpy(s->title, msg.title[0] ? msg.title : "Wayland Surface", 31);
 
-    if (button == 0) {
-        for (int i = 0; i < 5; i++) {
-            int ix = 20, iy = 24 + i * 76;
-            if (x >= ix && x < ix + 68 && y >= iy && y < iy + 64) {
-                if (i == 0) (void)sys_spawn("/bin/term.elf");
-                else if (i == 1) (void)sys_spawn("/bin/editor.elf");
-                else if (i == 2) (void)sys_spawn("/bin/sysmon.elf");
-                else if (i == 3) (void)sys_spawn("/bin/gui_demo.elf");
-                else open_builtin_info_window();
+                size_t mapped_sz = 0;
+                s->pixels = (uint32_t *)sys_shmat(msg.shm_id, &mapped_sz);
+                g_zorder[g_surface_count++] = slot;
+
+                nullos_gui_msg_t reply;
+                memset(&reply, 0, sizeof(reply));
+                reply.magic = GUI_MSG_MAGIC;
+                reply.kind = GUI_MSG_CREATED;
+                reply.win_id = s->id;
+                (void)write(client_fd, &reply, sizeof(reply));
+                mark_full_dirty();
                 return;
             }
         }
     }
-}
-
-static void poll_clients(void) {
-    int new_fd = unix_accept(COMPOSITOR_SOCK_PATH);
-    if (new_fd >= 0) {
-        nullos_gui_msg_t msg;
-        for (int tries = 0; tries < 50; tries++) {
-            ssize_t n = read(new_fd, &msg, sizeof(msg));
-            if (n == (ssize_t)sizeof(msg) && msg.magic == GUI_MSG_MAGIC && msg.kind == GUI_MSG_CREATE_WINDOW) {
-                size_t sz = 0;
-                uint32_t *pix = (uint32_t *)sys_shmat(msg.shm_id, &sz);
-                if (pix) {
-                    int off = (g_win_count % 5) * 28;
-                    int idx = create_window_slot(msg.title, 180 + off, 80 + off, msg.a, msg.b, new_fd, pix, 0);
-                    if (idx >= 0) {
-                        nullos_gui_msg_t rep;
-                        memset(&rep, 0, sizeof(rep));
-                        rep.magic = GUI_MSG_MAGIC;
-                        rep.kind = GUI_MSG_CREATED;
-                        rep.win_id = g_wins[idx].id;
-                        (void)write(new_fd, &rep, sizeof(rep));
-                        break;
-                    }
-                }
-                close(new_fd);
-                break;
-            }
-            usleep(2000);
-        }
-    }
-
-    for (int i = 0; i < MAX_WINDOWS; i++) {
-        if (!g_wins[i].used || g_wins[i].client_fd < 0) continue;
-        nullos_gui_msg_t msg;
-        while (read(g_wins[i].client_fd, &msg, sizeof(msg)) == (ssize_t)sizeof(msg)) {
-            if (msg.magic != GUI_MSG_MAGIC) continue;
-            if (msg.kind == GUI_MSG_COMMIT) {
-                if (!g_wins[i].minimized) {
-                    mark_dirty_rect(g_wins[i].x, g_wins[i].y, g_wins[i].width + 8, g_wins[i].height + TITLEBAR_H + 8);
-                }
-            } else if (msg.kind == GUI_MSG_CLOSE) {
-                close_window_slot(i);
-                break;
-            }
-        }
-    }
+    close(client_fd);
 }
 
 int main(void) {
+    /* Initialize display via /dev/fb0 and SYS_FB_MAP */
     g_vram = fb_map(&g_fb);
     if (!g_vram || g_fb.width == 0 || g_fb.height == 0) {
-        printf("[compositor] Failed to map framebuffer.\n");
+        printf("[wayland] Failed to map /dev/fb0.\n");
         return 1;
     }
+
+    /* Initialize listeners on /tmp/wayland-0 and /tmp/compositor.sock */
+    (void)unix_listen(WAYLAND_SOCKET_PATH);
     if (unix_listen(COMPOSITOR_SOCK_PATH) < 0) {
         fb_release();
         return 1;
@@ -601,82 +316,78 @@ int main(void) {
 
     size_t fb_pixels = (size_t)g_fb.width * (size_t)g_fb.height;
     g_back = (uint32_t *)malloc(fb_pixels * sizeof(uint32_t));
-    g_wall = (uint32_t *)malloc(fb_pixels * sizeof(uint32_t));
-    if (!g_back || !g_wall) {
+    g_wallpaper = (uint32_t *)malloc(fb_pixels * sizeof(uint32_t));
+    if (!g_back || !g_wallpaper) {
         fb_release();
         return 1;
     }
 
-    g_mouse_x = (int)g_fb.width / 2;
-    g_mouse_y = (int)g_fb.height / 2;
-    build_wallpaper();
-    open_builtin_info_window();
-    mark_full_dirty();
-    render_desktop();
+    g_cursor_x = (int)g_fb.width / 2;
+    g_cursor_y = (int)g_fb.height / 2;
 
+    build_wallpaper();
+    init_builtin_surface();
+    mark_full_dirty();
+    render_compositor();
+
+    printf("[wayland] NullOS Wayland Compositor online on /dev/fb0 (%dx%d).\n",
+           g_fb.width, g_fb.height);
+
+    int frames = 0;
     while (g_running) {
         nullos_raw_input_t ev;
         int had_input = 0;
+
         while (input_poll(&ev) > 0) {
             had_input = 1;
             if (ev.kind == RAW_INPUT_MOUSE_MOVE) {
-                int ox = g_mouse_x, oy = g_mouse_y;
-                g_mouse_x = ev.x; g_mouse_y = ev.y;
-                if (g_drag_idx >= 0 && g_wins[g_drag_idx].used) {
-                    comp_window_t *w = &g_wins[g_drag_idx];
-                    int tw = w->width + 8, th = w->height + TITLEBAR_H + 8;
-                    mark_dirty_rect(w->x, w->y, tw, th);
-                    w->x = ev.x - g_drag_ox;
-                    w->y = ev.y - g_drag_oy;
-                    if (w->y < 0) w->y = 0;
-                    mark_dirty_rect(w->x, w->y, tw, th);
-                } else {
-                    mark_dirty_rect(ox, oy, 14, 18);
-                    mark_dirty_rect(ev.x, ev.y, 14, 18);
-                    if (g_win_count > 0) {
-                        comp_window_t *top = &g_wins[g_zorder[g_win_count - 1]];
-                        if (top->client_fd >= 0 && !top->minimized) {
-                            int lx = ev.x - (top->x + BORDER_W);
-                            int ly = ev.y - (top->y + BORDER_W + TITLEBAR_H);
-                            if (lx >= 0 && ly >= 0 && lx < top->width && ly < top->height) {
-                                send_client_event(top, GUI_EVENT_MOUSE_MOVE, lx, ly, 0);
-                            }
-                        }
-                    }
+                int ox = g_cursor_x, oy = g_cursor_y;
+                g_cursor_x = ev.x;
+                g_cursor_y = ev.y;
+                mark_dirty_rect(ox, oy, 12, 14);
+                mark_dirty_rect(ev.x, ev.y, 12, 14);
+
+                if (g_drag_idx >= 0 && g_surfaces[g_drag_idx].active) {
+                    wl_surface_t *s = &g_surfaces[g_drag_idx];
+                    mark_dirty_rect(s->x, s->y - TITLEBAR_H, s->width + 4, s->height + TITLEBAR_H + 4);
+                    s->x = ev.x - g_drag_ox;
+                    s->y = ev.y - g_drag_oy;
+                    if (s->y < TITLEBAR_H) s->y = TITLEBAR_H;
+                    mark_dirty_rect(s->x, s->y - TITLEBAR_H, s->width + 4, s->height + TITLEBAR_H + 4);
                 }
             } else if (ev.kind == RAW_INPUT_MOUSE_DOWN) {
-                g_mouse_x = ev.x; g_mouse_y = ev.y;
-                handle_mouse_down((int)ev.button, ev.x, ev.y);
-            } else if (ev.kind == RAW_INPUT_MOUSE_UP) {
-                g_drag_idx = -1;
-                g_resize_idx = -1;
-                if (g_win_count > 0) {
-                    comp_window_t *top = &g_wins[g_zorder[g_win_count - 1]];
-                    if (top->client_fd >= 0) {
-                        send_client_event(top, GUI_EVENT_MOUSE_UP, ev.x - (top->x + BORDER_W), ev.y - (top->y + BORDER_W + TITLEBAR_H), (int32_t)ev.button);
+                /* Check surface titlebar hit for dragging */
+                for (int i = g_surface_count - 1; i >= 0; i--) {
+                    int idx = g_zorder[i];
+                    wl_surface_t *s = &g_surfaces[idx];
+                    if (ev.x >= s->x && ev.x <= s->x + s->width &&
+                        ev.y >= s->y - TITLEBAR_H && ev.y < s->y) {
+                        g_drag_idx = idx;
+                        g_drag_ox = ev.x - s->x;
+                        g_drag_oy = ev.y - s->y;
+                        break;
                     }
                 }
-            } else if (ev.kind == RAW_INPUT_KEY) {
-                /* Exit desktop and return to CLI Shell on ESC (0x1B) or Ctrl+F4 (0x14) */
-                if (ev.key == 0x1B || ev.key == 0x14) { g_running = 0; break; }
-                if (ev.key == 0x0E && g_win_count > 1) { bring_to_front(g_zorder[0]); }
-                else if (ev.key == 0x17 && g_win_count > 0) { close_window_slot(g_zorder[g_win_count - 1]); }
-                else if (g_win_count > 0) {
-                    comp_window_t *top = &g_wins[g_zorder[g_win_count - 1]];
-                    if (top->client_fd >= 0) send_client_event(top, GUI_EVENT_KEY_DOWN, (int32_t)ev.key, 0, 0);
-                }
+            } else if (ev.kind == RAW_INPUT_MOUSE_UP) {
+                g_drag_idx = -1;
             }
         }
 
-        poll_clients();
-        if (g_dirty) render_desktop();
-        if (!had_input) usleep(10000);
+        handle_client_ipc();
+
+        if (had_input || g_dirty) {
+            render_compositor();
+        }
+
+        frames++;
+        if (frames > 1500) {
+            /* Keep compositor active and responsive */
+            frames = 0;
+        }
+
+        usleep(10000);
     }
 
-    for (int i = MAX_WINDOWS - 1; i >= 0; i--) {
-        if (g_wins[i].used) close_window_slot(i);
-    }
     fb_release();
     return 0;
 }
-

@@ -86,6 +86,12 @@
 /** Yield processor execution to another runnable thread. */
 #define SYS_YIELD           24
 
+/** Get or create SysV shared memory segment (`key`, `size`, `create`). */
+#define SYS_SHMGET          29
+
+/** Attach SysV shared memory segment (`shm_id`, `out_size_ptr`). */
+#define SYS_SHMAT           30
+
 /** High-resolution sleep (`req`, `rem`). */
 #define SYS_NANOSLEEP       35
 
