@@ -300,10 +300,10 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
 
     let is_test_mode = cmdline_str.contains("test") || check_qemu_fw_cfg_test();
     if is_test_mode {
-        println!("[KERNEL] Test mode detected. Running automated test suite...");
-        task::shell::run_automated_tests();
+        println!("[KERNEL] Test mode detected. Running automated reliability & QA test suite...");
+        reliability::run_all();
     } else {
-        println!("[KERNEL] Fast boot active. Type 'test' in the shell to run all automated tests.");
+        println!("[KERNEL] Fast boot active.");
     }
 
     println!();
@@ -329,9 +329,6 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
             }
         }
     }
-
-    // Fallback to internal shell if external shell exits or was not found
-    task::shell::interactive_loop();
 
     // Fallback CPU low-power idle halt loop
     loop {

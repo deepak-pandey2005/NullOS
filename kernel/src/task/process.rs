@@ -400,24 +400,34 @@ pub fn execute_user_elf(name: &str, elf_bytes: &[u8]) -> Result<i32, &'static st
         if !top_frame_ptr.is_null() {
             unsafe {
                 let sh_bytes = b"sh\0";
-                let str_offset = 4096 - 16;
-                let str_phys = top_frame_ptr.add(str_offset);
-                core::ptr::copy_nonoverlapping(sh_bytes.as_ptr(), str_phys, sh_bytes.len());
+                let dash_i_bytes = b"-i\0";
+                // Place "sh\0" at offset 4096 - 16
+                let str_offset_sh = 4096 - 16;
+                let str_phys_sh = top_frame_ptr.add(str_offset_sh);
+                core::ptr::copy_nonoverlapping(sh_bytes.as_ptr(), str_phys_sh, sh_bytes.len());
 
-                // Virtual address of argv[0] ("sh")
-                let str_vaddr = (0x7000_0000 + 16 * 4096 - 16) as usize;
+                // Place "-i\0" at offset 4096 - 32
+                let str_offset_i = 4096 - 32;
+                let str_phys_i = top_frame_ptr.add(str_offset_i);
+                core::ptr::copy_nonoverlapping(dash_i_bytes.as_ptr(), str_phys_i, dash_i_bytes.len());
+
+                // Virtual addresses
+                let sh_vaddr = (0x7000_0000 + 16 * 4096 - 16) as usize;
+                let i_vaddr = (0x7000_0000 + 16 * 4096 - 32) as usize;
 
                 // Setup System V AMD64 initial stack frame with Linux Auxiliary Vector:
-                // [rsp + 0] = argc (1)
-                // [rsp + 8] = argv[0] pointer
-                // [rsp + 16] = NULL (end of argv)
-                // [rsp + 24] = NULL (end of envp)
-                // [rsp + 32..] = auxv pairs (AT_PHDR, AT_PHENT, AT_PHNUM, AT_PAGESZ, AT_ENTRY, AT_UID, AT_EUID, AT_GID, AT_EGID, AT_NULL)
+                // [rsp + 0] = argc (2)
+                // [rsp + 8] = argv[0] ("sh")
+                // [rsp + 16] = argv[1] ("-i")
+                // [rsp + 24] = NULL (end of argv)
+                // [rsp + 32] = NULL (end of envp)
+                // [rsp + 40..] = auxv pairs (AT_PHDR, AT_PHENT, AT_PHNUM, AT_PAGESZ, AT_ENTRY, AT_UID, AT_EUID, AT_GID, AT_EGID, AT_NULL)
                 let stack_base_offset = 4096 - 256;
                 let stack_u64 = top_frame_ptr.add(stack_base_offset) as *mut u64;
                 let mut idx = 0;
-                *stack_u64.add(idx) = 1; idx += 1; // argc = 1
-                *stack_u64.add(idx) = str_vaddr as u64; idx += 1; // argv[0]
+                *stack_u64.add(idx) = 2; idx += 1; // argc = 2
+                *stack_u64.add(idx) = sh_vaddr as u64; idx += 1; // argv[0] = "sh"
+                *stack_u64.add(idx) = i_vaddr as u64; idx += 1;  // argv[1] = "-i"
                 *stack_u64.add(idx) = 0; idx += 1; // argv end
                 *stack_u64.add(idx) = 0; idx += 1; // envp end
 
@@ -463,7 +473,7 @@ pub fn execute_user_elf(name: &str, elf_bytes: &[u8]) -> Result<i32, &'static st
 
                 // AT_RANDOM (25) = pointer to 16 bytes of random data
                 *stack_u64.add(idx) = 25; idx += 1;
-                *stack_u64.add(idx) = (str_vaddr - 16) as u64; idx += 1;
+                *stack_u64.add(idx) = (sh_vaddr - 32) as u64; idx += 1;
 
                 // AT_NULL (0, 0)
                 *stack_u64.add(idx) = 0; idx += 1;

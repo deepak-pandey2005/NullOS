@@ -296,6 +296,53 @@ impl Inode for ConsoleDevice {
         }
         revents
     }
+
+    fn ioctl(&self, cmd: u32, arg: usize) -> Result<i32, FsError> {
+        match cmd {
+            // TCGETS (0x5401) / TCSETS (0x5402) / TCSETSW (0x5403) / TCSETSF (0x5404)
+            0x5401 | 0x5402 | 0x5403 | 0x5404 => {
+                if arg != 0 && crate::security::validate_user_buffer(arg as *const u8, 60).is_ok() {
+                    // Populate standard termios: echo on, icanon on, 38400 baud
+                    unsafe {
+                        core::ptr::write_bytes(arg as *mut u8, 0, 60);
+                        let ptr = arg as *mut u32;
+                        *ptr = 0o000004; // c_iflag: ICRNL
+                        *ptr.add(1) = 0o000005; // c_oflag: OPOST | ONLCR
+                        *ptr.add(2) = 0o000017 | 0o000060; // c_cflag: B38400 | CS8
+                        *ptr.add(3) = 0o000012 | 0o000010; // c_lflag: ISIG | ICANON | ECHO
+                    }
+                }
+                Ok(0)
+            }
+            // TIOCGWINSZ (0x5413): Window size (rows=25, cols=80)
+            0x5413 => {
+                if arg != 0 && crate::security::validate_user_buffer(arg as *const u8, 8).is_ok() {
+                    unsafe {
+                        let ptr = arg as *mut u16;
+                        *ptr = 25; // ws_row
+                        *ptr.add(1) = 80; // ws_col
+                        *ptr.add(2) = 0;
+                        *ptr.add(3) = 0;
+                    }
+                }
+                Ok(0)
+            }
+            // TIOCSCTTY (0x540E): Make controlling tty
+            0x540E => Ok(0),
+            // TIOCGPGRP (0x540F): Get foreground process group
+            0x540F => {
+                if arg != 0 && crate::security::validate_user_buffer(arg as *const u8, 4).is_ok() {
+                    unsafe {
+                        *(arg as *mut i32) = 1;
+                    }
+                }
+                Ok(0)
+            }
+            // TIOCSPGRP (0x5410): Set foreground process group
+            0x5410 => Ok(0),
+            _ => Ok(0), // Tolerate other terminal ioctls gracefully
+        }
+    }
 }
 
 /// Character device node representing `/dev/zero`.

@@ -51,8 +51,6 @@
 //!      for shared ELF libraries.
 //! 7. **Event Multiplexing ([`event`])**:
 //!    - Readiness notifications and epoll-style wait mechanisms for scalable IPC and networking.
-//! 8. **Kernel Shell ([`shell`])**:
-//!    - Interactive diagnostic command-line interface with built-in commands (`help`, `ls`, `ps`, `mem`, `cat`, etc.).
 
 #![allow(unused_imports, dead_code)]
 
@@ -61,7 +59,6 @@ pub mod elf;
 pub mod event;
 pub mod process;
 pub mod scheduler;
-pub mod shell;
 pub mod syscall;
 pub mod thread;
 

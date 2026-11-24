@@ -207,7 +207,7 @@ if [[ "${MODE}" == "headless" ]]; then
     TEST_PASSED=false
     for i in {1..360}; do
         sleep 0.5
-        if grep -q -E "All shell verification commands executed successfully|All Phase 7.*passed successfully" "${SERIAL_LOG}" 2>/dev/null; then
+        if grep -q -E "All Reliability, Fuzzing, Stress, SMP & Stability checks passed|All shell verification commands executed successfully|All Phase 7.*passed successfully" "${SERIAL_LOG}" 2>/dev/null; then
             sleep 0.5
             echo "==> Kernel reached and all automated tests passed!"
             TEST_PASSED=true

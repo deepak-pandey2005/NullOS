@@ -326,6 +326,10 @@ fn syscall_dispatcher_inner(
             super::process::exit_process(cur_pid, code);
             super::exit();
         }
+        // Linux getpgrp (111)
+        111 => {
+            1 // PGID 1
+        }
         // Linux rt_sigaction (13), rt_sigprocmask (14)
         13 | 14 => {
             0 // success
@@ -614,7 +618,7 @@ fn syscall_dispatcher_inner(
                 if let Ok(file_desc) = proc.fd_table.get(fd) {
                     match file_desc.inode.ioctl(cmd, arg) {
                         Ok(ret) => ret as u64,
-                        Err(crate::fs::vfs::FsError::Unsupported) => (-25i64) as u64, // -ENOTTY
+                        Err(crate::fs::vfs::FsError::Unsupported) => 0, // Tolerate unsupported ioctls gracefully
                         Err(crate::fs::vfs::FsError::InvalidInput) => (-22i64) as u64, // -EINVAL
                         Err(_) => (-1i64) as u64, // -EPERM / error
                     }
