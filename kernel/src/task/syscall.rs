@@ -40,10 +40,16 @@ pub const SYS_OPEN: u64 = 2;
 pub const SYS_CLOSE: u64 = 3;
 /// POSIX stat(2) syscall number (4).
 pub const SYS_STAT: u64 = 4;
+/// POSIX fstat(2) syscall number (5).
+pub const SYS_FSTAT: u64 = 5;
 /// POSIX lseek(2) syscall number (8).
 pub const SYS_LSEEK: u64 = 8;
 /// POSIX mmap(2) syscall number (9).
 pub const SYS_MMAP: u64 = 9;
+/// Linux mprotect(2) syscall number (10).
+pub const SYS_MPROTECT: u64 = 10;
+/// Linux brk(2) syscall number (12).
+pub const SYS_BRK: u64 = 12;
 /// Linux ioctl(2) syscall number (16).
 pub const SYS_IOCTL: u64 = 16;
 /// POSIX pipe(2) syscall number (22).
@@ -72,6 +78,12 @@ pub const SYS_ARCH_PRCTL: u64 = 158;
 pub const SYS_GETTID: u64 = 186;
 /// Linux futex(2) fast userspace mutex syscall number (202).
 pub const SYS_FUTEX: u64 = 202;
+/// Linux nanosleep(2) syscall number (35).
+pub const SYS_NANOSLEEP: u64 = 35;
+/// Linux fcntl(2) syscall number (72).
+pub const SYS_FCNTL: u64 = 72;
+/// Linux clock_gettime(2) syscall number (228).
+pub const SYS_CLOCK_GETTIME: u64 = 228;
 
 /// POSIX poll(2) syscall number (7).
 pub const SYS_POLL: u64 = 7;
@@ -537,6 +549,92 @@ fn syscall_dispatcher_inner(
             } else {
                 (-9i64) as u64
             }
+        }
+        SYS_FSTAT => {
+            let fd = a1 as i32;
+            let statbuf_ptr = a2 as *mut u8;
+            if statbuf_ptr.is_null() || crate::security::validate_user_buffer(statbuf_ptr, 64).is_err() {
+                return (-14i64) as u64; // -EFAULT
+            }
+            let cur_pid = current_pid();
+            let mut proc_table = super::process::PROCESS_TABLE.lock();
+            let proc = if proc_table.get_mut(cur_pid).is_some() {
+                proc_table.get_mut(cur_pid)
+            } else {
+                proc_table.get_mut(super::process::ProcessId::INIT)
+            };
+            if let Some(proc) = proc {
+                if let Ok(file_desc) = proc.fd_table.get(fd) {
+                    let st = file_desc.inode.stat();
+                    // Populate minimal POSIX/Linux stat struct
+                    unsafe {
+                        core::ptr::write_bytes(statbuf_ptr, 0, 64);
+                        *(statbuf_ptr.add(0) as *mut u64) = 1; // st_dev
+                        *(statbuf_ptr.add(8) as *mut u64) = st.inode_num; // st_ino
+                        *(statbuf_ptr.add(24) as *mut u32) = st.mode; // st_mode
+                        *(statbuf_ptr.add(48) as *mut u64) = st.size as u64; // st_size
+                    }
+                    0
+                } else {
+                    (-9i64) as u64 // -EBADF
+                }
+            } else {
+                (-9i64) as u64
+            }
+        }
+        SYS_MPROTECT => {
+            // Memory protection permissions (read/write/exec)
+            0
+        }
+        SYS_BRK => {
+            let req_brk = a1;
+            static CURRENT_BRK: AtomicU64 = AtomicU64::new(0x0000_7000_0000);
+            if req_brk == 0 {
+                CURRENT_BRK.load(Ordering::SeqCst)
+            } else {
+                CURRENT_BRK.store(req_brk, Ordering::SeqCst);
+                req_brk
+            }
+        }
+        SYS_FCNTL => {
+            let _fd = a1 as i32;
+            let cmd = a2 as u32;
+            let arg = a3 as u32;
+            match cmd {
+                1 => 0, // F_GETFD
+                2 => 0, // F_SETFD
+                3 => 2, // F_GETFL (O_RDWR)
+                4 => 0, // F_SETFL
+                _ => arg as u64,
+            }
+        }
+        SYS_CLOCK_GETTIME => {
+            let _clk_id = a1;
+            let ts_ptr = a2 as *mut u64;
+            if ts_ptr.is_null() || crate::security::validate_user_buffer(ts_ptr as *const u8, 16).is_err() {
+                return (-14i64) as u64; // -EFAULT
+            }
+            let ticks = crate::arch::x86_64::apic::get_ticks();
+            let sec = ticks / 1000;
+            let nsec = (ticks % 1000) * 1_000_000;
+            unsafe {
+                *ts_ptr = sec;
+                *ts_ptr.add(1) = nsec;
+            }
+            0
+        }
+        SYS_NANOSLEEP => {
+            let req_ptr = a1 as *const u64;
+            if req_ptr.is_null() || crate::security::validate_user_buffer(req_ptr as *const u8, 16).is_err() {
+                return (-14i64) as u64;
+            }
+            let sec = unsafe { *req_ptr };
+            let nsec = unsafe { *req_ptr.add(1) };
+            let ms = (sec * 1000) + (nsec / 1_000_000);
+            if ms > 0 {
+                crate::arch::x86_64::apic::sleep(ms);
+            }
+            0
         }
         SYS_PIPE => {
             let pipefd_ptr = a1 as *mut i32;

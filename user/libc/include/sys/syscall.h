@@ -53,6 +53,9 @@
 /** Get file status (`pathname`, `statbuf`). */
 #define SYS_STAT            4
 
+/** Get file status from open file descriptor (`fd`, `statbuf`). */
+#define SYS_FSTAT           5
+
 /** Wait for events on file descriptors (`fds`, `nfds`, `timeout`). */
 #define SYS_POLL            7
 
@@ -61,6 +64,12 @@
 
 /** Map pages of memory (`addr`, `length`, `prot`, `flags`, `fd`, `offset`). */
 #define SYS_MMAP            9
+
+/** Set protection on a region of memory (`addr`, `len`, `prot`). */
+#define SYS_MPROTECT        10
+
+/** Change the location of the program break (`brk`). */
+#define SYS_BRK             12
 
 /** Device-specific input/output control (`fd`, `request`, `arg`). */
 #define SYS_IOCTL           16
@@ -77,14 +86,14 @@
 /** Yield processor execution to another runnable thread. */
 #define SYS_YIELD           24
 
-/** Get or create SysV shared memory segment (`key`, `size`, `create`). */
-#define SYS_SHMGET          29
-
-/** Attach SysV shared memory segment (`shm_id`, `out_size_ptr`). */
-#define SYS_SHMAT           30
+/** High-resolution sleep (`req`, `rem`). */
+#define SYS_NANOSLEEP       35
 
 /** Get process identifier of calling process. */
 #define SYS_GETPID          39
+
+/** Manipulate file descriptor (`fd`, `cmd`, `arg`). */
+#define SYS_FCNTL           72
 
 /** Create a new lightweight execution thread (`fn`, `child_stack`, `arg`). */
 #define SYS_CLONE           56
@@ -115,6 +124,9 @@
 
 /** Fast userspace locking and waiting primitive (`uaddr`, `op`, `val`, `timeout`). */
 #define SYS_FUTEX           202
+
+/** Get time of specified clock (`clockid`, `tp`). */
+#define SYS_CLOCK_GETTIME   228
 
 /** Create an epoll event notification instance (`size`). */
 #define SYS_EPOLL_CREATE    213
