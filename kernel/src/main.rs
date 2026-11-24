@@ -324,8 +324,12 @@ pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
             let size = inode.stat().size;
             let mut elf_buf = alloc::vec![0u8; size];
             if inode.read_at(0, &mut elf_buf).is_ok() {
-                println!("[INIT] Spawning external userspace shell ({}) as PID 1...", path);
-                let _ = task::execute_user_elf("sh", &elf_buf);
+                loop {
+                    println!("[INIT] Spawning external userspace shell ({}) as PID 1...", path);
+                    let _ = task::execute_user_elf("sh", &elf_buf);
+                    println!("[INIT] Userspace shell exited. Respawning /bin/sh in 1 second...");
+                    task::sleep(100);
+                }
             }
         }
     }

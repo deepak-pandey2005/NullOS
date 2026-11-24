@@ -243,7 +243,10 @@ impl Inode for ConsoleDevice {
         }
         let mut read_bytes = 0;
         while read_bytes < buf.len() {
-            let ch = if let Some(c) = crate::drivers::keyboard::read_char() {
+            crate::drivers::usb::poll_inputs();
+            let ch = if let Some(c) = crate::drivers::usb::read_char() {
+                Some(c as u8)
+            } else if let Some(c) = crate::drivers::keyboard::read_char() {
                 Some(c as u8)
             } else if let Some(b) = crate::drivers::serial::read_byte() {
                 Some(b)
@@ -252,6 +255,9 @@ impl Inode for ConsoleDevice {
             };
 
             if let Some(b) = ch {
+                unsafe {
+                    serial::write_byte(b);
+                }
                 buf[read_bytes] = b;
                 read_bytes += 1;
                 if b == b'\n' || b == b'\r' {

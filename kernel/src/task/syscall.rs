@@ -387,7 +387,10 @@ fn syscall_dispatcher_inner(
             if fd == 0 {
                 let mut read_bytes = 0;
                 while read_bytes < len {
-                    let ch = if let Some(c) = crate::drivers::keyboard::read_char() {
+                    crate::drivers::usb::poll_inputs();
+                    let ch = if let Some(c) = crate::drivers::usb::read_char() {
+                        Some(c as u8)
+                    } else if let Some(c) = crate::drivers::keyboard::read_char() {
                         Some(c as u8)
                     } else if let Some(b) = crate::drivers::serial::read_byte() {
                         Some(b)
@@ -396,6 +399,10 @@ fn syscall_dispatcher_inner(
                     };
 
                     if let Some(b) = ch {
+                        // Echo input back to serial so user sees keystrokes
+                        unsafe {
+                            crate::drivers::serial::write_byte(b);
+                        }
                         unsafe {
                             *buf_ptr.add(read_bytes) = b;
                         }
@@ -404,7 +411,10 @@ fn syscall_dispatcher_inner(
                             break;
                         }
                     } else {
-                        break;
+                        if read_bytes > 0 {
+                            break;
+                        }
+                        super::yield_now();
                     }
                 }
                 return read_bytes as u64;
