@@ -7,31 +7,39 @@ SECTIONS
 {
  . = 1M;
 
-.text ALIGN(4K) :
+ .boot ALIGN(8) :
+ {
+    KEEP(*(.multiboot2))
+    KEEP(*(.limine_requests_start))
+    KEEP(*(.limine_requests))
+    KEEP(*(.limine_requests_end))
+ }
+
+ .text ALIGN(4K) :
  {
     KEEP(*(.text.entry))
     *(.text .text.*)
-}
-
-.rodata ALIGN(4K) :
-{
- *(.rodata .roadata.*)
  }
 
-.data ALIGN(4K) :
-{
-    *(.data .data.*)
-}
+ .rodata ALIGN(4K) :
+ {
+    *(.rodata .rodata.*)
+ }
 
-.bss ALIGN(4K) :
-{
+ .data ALIGN(4K) :
+ {
+    *(.data .data.*)
+ }
+
+ .bss ALIGN(4K) :
+ {
     *(COMMON)
     *(.bss .bss.*)
-}
+ }
 
-. = ALIGN(4K);
+ . = ALIGN(4K);
 
-__kernel_start = ADDR(.text);
-__kernel_end = .;
+ __kernel_start = ADDR(.boot);
+ __kernel_end = .;
 
 }
