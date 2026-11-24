@@ -80,6 +80,8 @@ pub const SYS_GETTID: u64 = 186;
 pub const SYS_FUTEX: u64 = 202;
 /// Linux nanosleep(2) syscall number (35).
 pub const SYS_NANOSLEEP: u64 = 35;
+/// Linux socketpair(2) syscall number (53).
+pub const SYS_SOCKETPAIR: u64 = 53;
 /// Linux fcntl(2) syscall number (72).
 pub const SYS_FCNTL: u64 = 72;
 /// Linux clock_gettime(2) syscall number (228).
@@ -635,6 +637,48 @@ fn syscall_dispatcher_inner(
                 crate::arch::x86_64::apic::sleep(ms);
             }
             0
+        }
+        SYS_SOCKETPAIR => {
+            let sv_ptr = a4 as *mut i32; // In Linux AMD64, 4th arg is sv[2] pointer
+            if sv_ptr.is_null() || crate::security::validate_user_buffer(sv_ptr as *const u8, 8).is_err() {
+                return (-14i64) as u64; // -EFAULT
+            }
+            let (sock_a, sock_b) = crate::ipc::socketpair();
+            let cur_pid = current_pid();
+            let mut proc_table = super::process::PROCESS_TABLE.lock();
+            let proc = if proc_table.get_mut(cur_pid).is_some() {
+                proc_table.get_mut(cur_pid)
+            } else {
+                proc_table.get_mut(super::process::ProcessId::INIT)
+            };
+            if let Some(proc) = proc {
+                let desc_a = alloc::sync::Arc::new(crate::fs::fd::FileDescriptor::new(
+                    alloc::sync::Arc::new(sock_a),
+                    crate::fs::vfs::OpenFlags::READ_WRITE,
+                ));
+                let desc_b = alloc::sync::Arc::new(crate::fs::fd::FileDescriptor::new(
+                    alloc::sync::Arc::new(sock_b),
+                    crate::fs::vfs::OpenFlags::READ_WRITE,
+                ));
+                let fd_a = match proc.fd_table.alloc_fd(desc_a) {
+                    Ok(f) => f,
+                    Err(_) => return (-24i64) as u64, // -EMFILE
+                };
+                let fd_b = match proc.fd_table.alloc_fd(desc_b) {
+                    Ok(f) => f,
+                    Err(_) => {
+                        let _ = proc.fd_table.close(fd_a);
+                        return (-24i64) as u64;
+                    }
+                };
+                unsafe {
+                    *sv_ptr = fd_a;
+                    *sv_ptr.add(1) = fd_b;
+                }
+                0
+            } else {
+                (-9i64) as u64
+            }
         }
         SYS_PIPE => {
             let pipefd_ptr = a1 as *mut i32;
