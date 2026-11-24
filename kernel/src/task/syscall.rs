@@ -48,6 +48,8 @@ pub const SYS_LSEEK: u64 = 8;
 pub const SYS_MMAP: u64 = 9;
 /// Linux mprotect(2) syscall number (10).
 pub const SYS_MPROTECT: u64 = 10;
+/// POSIX munmap(2) syscall number (11).
+pub const SYS_MUNMAP: u64 = 11;
 /// Linux brk(2) syscall number (12).
 pub const SYS_BRK: u64 = 12;
 /// Linux ioctl(2) syscall number (16).
@@ -191,9 +193,26 @@ pub struct StatBuffer {
 }
 
 /// Handles dynamic memory allocation and page mapping requests from user space.
-pub fn sys_mmap(addr: u64, len: usize, prot: u64, _flags: u64) -> u64 {
+pub fn sys_mmap(addr: u64, len: usize, prot: u64, _flags: u64, fd: i32) -> u64 {
     if len == 0 {
         return u64::MAX;
+    }
+
+    // Check if mapping the linear framebuffer device /dev/fb0
+    if fd >= 0 {
+        let cur_pid = current_pid();
+        let proc_table = super::process::PROCESS_TABLE.lock();
+        let proc = proc_table.get(cur_pid).or_else(|| proc_table.get(super::process::ProcessId::INIT));
+        if let Some(proc) = proc {
+            if let Ok(handle) = proc.fd_table.get(fd) {
+                if handle.inode.as_any().and_then(|a| a.downcast_ref::<crate::fs::devfs::FbDevice>()).is_some() {
+                    drop(proc_table);
+                    if let Some((_info, vaddr)) = crate::graphics::fb_map_for_user(cur_pid.0) {
+                        return vaddr;
+                    }
+                }
+            }
+        }
     }
 
     let num_pages = (len + (PAGE_SIZE_4K as usize) - 1) / (PAGE_SIZE_4K as usize);
@@ -242,15 +261,16 @@ pub extern "C" fn syscall_dispatcher(
     a3: u64,
     a4: u64,
     a5: u64,
+    a6: u64,
 ) -> u64 {
     let t0 = crate::perf::tsc::read_tsc();
     crate::perf::pmu::record_sw_syscall();
     let ret = if num == SYS_GETPID {
         crate::perf::opt::syscall_opt::FAST_SYSCALL_TABLE
             .try_dispatch(num, a1, a2, a3)
-            .unwrap_or_else(|| syscall_dispatcher_inner(num, a1, a2, a3, a4, a5))
+            .unwrap_or_else(|| syscall_dispatcher_inner(num, a1, a2, a3, a4, a5, a6))
     } else {
-        syscall_dispatcher_inner(num, a1, a2, a3, a4, a5)
+        syscall_dispatcher_inner(num, a1, a2, a3, a4, a5, a6)
     };
     let elapsed = crate::perf::tsc::read_tsc().saturating_sub(t0);
     crate::perf::latency::SYSCALL_LATENCY.record(elapsed);
@@ -271,6 +291,7 @@ fn syscall_dispatcher_inner(
     a3: u64,
     a4: u64,
     a5: u64,
+    _a6: u64,
 ) -> u64 {
     match num {
         // Linux uname (63)
@@ -599,7 +620,12 @@ fn syscall_dispatcher_inner(
             let len = a2 as usize;
             let prot = a3;
             let flags = a4;
-            sys_mmap(addr, len, prot, flags)
+            let fd = a5 as i32;
+            sys_mmap(addr, len, prot, flags, fd)
+        }
+        SYS_MUNMAP => {
+            // Graceful munmap handling
+            0
         }
         SYS_IOCTL => {
             let fd = a1 as i32;

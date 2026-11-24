@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <sys/syscall.h>
+#include <nullos/syscall.h>
 
 #define NULLOS_SDK_VERSION_MAJOR 0
 #define NULLOS_SDK_VERSION_MINOR 18

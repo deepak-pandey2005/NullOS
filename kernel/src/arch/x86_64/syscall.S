@@ -59,17 +59,17 @@ syscall_entry:
     push %rdi                     /* [rsp+0]  User Arg 1 */
 
     /* Step 4: Map user arguments to System V C calling convention:
-     * extern "C" fn syscall_dispatcher(num: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64) -> u64
+     * extern "C" fn syscall_dispatcher(num: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64) -> u64
      */
-    mov %r8, %r9      /* arg 5 -> %r9 */
-    mov %r10, %r8     /* arg 4 -> %r8 (restored from user %r10) */
-    mov %rdx, %rcx    /* arg 3 -> %rcx */
-    mov %rsi, %rdx    /* arg 2 -> %rdx */
-    mov %rdi, %rsi    /* arg 1 -> %rsi */
-    mov %rax, %rdi    /* syscall number -> %rdi */
+    sub $8, %rsp      /* 16-byte stack alignment: 120 bytes + 8 = 128 bytes */
+    mov %r9, (%rsp)   /* 7th parameter (a6) placed on stack */
+    mov %r8, %r9      /* 6th parameter (a5) -> %r9 */
+    mov %r10, %r8     /* 5th parameter (a4) -> %r8 */
+    mov %rdx, %rcx    /* 4th parameter (a3) -> %rcx */
+    mov %rsi, %rdx    /* 3rd parameter (a2) -> %rdx */
+    mov %rdi, %rsi    /* 2nd parameter (a1) -> %rsi */
+    mov %rax, %rdi    /* 1st parameter (num) -> %rdi */
 
-    /* Enforce 16-byte stack alignment: 120 bytes + 8 bytes padding = 128 bytes */
-    sub $8, %rsp
     call syscall_dispatcher
     add $8, %rsp
     /* Return value from Rust handler is in %rax */

@@ -77,6 +77,10 @@ done
 if [ -f "${ROOT_DIR}/ports/bin/tinywl.elf" ]; then
     cp "${ROOT_DIR}/ports/bin/tinywl.elf" "${INITRAMFS_STAGE}/bin/tinywl.elf"
 fi
+if [ -f "${ROOT_DIR}/ports/bin/nullos-gui.elf" ]; then
+    cp "${ROOT_DIR}/ports/bin/nullos-gui.elf" "${INITRAMFS_STAGE}/bin/nullos-gui.elf"
+    ln -sf nullos-gui.elf "${INITRAMFS_STAGE}/bin/gui"
+fi
 if [ -f "${ROOT_DIR}/ports/bin/busybox" ]; then
     cp "${ROOT_DIR}/ports/bin/busybox" "${INITRAMFS_STAGE}/bin/busybox"
     ln -sf busybox "${INITRAMFS_STAGE}/bin/sh"

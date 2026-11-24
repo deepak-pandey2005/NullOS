@@ -1,35 +1,14 @@
 #!/usr/bin/env bash
-# NullOS Unified SDK Manager (Phase 18 - M39)
-# Commands:
-#   nullos-sdk sysroot            - Build libc + SDK crt0 and install sdk/sysroot/
-#   nullos-sdk init <dir> [tmpl]  - Scaffold a new app from templates (c-cli|c-pthread|c-dyn)
-#   nullos-sdk build <dir>        - Build & package an SDK application
-#   nullos-sdk check              - Verify full SDK toolchain, templates & example build
+# NullOS Unified SDK Manager (Musl-based)
 set -euo pipefail
 
 BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SDK_ROOT="$(cd "${BIN_DIR}/.." && pwd)"
-NULLOS_ROOT="$(cd "${SDK_ROOT}/.." && pwd)"
-SYSROOT="${SDK_ROOT}/sysroot"
-
-build_sysroot() {
-    echo "[SDK] Building NullOS libc + crt0 sysroot..."
-    make -C "${NULLOS_ROOT}/user/libc" >/dev/null
-
-    mkdir -p "${SYSROOT}/include/nullos" "${SYSROOT}/lib" "${SYSROOT}/ld"
-    cp -r "${NULLOS_ROOT}/user/libc/include/." "${SYSROOT}/include/"
-    cp -r "${SDK_ROOT}/include/nullos/." "${SYSROOT}/include/nullos/"
-    as --64 "${SDK_ROOT}/crt/crt0.s" -o "${SYSROOT}/lib/crt0.o"
-    cp "${NULLOS_ROOT}/user/libc/build/libc.a" "${SYSROOT}/lib/libc.a"
-    cp "${NULLOS_ROOT}/user/libc/build/libc.so" "${SYSROOT}/lib/libc.so"
-    cp "${SDK_ROOT}/ld/"*.ld "${SYSROOT}/ld/"
-    echo "[SDK] Sysroot installed at ${SYSROOT}"
-}
 
 cmd="${1:-check}"
 case "${cmd}" in
     sysroot)
-        build_sysroot
+        echo "[SDK] Using standard Musl toolchain sysroot at /usr/lib/musl."
         ;;
     init)
         dest="${2:-}"
@@ -43,11 +22,9 @@ case "${cmd}" in
         ;;
     build)
         dir="${2:-.}"
-        build_sysroot
         make -C "${dir}" all verify
         ;;
     check)
-        build_sysroot
         make -C "${SDK_ROOT}/examples/sdk_demo" clean all verify
         echo "[SDK] Full NullOS SDK check passed!"
         ;;
@@ -56,4 +33,3 @@ case "${cmd}" in
         exit 1
         ;;
 esac
-
