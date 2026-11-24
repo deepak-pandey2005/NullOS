@@ -20,18 +20,14 @@ OUT_NPKG := $(BUILD_DIR)/$(APP_NAME).npkg
 
 SDK_MODE_FLAG := $(if $(filter dynamic,$(APP_MODE)),--dynamic,)
 
-all: $(OUT_ELF) $(OUT_NPKG)
+all: $(OUT_ELF)
 
 $(OUT_ELF): $(SRCS)
 	@mkdir -p $(BUILD_DIR)
 	$(NULLOS_CC) $(SDK_MODE_FLAG) $(SRCS) -o $(OUT_ELF)
 
-$(OUT_NPKG): $(OUT_ELF)
-	$(NULLOS_PKG) pack $(OUT_ELF) $(OUT_NPKG) --name $(APP_NAME) --version $(APP_VERSION) $(SDK_MODE_FLAG)
-
-verify: $(OUT_ELF) $(OUT_NPKG)
+verify: $(OUT_ELF)
 	$(NULLOS_DBG) check $(OUT_ELF)
-	$(NULLOS_PKG) verify $(OUT_NPKG)
 
 clean:
 	rm -rf $(BUILD_DIR)

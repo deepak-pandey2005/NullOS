@@ -13,7 +13,7 @@ LIBC = $(LIBC_DIR)/build/libc.a
 LIBC_SO = $(LIBC_DIR)/build/libc.so
 CRT0 = $(LIBC_DIR)/build/crt0.o
 
-BINS = $(BIN_DIR)/hello.elf $(BIN_DIR)/cat.elf $(BIN_DIR)/threads.elf $(BIN_DIR)/async_test.elf $(BIN_DIR)/dyn_test.elf $(BIN_DIR)/dyn_hello.elf $(BIN_DIR)/fat32d.elf $(BIN_DIR)/netd.elf $(BIN_DIR)/audiod.elf $(BIN_DIR)/powerd.elf $(BIN_DIR)/uiod.elf
+BINS = $(BIN_DIR)/hello.elf $(BIN_DIR)/cat.elf $(BIN_DIR)/threads.elf $(BIN_DIR)/async_test.elf $(BIN_DIR)/dyn_test.elf $(BIN_DIR)/dyn_hello.elf
 
 all: libc_build $(BINS)
 

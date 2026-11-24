@@ -69,7 +69,7 @@ cp "${ESP_DIR}/nullos.cfg" "${ESP_DIR}/EFI/BOOT/nullos.cfg"
 rm -rf "${INITRAMFS_STAGE}" "${INITRAMFS_TAR}"
 mkdir -p "${INITRAMFS_STAGE}/bin" "${INITRAMFS_STAGE}/lib" "${INITRAMFS_STAGE}/etc" "${INITRAMFS_STAGE}/pkg"
 
-for bin_name in hello.elf cat.elf threads.elf async_test.elf dyn_test.elf dyn_hello.elf fat32d.elf netd.elf audiod.elf powerd.elf uiod.elf; do
+for bin_name in hello.elf cat.elf threads.elf async_test.elf dyn_test.elf dyn_hello.elf; do
     if [ -f "${ROOT_DIR}/user/build/bin/${bin_name}" ]; then
         cp "${ROOT_DIR}/user/build/bin/${bin_name}" "${INITRAMFS_STAGE}/bin/${bin_name}"
     fi
@@ -77,15 +77,17 @@ done
 if [ -f "${ROOT_DIR}/ports/bin/tinywl.elf" ]; then
     cp "${ROOT_DIR}/ports/bin/tinywl.elf" "${INITRAMFS_STAGE}/bin/tinywl.elf"
 fi
+if [ -f "${ROOT_DIR}/ports/bin/busybox" ]; then
+    cp "${ROOT_DIR}/ports/bin/busybox" "${INITRAMFS_STAGE}/bin/busybox"
+    ln -sf busybox "${INITRAMFS_STAGE}/bin/sh"
+fi
 if [ -f "${ROOT_DIR}/sdk/examples/sdk_demo/build/sdk_demo.elf" ]; then
     cp "${ROOT_DIR}/sdk/examples/sdk_demo/build/sdk_demo.elf" "${INITRAMFS_STAGE}/bin/sdk_demo.elf"
 fi
 if [ -f "${ROOT_DIR}/user/libc/build/libc.so" ]; then
     cp "${ROOT_DIR}/user/libc/build/libc.so" "${INITRAMFS_STAGE}/lib/libc.so"
 fi
-if [ -f "${ROOT_DIR}/sdk/examples/sdk_demo/build/sdk_demo.npkg" ]; then
-    cp "${ROOT_DIR}/sdk/examples/sdk_demo/build/sdk_demo.npkg" "${INITRAMFS_STAGE}/pkg/sdk_demo.npkg"
-fi
+# (NPKG packaging removed in favor of standard USTAR initramfs)
 
 cat > "${INITRAMFS_STAGE}/etc/nullos-release" <<EOF
 NAME="NullOS"
@@ -179,10 +181,7 @@ if [ -f "${ROOT_DIR}/sdk/examples/sdk_demo/build/sdk_demo.elf" ]; then
     mcopy -o -i "${DATA_DISK_IMG}" "${ROOT_DIR}/sdk/examples/sdk_demo/build/sdk_demo.elf" ::SDK_DEMO.ELF
     echo "==> Copied SDK_DEMO.ELF to FAT32 data disk."
 fi
-if [ -f "${ROOT_DIR}/sdk/examples/sdk_demo/build/sdk_demo.npkg" ]; then
-    mcopy -o -i "${DATA_DISK_IMG}" "${ROOT_DIR}/sdk/examples/sdk_demo/build/sdk_demo.npkg" ::SDKDEMO.NPK
-    echo "==> Copied SDKDEMO.NPK to FAT32 data disk."
-fi
+# (SDKDEMO.NPK removed from data disk)
 
 # Generate compact KSYM v1 binary symbol table for M40 Kernel Symbolizer (/disk/KERNEL.SYM)
 KSYM_FILE="${BUILD_DIR}/kernel.ksym"

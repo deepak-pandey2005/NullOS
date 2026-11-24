@@ -206,6 +206,10 @@ pub fn load_user_elf(elf_data: &[u8]) -> Result<LoadedUserElf, &'static str> {
     let ph_count = header.e_phnum as usize;
     let ph_size = header.e_phentsize as usize;
 
+    // For Position-Independent Executables (ET_DYN), default load base if segments start at 0
+    let is_pie = header.e_type == ET_DYN;
+    let pie_base: u64 = 0x0000_0000_0040_0000;
+
     let mut min_vaddr = u64::MAX;
     let mut max_vaddr = 0u64;
 
@@ -215,13 +219,19 @@ pub fn load_user_elf(elf_data: &[u8]) -> Result<LoadedUserElf, &'static str> {
         let ph = unsafe { ptr::read_unaligned(ph_ptr) };
 
         if ph.p_type == PT_LOAD && ph.p_memsz > 0 {
+            let seg_vaddr = if is_pie && ph.p_vaddr < pie_base {
+                ph.p_vaddr + pie_base
+            } else {
+                ph.p_vaddr
+            };
+
             // Verify address is in canonical user space (< 128 TiB)
-            if ph.p_vaddr >= 0x0000_8000_0000_0000 {
-                return Err("User ELF segment attempted mapping into kernel address space");
+            if seg_vaddr == 0 || seg_vaddr >= 0x0000_8000_0000_0000 {
+                return Err("User ELF segment attempted mapping into NULL or kernel address space");
             }
 
-            let start_vaddr = ph.p_vaddr & !0xFFF; // Page-align
-            let end_vaddr = (ph.p_vaddr + ph.p_memsz + PAGE_SIZE_4K - 1) & !0xFFF;
+            let start_vaddr = seg_vaddr & !0xFFF; // Page-align
+            let end_vaddr = (seg_vaddr + ph.p_memsz + PAGE_SIZE_4K - 1) & !0xFFF;
 
             let mut page_flags = PageTableFlags::PRESENT | PageTableFlags::USER_ACCESSIBLE;
             if (ph.p_flags & PF_W) != 0 {
@@ -265,7 +275,7 @@ pub fn load_user_elf(elf_data: &[u8]) -> Result<LoadedUserElf, &'static str> {
                 unsafe {
                     core::ptr::copy_nonoverlapping(
                         elf_data.as_ptr().add(file_offset),
-                        ph.p_vaddr as *mut u8,
+                        seg_vaddr as *mut u8,
                         file_size,
                     );
                 }
@@ -273,7 +283,7 @@ pub fn load_user_elf(elf_data: &[u8]) -> Result<LoadedUserElf, &'static str> {
 
             // Zero any remaining .bss memory up to p_memsz
             if ph.p_memsz > ph.p_filesz {
-                let bss_start = ph.p_vaddr + ph.p_filesz;
+                let bss_start = seg_vaddr + ph.p_filesz;
                 let bss_size = (ph.p_memsz - ph.p_filesz) as usize;
                 unsafe {
                     core::ptr::write_bytes(bss_start as *mut u8, 0, bss_size);
@@ -287,17 +297,23 @@ pub fn load_user_elf(elf_data: &[u8]) -> Result<LoadedUserElf, &'static str> {
                 }
             }
 
-            if ph.p_vaddr < min_vaddr {
-                min_vaddr = ph.p_vaddr;
+            if seg_vaddr < min_vaddr {
+                min_vaddr = seg_vaddr;
             }
-            if ph.p_vaddr + ph.p_memsz > max_vaddr {
-                max_vaddr = ph.p_vaddr + ph.p_memsz;
+            if seg_vaddr + ph.p_memsz > max_vaddr {
+                max_vaddr = seg_vaddr + ph.p_memsz;
             }
         }
     }
 
+    let resolved_entry = if is_pie && header.e_entry < pie_base {
+        header.e_entry + pie_base
+    } else {
+        header.e_entry
+    };
+
     Ok(LoadedUserElf {
-        entry_point: header.e_entry,
+        entry_point: resolved_entry,
         load_base: if min_vaddr != u64::MAX { min_vaddr } else { 0 },
         total_memory_size: if max_vaddr > min_vaddr { max_vaddr - min_vaddr } else { 0 },
     })

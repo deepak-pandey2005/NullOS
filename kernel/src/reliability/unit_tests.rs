@@ -14,7 +14,7 @@ use crate::memory::{alloc_frame, dealloc_frame, stats as mem_stats, PAGE_SIZE_4K
 use crate::perf::opt::mem_opt::GLOBAL_SLAB_POOL;
 use crate::perf::opt::sched_opt::{O1PriorityRunQueue, SchedTaskEntry};
 use crate::sync::Spinlock;
-use crate::task::npkg::crc32_ieee;
+// (Custom npkg tests removed in favor of standard USTAR initramfs)
 use alloc::vec::Vec;
 
 /// Executes core kernel data-structure & allocator unit tests.
@@ -96,7 +96,18 @@ pub fn run() -> SuiteCounts {
     check!(clean_path("/../../..") == "/", "clean_path clamps root '..'");
 
     // 6. IEEE CRC-32 standard test vector ("123456789" -> 0xCBF43926)
-    check!(crc32_ieee(b"123456789") == 0xCBF4_3926, "CRC-32 IEEE standard vector");
+    fn crc32_ieee_local(data: &[u8]) -> u32 {
+        let mut crc = 0xFFFF_FFFFu32;
+        for &byte in data {
+            crc ^= byte as u32;
+            for _ in 0..8 {
+                let mask = (crc & 1).wrapping_neg() & 0xEDB8_8320;
+                crc = (crc >> 1) ^ mask;
+            }
+        }
+        !crc
+    }
+    check!(crc32_ieee_local(b"123456789") == 0xCBF4_3926, "CRC-32 IEEE standard vector");
 
     // 7. Spinlock atomic exclusivity invariant
     let lock = Spinlock::new(0u64);

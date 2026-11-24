@@ -366,6 +366,7 @@ pub fn execute_user_elf(name: &str, elf_bytes: &[u8]) -> Result<i32, &'static st
 
         // Map user stack pages (0x7000_0000 - 0x7001_0000, 64 KiB)
         const USER_STACK_PAGES: u64 = 16;
+        let mut top_frame_ptr: *mut u8 = core::ptr::null_mut();
         for i in 0..USER_STACK_PAGES {
             let user_stack_vaddr = crate::memory::VirtAddr::new(0x7000_0000 + i * 4096);
             let stack_page = crate::memory::Page::containing_address(user_stack_vaddr);
@@ -383,13 +384,46 @@ pub fn execute_user_elf(name: &str, elf_bytes: &[u8]) -> Result<i32, &'static st
             unsafe {
                 core::ptr::write_bytes(stack_frame.start_address().as_mut_ptr::<u8>(), 0, 4096);
             }
+
+            if i == USER_STACK_PAGES - 1 {
+                top_frame_ptr = stack_frame.start_address().as_mut_ptr::<u8>();
+            }
+        }
+
+        // Setup System V AMD64 initial stack frame:
+        // [rsp + 0] = argc (1)
+        // [rsp + 8] = argv[0] pointer
+        // [rsp + 16] = NULL (end of argv)
+        // [rsp + 24] = NULL (end of envp)
+        // [rsp + 32] = AT_NULL (0, 0)
+        // String data placed at the end of the top stack page
+        if !top_frame_ptr.is_null() {
+            unsafe {
+                let name_bytes = name.as_bytes();
+                let str_offset = 4096 - 1 - name_bytes.len();
+                let str_phys = top_frame_ptr.add(str_offset);
+                core::ptr::copy_nonoverlapping(name_bytes.as_ptr(), str_phys, name_bytes.len());
+                *str_phys.add(name_bytes.len()) = 0; // null terminator
+
+                // Virtual address of the name string
+                let str_vaddr = (0x7000_0000 + 16 * 4096 - 1 - name_bytes.len() as u64) as usize;
+
+                let stack_base_offset = 4096 - 128;
+                let stack_u64 = top_frame_ptr.add(stack_base_offset) as *mut u64;
+                *stack_u64.add(0) = 1; // argc = 1
+                *stack_u64.add(1) = str_vaddr as u64; // argv[0]
+                *stack_u64.add(2) = 0; // argv[1] = NULL
+                *stack_u64.add(3) = 0; // envp[0] = NULL
+                *stack_u64.add(4) = 0; // AT_NULL key
+                *stack_u64.add(5) = 0; // AT_NULL value
+            }
         }
 
         proc.state = ProcessState::Ready;
         loaded_elf.entry_point
     };
 
-    let user_stack_top = 0x7000_0000 + 16 * 4096 - 16;
+    let user_stack_top = 0x7000_0000 + 16 * 4096 - 128;
     super::syscall::set_current_pid(pid.0);
     PENDING_USER_ENTRY.store(entry_point, Ordering::SeqCst);
     PENDING_USER_STACK.store(user_stack_top, Ordering::SeqCst);

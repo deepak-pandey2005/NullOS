@@ -1395,35 +1395,7 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
             (String::new(), 0)
         }
         "pkg" => {
-            if args.len() < 2 {
-                return ("Usage: pkg <inspect|run> <path.npkg>\n".to_string(), 1);
-            }
-            let subcmd = args[0].as_str();
-            let resolved = resolve_path_with_pwd(&args[1]);
-            match VFS.open(&resolved, OpenFlags::READ_ONLY) {
-                Ok(file) => {
-                    let size = file.stat().size;
-                    let mut buf = vec![0u8; size];
-                    match file.read_at(0, &mut buf) {
-                        Ok(n) if n == size => match subcmd {
-                            "inspect" => match crate::task::npkg::parse_and_verify(&buf) {
-                                Ok(pkg) => {
-                                    crate::task::npkg::print_package_info(&pkg);
-                                    (String::new(), 0)
-                                }
-                                Err(e) => (alloc::format!("pkg inspect error: {}\n", e), 1),
-                            },
-                            "run" => match crate::task::npkg::execute_package(&buf) {
-                                Ok(status) => (alloc::format!("Package exited with status {}\n", status), status),
-                                Err(e) => (alloc::format!("pkg run error: {}\n", e), 1),
-                            },
-                            _ => ("Usage: pkg <inspect|run> <path.npkg>\n".to_string(), 1),
-                        },
-                        _ => (alloc::format!("pkg: failed reading '{}'\n", resolved), 1),
-                    }
-                }
-                Err(e) => (alloc::format!("pkg: cannot open '{}': {:?}\n", resolved, e), 1),
-            }
+            ("[PKG] Custom npkg format removed in favor of standard tar/initramfs packages.\n".to_string(), 0)
         }
         "dbg" | "kdbg" => {
             let arg_strs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
@@ -1963,13 +1935,8 @@ pub fn run_automated_tests() {
     crate::perf::opt::run_self_tests();
     execute_command("optstat");
 
-    println!("[SHELL] 31. Testing NullOS SDK Application, Runtime ABI & .npkg Package Format (M39)...");
+    println!("[SHELL] 31. Testing NullOS Userspace Runtime ABI (M39)...");
     execute_command("sdk");
-    crate::task::npkg::run_self_tests();
-    let insp_rc = execute_command("pkg inspect /disk/SDKDEMO.NPK");
-    assert_eq!(insp_rc, 0, "pkg inspect /disk/SDKDEMO.NPK must succeed");
-    let run_rc = execute_command("pkg run /disk/SDKDEMO.NPK");
-    assert_eq!(run_rc, 0, "pkg run /disk/SDKDEMO.NPK must execute and exit 0");
 
     println!("[SHELL] 32. Testing Kernel Debugger, Symbolizer, Unwinder, Klog, MemDiag & Lockdep (M40)...");
     crate::debug::run_self_tests();
@@ -1987,9 +1954,7 @@ pub fn run_automated_tests() {
     assert!(VFS.resolve_path("/bin/cat.elf").is_ok(), "initramfs must populate /bin/cat.elf");
     assert!(VFS.resolve_path("/bin/threads.elf").is_ok(), "initramfs must populate /bin/threads.elf");
     assert!(VFS.resolve_path("/lib/libc.so").is_ok(), "initramfs must populate /lib/libc.so");
-    assert!(VFS.resolve_path("/pkg/sdk_demo.npkg").is_ok(), "initramfs must populate /pkg/sdk_demo.npkg");
     assert_eq!(execute_command("cat /etc/nullos-release"), 0, "cat /etc/nullos-release must succeed");
-    assert_eq!(execute_command("pkg inspect /pkg/sdk_demo.npkg"), 0, "pkg inspect /pkg/sdk_demo.npkg must succeed");
 
     println!("[SHELL] 34. Testing Kernel Reliability, Unit, Integration, FS, Net, SMP, Stress, MemCorruption, Fuzzing & Soak Stability (M42)...");
     crate::reliability::run_all();
