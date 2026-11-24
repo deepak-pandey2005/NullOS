@@ -40,7 +40,8 @@ static void term_draw_char_at(int col, int row, char c, uint32_t fg, uint32_t bg
     if (col < 0 || col >= TERM_COLS || row < 0 || row >= TERM_ROWS) return;
     int px = col * FONT_W;
     int py = row * FONT_H;
-    const uint8_t *glyph = font8x8_basic[(unsigned char)c];
+    if (c < 0x20 || c > 0x7E) return;
+    const uint8_t *glyph = font8x8_basic[c - 0x20];
 
     for (int r = 0; r < 8; r++) {
         uint8_t byte = glyph[r];
@@ -48,7 +49,7 @@ static void term_draw_char_at(int col, int row, char c, uint32_t fg, uint32_t bg
         if (y_pos >= TERM_H) break;
         uint32_t *dst = &g_fb[y_pos * TERM_W + px];
         for (int b = 0; b < 8; b++) {
-            dst[b] = ((byte >> b) & 1) ? fg : bg;
+            dst[b] = ((byte >> (7 - b)) & 1) ? fg : bg;
         }
     }
 }

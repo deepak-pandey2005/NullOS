@@ -118,9 +118,8 @@ static void mark_dirty_rect(int x, int y, int w, int h) {
 }
 
 static void draw_glyph(uint32_t *dst, int buf_w, int buf_h, int px, int py, char c, uint32_t color) {
-    unsigned char uc = (unsigned char)c;
-    if (uc > 127) return;
-    const uint8_t *bitmap = font8x8_basic[uc];
+    if (c < 0x20 || c > 0x7E) return;
+    const uint8_t *bitmap = font8x8_basic[c - 0x20];
     for (int y = 0; y < 8; y++) {
         int dy = py + y;
         if (dy < 0 || dy >= buf_h) continue;
@@ -128,7 +127,8 @@ static void draw_glyph(uint32_t *dst, int buf_w, int buf_h, int px, int py, char
         for (int x = 0; x < 8; x++) {
             int dx = px + x;
             if (dx < 0 || dx >= buf_w) continue;
-            if (row & (1 << x)) dst[dy * buf_w + dx] = color;
+            /* MSB (bit 7) is leftmost pixel */
+            if (row & (0x80 >> x)) dst[dy * buf_w + dx] = color;
         }
     }
 }
