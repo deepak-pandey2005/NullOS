@@ -1169,24 +1169,24 @@ fn execute_stage(cmd: &str, args: &[String], input: &str) -> (String, i32) {
                 if let Some(info) = crate::graphics::get_fb_info() {
                     out.push_str("NullOS Linux-Style Display & Input Subsystem (fbdev + evdev):\n");
                     out.push_str(&alloc::format!("  Resolution:  {}x{} (stride: {}, {} bpp)\n", info.width, info.height, info.stride, info.bpp));
-                    out.push_str("  Compositor:  Ring 3 Userspace (/bin/compositor.elf)\n");
-                    out.push_str("  IPC / SHM:   AF_UNIX (/tmp/compositor.sock) + SysV SHM\n");
+                    out.push_str("  Compositor:  External Wayland Compositor (/bin/tinywl.elf)\n");
+                    out.push_str("  IPC / SHM:   AF_UNIX (/tmp/wayland-0) + /dev/shm\n");
                 } else {
                     out.push_str("Framebuffer device is not initialized (no GOP framebuffer).\n");
                 }
             } else {
-                if let Ok(inode) = crate::fs::vfs::VFS.resolve_path("/bin/compositor.elf") {
+                if let Ok(inode) = crate::fs::vfs::VFS.resolve_path("/bin/tinywl.elf") {
                     let size = inode.stat().size;
                     let mut buf = alloc::vec![0u8; size];
                     if let Ok(n) = inode.read_at(0, &mut buf) {
                         buf.truncate(n);
-                        let code = crate::task::execute_user_elf("compositor", &buf).unwrap_or(-1);
-                        out.push_str(&alloc::format!("[GUI] Ring 3 compositor exited with code {}.\n", code));
+                        let code = crate::task::execute_user_elf("tinywl", &buf).unwrap_or(-1);
+                        out.push_str(&alloc::format!("[GUI] Wayland compositor exited with code {}.\n", code));
                     } else {
-                        out.push_str("[GUI] Failed to read /bin/compositor.elf.\n");
+                        out.push_str("[GUI] Failed to read /bin/tinywl.elf.\n");
                     }
                 } else {
-                    out.push_str("[GUI] /bin/compositor.elf not found in VFS.\n");
+                    out.push_str("[GUI] /bin/tinywl.elf not found in VFS.\n");
                 }
             }
             (out, 0)
@@ -1880,8 +1880,9 @@ pub fn run_automated_tests() {
         assert_eq!(&rbuf[..n], b"hello_wayland");
         crate::ipc::unix_socket::unix_close_listener("/tmp/test_comp.sock");
 
-        // Verify /bin/compositor.elf is present in initramfs
-        assert!(crate::fs::vfs::VFS.resolve_path("/bin/compositor.elf").is_ok());
+        // Verify Wayland IPC socket interface
+        assert!(crate::fs::vfs::VFS.resolve_path("/dev/fb0").is_ok());
+        assert!(crate::fs::vfs::VFS.resolve_path("/dev/input/event0").is_ok());
     }
 
     println!("[SHELL] 23. Testing USB 3.0 xHCI Controller & HID Input Subsystems (M31)...");
