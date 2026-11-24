@@ -254,6 +254,11 @@ pub trait Inode: Send + Sync {
         POLLIN | POLLOUT
     }
 
+    /// Handles device-specific I/O control requests (`ioctl(2)`).
+    fn ioctl(&self, _cmd: u32, _arg: usize) -> Result<i32, FsError> {
+        Err(FsError::Unsupported)
+    }
+
     /// Removes a named child entry from this directory.
     fn unlink(&self, _name: &str) -> Result<(), FsError> {
         Err(FsError::Unsupported)

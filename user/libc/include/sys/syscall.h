@@ -62,6 +62,9 @@
 /** Map pages of memory (`addr`, `length`, `prot`, `flags`, `fd`, `offset`). */
 #define SYS_MMAP            9
 
+/** Device-specific input/output control (`fd`, `request`, `arg`). */
+#define SYS_IOCTL           16
+
 /** Read data into multiple buffers via scatter-gather (`fd`, `iov`, `iovcnt`). */
 #define SYS_READV           19
 

@@ -1053,6 +1053,13 @@ impl RamFs {
         dev.insert_child("console", Arc::new(ConsoleDevice::new()));
         dev.insert_child("zero", Arc::new(ZeroDevice::new()));
         dev.insert_child("null", Arc::new(NullDevice::new()));
+        dev.insert_child("fb0", Arc::new(crate::fs::devfs::FbDevice::new(alloc_inode_num())));
+
+        // Create /dev/input directory and event0 node
+        let input_dir = Arc::new(RamDirectory::new(0o755));
+        input_dir.insert_child("event0", Arc::new(crate::fs::devfs::EvdevDevice::new(alloc_inode_num())));
+        dev.insert_dir("input", input_dir);
+
         self.root.insert_dir("dev", dev);
 
         // Create /etc directory and files

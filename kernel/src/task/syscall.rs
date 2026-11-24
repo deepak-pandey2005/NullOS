@@ -44,6 +44,8 @@ pub const SYS_STAT: u64 = 4;
 pub const SYS_LSEEK: u64 = 8;
 /// POSIX mmap(2) syscall number (9).
 pub const SYS_MMAP: u64 = 9;
+/// Linux ioctl(2) syscall number (16).
+pub const SYS_IOCTL: u64 = 16;
 /// POSIX pipe(2) syscall number (22).
 pub const SYS_PIPE: u64 = 22;
 /// POSIX sched_yield(2) syscall number (24).
@@ -507,6 +509,34 @@ fn syscall_dispatcher_inner(
             let prot = a3;
             let flags = a4;
             sys_mmap(addr, len, prot, flags)
+        }
+        SYS_IOCTL => {
+            let fd = a1 as i32;
+            let cmd = a2 as u32;
+            let arg = a3 as usize;
+
+            let cur_pid = current_pid();
+            let mut proc_table = super::process::PROCESS_TABLE.lock();
+            let proc = if proc_table.get_mut(cur_pid).is_some() {
+                proc_table.get_mut(cur_pid)
+            } else {
+                proc_table.get_mut(super::process::ProcessId::INIT)
+            };
+
+            if let Some(proc) = proc {
+                if let Ok(file_desc) = proc.fd_table.get(fd) {
+                    match file_desc.inode.ioctl(cmd, arg) {
+                        Ok(ret) => ret as u64,
+                        Err(crate::fs::vfs::FsError::Unsupported) => (-25i64) as u64, // -ENOTTY
+                        Err(crate::fs::vfs::FsError::InvalidInput) => (-22i64) as u64, // -EINVAL
+                        Err(_) => (-1i64) as u64, // -EPERM / error
+                    }
+                } else {
+                    (-9i64) as u64 // -EBADF
+                }
+            } else {
+                (-9i64) as u64
+            }
         }
         SYS_PIPE => {
             let pipefd_ptr = a1 as *mut i32;

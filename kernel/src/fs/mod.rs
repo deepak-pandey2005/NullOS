@@ -20,6 +20,7 @@
 //! providing standard I/O abstractions (stdin, stdout, stderr), offset seeking,
 //! and process descriptor tables.
 
+pub mod devfs;
 pub mod ext2;
 pub mod fat32;
 pub mod fd;
