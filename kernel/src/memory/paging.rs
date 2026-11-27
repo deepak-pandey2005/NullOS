@@ -715,6 +715,11 @@ pub fn unmap_page(page: Page) -> Result<PhysFrame, &'static str> {
     }
 }
 
+/// Returns the root PML4 physical frame of the initial kernel page table.
+pub fn kernel_pml4_frame() -> Option<PhysFrame> {
+    KERNEL_PAGE_TABLE.lock().as_ref().map(|kpt| kpt.pml4_frame())
+}
+
 /// Executes comprehensive self-tests verifying virtual memory mapping, translation, and unmapping.
 pub fn run_self_tests() {
     println!("[PAGING] Running Virtual Memory verification self-tests...");

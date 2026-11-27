@@ -320,6 +320,13 @@ pub fn spawn_init_process(elf_bytes: &[u8]) -> Result<ProcessId, &'static str> {
         )?;
     }
 
+    // Restore kernel PML4 table to CR3 before returning
+    if let Some(k_frame) = crate::memory::paging::kernel_pml4_frame() {
+        unsafe {
+            crate::memory::paging::x86::write_cr3(k_frame);
+        }
+    }
+
     proc.state = ProcessState::Ready;
 
     println!("[PROCESS] First user process \"init\" (PID 1) successfully prepared.");
@@ -497,6 +504,13 @@ pub fn execute_user_elf(name: &str, elf_bytes: &[u8]) -> Result<i32, &'static st
     let (reaped_pid, exit_status) = waitpid(ProcessId::INIT, Some(pid))?;
     assert_eq!(reaped_pid, pid);
     super::syscall::set_current_pid(ProcessId::INIT.0);
+
+    // Restore baseline kernel PML4 table to CR3
+    if let Some(k_frame) = crate::memory::paging::kernel_pml4_frame() {
+        unsafe {
+            crate::memory::paging::x86::write_cr3(k_frame);
+        }
+    }
 
     println!("[EXEC] User process #{} \"{}\" finished with exit status: {}", pid.0, name, exit_status);
     Ok(exit_status)
